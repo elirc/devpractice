@@ -1,0 +1,964 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v3-ch06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "EF Core: mapping, migrating, and reading the SQL",
+      "conceptIds": [
+        "efcore.entities",
+        "efcore.relationships",
+        "efcore.migrations",
+        "efcore.tracking",
+        "efcore.projection",
+        "efcore.generated-sql"
+      ],
+      "prerequisiteIds": ["sql.keys", "sql.relationships", "sql.migrations", "linq.deferred-execution"],
+      "objectiveIds": [
+        "efcore.entities",
+        "efcore.relationships",
+        "efcore.migrations",
+        "efcore.tracking",
+        "efcore.projection",
+        "efcore.generated-sql"
+      ],
+      "trackId": "v1-track",
+      "sortOrder": 25,
+      "lessonIds": ["v3-l16", "v3-l17", "v3-l18"],
+      "assessmentId": "v3-a06",
+      "missionIds": [],
+      "bodyMarkdown": "Larkspur Support is rebuilding the ticket service on ASP.NET Core, against the same PostgreSQL database the Node version already uses. Nothing about the data changes. What changes is who writes the SQL.\n\nIn the Node service you wrote queries yourself, or nearly so, and could read them in the file. EF Core puts a translator in between: you write LINQ against C# objects, and something else decides what SQL runs. That is a genuine gain — relationships, change detection and schema evolution stop being hand-rolled — and it is also the chapter's central risk. A translator that silently does something expensive is worse than a slow query you can see.\n\nSo this chapter has three movements. First, map the classes so the relationships are the ones you meant, with the foreign key on the end that actually holds it. Second, evolve the schema in versioned steps that a reviewer can read and a deployment can apply to an empty database. Third — and this is the part that separates people who use EF Core from people who trust it — learn to look at the SQL it generated and decide whether it is the query you would have written.\n\nThe honest framing for the whole of V3: you are not learning a new way to think about data. You already did that in chapter 10. You are learning where this particular tool helps, and where it will quietly do the wrong thing if nobody looks."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l16",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Entities and relationships",
+      "conceptIds": ["efcore.entities", "efcore.relationships"],
+      "prerequisiteIds": ["sql.keys", "sql.relationships"],
+      "chapterId": "v3-ch06",
+      "sortOrder": 0,
+      "objectives": [
+        "Map a C# class to a table and identify which property EF Core will treat as the key.",
+        "Model one-to-many, many-to-many and one-to-one relationships with the foreign key on the correct end.",
+        "Explain what a navigation property is and why it is not itself a column."
+      ],
+      "estimatedMinutes": 18,
+      "bodyMarkdown": "An **entity** is just a C# class that EF Core knows how to store. Nothing about the class announces this — no base class, no attribute is required. It becomes an entity because a `DbContext` exposes it:\n\n```csharp\npublic class SupportContext : DbContext\n{\n    public DbSet<Ticket> Tickets => Set<Ticket>();\n    public DbSet<Comment> Comments => Set<Comment>();\n}\n```\n\nThat `DbSet<Ticket>` is the declaration. From it, EF Core builds a *model*: a table per entity, a column per mapped property, and a key chosen by convention — a property called `Id`, or `TicketId`, becomes the primary key without you saying so.\n\nConvention is doing a lot of quiet work, and it is worth knowing where it stops. Property names map to column names. Types map to database types. A `string` is nullable or not according to C#'s nullable reference types, so `string Subject` becomes `NOT NULL` and `string? ClosedBy` does not. When convention guesses wrong, or cannot guess, you override it in `OnModelCreating`. That is the whole configuration story: conventions first, explicit configuration where the conventions are silent or wrong.\n\nThe part that repays real attention is relationships, because there are two different things going on and they are easy to conflate.\n\nOne is the **foreign key** — an actual column holding an actual value. The other is the **navigation property** — a C# reference that lets you write `ticket.Comments` or `comment.Ticket`. Only the first exists in the database. Navigations are how you traverse a relationship in code; the foreign key is how it is stored, and it is stored exactly once.\n\nThat single-storage fact drives everything else. If the relationship is stored in one place, some end must hold it, and the end that holds it must be able to hold exactly one value per row. A comment belongs to one ticket, so `Comment.TicketId` works. A ticket has many comments, and no column holds a list, so `Ticket` cannot store the relationship at all — it only gets a navigation.\n\nThis is not an EF Core rule. It is the same rule you applied in chapter 10 when you decided which table got the `REFERENCES` clause. What EF Core adds is the ability to *walk* the relationship in both directions from objects, which is convenient enough that people forget only one side is real.\n\nTwo shapes need more than convention. **Many-to-many** has no end that can hold a single id, so a third table does — EF Core will manage that table invisibly if the pairing carries no extra data, and you map it as a real entity as soon as it does. **One-to-one** has two ends that could each hold the key, so nothing structural decides it; you nominate the principal and the dependent takes the foreign key. If EF Core throws at startup complaining it cannot determine a relationship, one of these two is usually why.",
+      "workedExampleMarkdown": "A ticket has many comments. Here is the whole relationship, in two classes:\n\n```csharp\npublic class Ticket\n{\n    public long Id { get; set; }                    // key by convention\n    public string Subject { get; set; } = \"\";\n    public long OwnerId { get; set; }\n    public List<Comment> Comments { get; set; } = new();   // navigation, not a column\n}\n\npublic class Comment\n{\n    public long Id { get; set; }\n    public string Body { get; set; } = \"\";\n    public long TicketId { get; set; }              // the foreign key column\n    public Ticket? Ticket { get; set; }             // navigation back\n}\n```\n\nRead what is and is not a column. `Ticket.Comments` is a `List<Comment>`; no table has a list in a cell. It is a *navigation*: a way to walk the relationship in code. The relationship itself is stored in exactly one place — `Comment.TicketId`, on the many end.\n\nThat is the rule worth internalising, and it is not an EF Core rule. It is the same rule from chapter 10: **the foreign key lives on the end that has many rows**, because each of those rows needs to say which one it belongs to. One ticket cannot store five comment ids in one column, so the five comments each store one ticket id.\n\nEF Core will infer all of this from the property names — `TicketId` matching type `Ticket` is the convention. When the names do not line up, you say so explicitly:\n\n```csharp\nmodelBuilder.Entity<Comment>()\n    .HasOne(c => c.Ticket)\n    .WithMany(t => t.Comments)\n    .HasForeignKey(c => c.TicketId)\n    .OnDelete(DeleteBehavior.Cascade);\n```\n\nRead that as a sentence: a comment *has one* ticket, which *has many* comments, joined through `TicketId`. The `OnDelete` is a real decision, not boilerplate — it is the same `ON DELETE CASCADE` choice you made in SQL, and it destroys rows when the parent goes.\n\nThe two other shapes:\n\n- **Many-to-many** — a ticket has many tags, a tag has many tickets. Neither end can hold the key, so a third table does. EF Core will create and manage it for you if you declare navigations on both sides; you can also map it explicitly when the pairing needs its own columns (who added the tag, when).\n- **One-to-one** — a ticket has one detail row. Here the key could go on either end, so EF Core cannot guess. You nominate the *principal* (the one that exists independently) and the *dependent* gets the foreign key.",
+      "commonMistakes": [
+        "Putting a `List<Comment>` on `Ticket` and expecting that to *be* the relationship. The navigation is how you traverse it; `Comment.TicketId` is what stores it.",
+        "Declaring `public long? TicketId` because it felt safer, which makes an orphan comment legal. Nullability of the foreign key is exactly the 'is this relationship mandatory' decision from chapter 10.",
+        "Assuming a many-to-many join table is invisible forever. As soon as the pairing needs a column of its own — added_by, added_at, quantity — it needs to be an entity you mapped.",
+        "Letting EF Core guess a one-to-one direction. It cannot, and the error message arrives at model-build time rather than where you wrote the class.",
+        "Copying `OnDelete(DeleteBehavior.Cascade)` from an example because it made a delete stop failing, and quietly deleting rows the business still needed.",
+        "Naming the key `TicketID` or `ticket_id` in C# and wondering why convention did not pick it up. Convention is `Id` or `<Type>Id`, in Pascal case."
+      ],
+      "summaryMarkdown": "A class becomes a table; a property becomes a column; a navigation becomes neither — it is a way to walk a relationship that some *other* property stores. Put the foreign key on the many end, decide nullability deliberately because that is the mandatory-or-not question, and give one-to-one an explicit principal because nothing in the model implies one.",
+      "exerciseIds": ["v3-e601", "v3-e602", "v3-e603"],
+      "reviewCardIds": ["v3-c601", "v3-c602"],
+      "references": [
+        { "label": "EF Core — Relationships", "url": "https://learn.microsoft.com/en-us/ef/core/modeling/relationships" },
+        { "label": "EF Core — Keys", "url": "https://learn.microsoft.com/en-us/ef/core/modeling/keys" },
+        { "label": "EF Core — Cascade delete behaviours", "url": "https://learn.microsoft.com/en-us/ef/core/saving/cascade-delete" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e601",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which property stores the relationship?",
+      "conceptIds": ["efcore.relationships", "efcore.entities"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Separating the navigation from the column that actually holds the link.",
+      "lessonId": "v3-l16",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 5,
+      "primaryConceptId": "efcore.relationships",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Given these two classes, which property is the one the database actually stores the ticket-to-comment relationship in?\n\n```csharp\npublic class Ticket\n{\n    public long Id { get; set; }\n    public List<Comment> Comments { get; set; } = new();\n}\n\npublic class Comment\n{\n    public long Id { get; set; }\n    public long TicketId { get; set; }\n    public Ticket? Ticket { get; set; }\n}\n```",
+      "hints": [
+        "One of these properties could be a column in a table. The others could not — ask what a single cell would have to contain.",
+        "A relationship is stored once, on the end that can hold exactly one value per row.",
+        "`Ticket.Comments` and `Comment.Ticket` are navigations — object references EF Core populates. Only one property here is a scalar the database can put in a column."
+      ],
+      "solution": {
+        "modelAnswer": "Comment.TicketId",
+        "explanationMarkdown": "`Comment.TicketId` is the foreign key column. Both `Ticket.Comments` and `Comment.Ticket` are navigations: they exist so you can traverse the relationship in C#, and EF Core fills them from the same underlying column. `Ticket.Id` is the primary key of a different table, which is what `TicketId` points at, not what stores the link."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "comment-ticketid",
+            "textMarkdown": "`Comment.TicketId`",
+            "correct": true,
+            "explanationMarkdown": "Correct. It is the only scalar here that a column can hold, it sits on the many end, and every navigation in both classes is populated from it."
+          },
+          {
+            "id": "ticket-comments",
+            "textMarkdown": "`Ticket.Comments`",
+            "correct": false,
+            "explanationMarkdown": "A `List<Comment>` cannot be a column — no cell holds a list of rows. This is a navigation; EF Core fills it by querying comments whose `TicketId` matches."
+          },
+          {
+            "id": "comment-ticket",
+            "textMarkdown": "`Comment.Ticket`",
+            "correct": false,
+            "explanationMarkdown": "Also a navigation. It looks scalar because it is a single object, but the database stores an id, not an object. Delete this property and the relationship still exists; delete `TicketId` and it does not."
+          },
+          {
+            "id": "ticket-id",
+            "textMarkdown": "`Ticket.Id`",
+            "correct": false,
+            "explanationMarkdown": "That is the primary key of `Ticket` — the value being pointed *at*. It would exist even if comments had never been invented, so it cannot be what stores this particular relationship."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e602",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "A mapping that makes orphans legal",
+      "conceptIds": ["efcore.relationships", "efcore.entities"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Reading a model configuration for the rule it fails to enforce.",
+      "lessonId": "v3-l16",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "primaryConceptId": "efcore.relationships",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Larkspur's rule is: **every comment belongs to a ticket**. Here is the model as written.\n\n```csharp\npublic class Comment\n{\n    public long Id { get; set; }\n    public string Body { get; set; } = \"\";\n    public long? TicketId { get; set; }\n    public Ticket? Ticket { get; set; }\n}\n\nmodelBuilder.Entity<Comment>()\n    .HasOne(c => c.Ticket)\n    .WithMany(t => t.Comments)\n    .HasForeignKey(c => c.TicketId);\n```\n\nThe relationship is configured and the foreign key is on the right end. Which change is required for the database to actually enforce the rule?",
+      "hints": [
+        "The mapping says which ticket a comment belongs to, if it belongs to one. Read the rule again and ask whether 'if' is allowed.",
+        "In chapter 10 you saw that a foreign key constrains a *present* value but never demands one — a NULL always satisfies a reference.",
+        "The type of the foreign key property is the mandatory-or-not decision. `long?` permits NULL; `long` does not."
+      ],
+      "solution": {
+        "modelAnswer": "Make TicketId non-nullable: `public long TicketId { get; set; }`",
+        "explanationMarkdown": "`long?` maps to a nullable column, and a NULL foreign key always satisfies the reference — so a comment attached to no ticket is legal, which is exactly the state the rule forbids. Changing the property to `long` makes the column `NOT NULL`, and EF Core also infers a required relationship from it. `IsRequired()` on the relationship expresses the same thing explicitly. Note that this is a schema change: a migration is needed, and it will fail if rows with NULL already exist — which is the correct time to find out."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "non-nullable-fk",
+            "textMarkdown": "Change `public long? TicketId` to `public long TicketId`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The nullable foreign key is what makes an orphan legal. A non-nullable key maps to `NOT NULL` and makes the relationship required, enforced by the database rather than by every code path remembering."
+          },
+          {
+            "id": "add-index",
+            "textMarkdown": "Add `.HasIndex(c => c.TicketId)` so the relationship is enforced on lookup.",
+            "correct": false,
+            "explanationMarkdown": "An index changes how quickly rows are found, never which rows may exist. An orphaned comment would simply be found faster. This is the same misconception as adding an index to enforce a foreign key in SQL."
+          },
+          {
+            "id": "cascade",
+            "textMarkdown": "Add `.OnDelete(DeleteBehavior.Cascade)`.",
+            "correct": false,
+            "explanationMarkdown": "Cascade decides what happens to comments when their ticket is *deleted*. It says nothing about whether a comment may be created without one, which is the rule in question."
+          },
+          {
+            "id": "required-navigation",
+            "textMarkdown": "Change `public Ticket? Ticket` to `public Ticket Ticket` and leave the key nullable.",
+            "correct": false,
+            "explanationMarkdown": "Closer, because EF Core does read navigation nullability — but the explicit `long?` foreign key wins, and the column stays nullable. A non-nullable navigation with a nullable key is a contradiction in the model, and the key is the side that maps to the column."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e603",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Decide which end holds the foreign key",
+      "conceptIds": ["efcore.relationships"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The placement rule, as a function. This is pure logic about relationships — the same decision you make when writing a migration, with no database attached.",
+      "lessonId": "v3-l16",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "primaryConceptId": "efcore.relationships",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Implement `foreignKeyOwner(relationship)`.\n\n`relationship` is an object describing a mapping you are about to configure:\n\n```js\n{ left: \"Ticket\", right: \"Comment\", kind: \"one-to-many\", principal: null }\n```\n\nRead `kind` as *left-to-right*: `\"one-to-many\"` means one `left` has many `right`.\n\nReturn the name of the entity whose table holds the foreign key column:\n\n- `\"one-to-many\"` — the many end is `right`, so return `right`.\n- `\"many-to-one\"` — the many end is `left`, so return `left`.\n- `\"many-to-many\"` — neither end can hold it; return the string `\"join-table\"`.\n- `\"one-to-one\"` — the dependent end holds it. `principal` names the end that exists independently, so return *the other one*.\n- Any other `kind` — return the string `\"unknown\"`.\n\nDo not modify the input.",
+      "hints": [
+        "Four of the five branches are decided by `kind` alone. Handle the shape of the relationship before you worry about which name to return.",
+        "For the two 'many' cases the answer is whichever side the word 'many' lands on. For many-to-many there is no such side at all, which is why a third table exists.",
+        "One-to-one is the only case that reads another field: the dependent is the end that is *not* `principal`, so return `principal === left ? right : left`."
+      ],
+      "solution": {
+        "code": "function foreignKeyOwner(relationship) {\n  const kind = relationship.kind;\n  if (kind === 'many-to-many') return 'join-table';\n  if (kind === 'one-to-many') return relationship.right;\n  if (kind === 'many-to-one') return relationship.left;\n  if (kind === 'one-to-one') {\n    return relationship.principal === relationship.left ? relationship.right : relationship.left;\n  }\n  return 'unknown';\n}",
+        "explanationMarkdown": "The foreign key goes on the end that has many rows, because each of those rows needs to name the single row it belongs to. `one-to-many` puts that end on the right, `many-to-one` on the left — the words are the whole answer. Many-to-many has no such end, which is precisely why a join table exists rather than being an EF Core convenience. One-to-one is the case with no structural answer: both ends have one row, so the model has to be told which is the principal, and the dependent takes the key. Returning `\"unknown\"` rather than guessing on an unrecognised kind matters, because a silent wrong guess here becomes a wrong column in a migration."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "foreignKeyOwner",
+        "starterCode": "function foreignKeyOwner(relationship) {\n  // The dependent end holds the foreign key. Which end is that?\n  return relationship.left;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "one-to-many-picks-right",
+            "args": [{ "left": "Ticket", "right": "Comment", "kind": "one-to-many", "principal": null }],
+            "expected": "Comment",
+            "hidden": false
+          },
+          {
+            "id": "many-to-one-picks-left",
+            "args": [{ "left": "Comment", "right": "Ticket", "kind": "many-to-one", "principal": null }],
+            "expected": "Comment",
+            "hidden": false
+          },
+          {
+            "id": "many-to-many-has-no-end",
+            "args": [{ "left": "Ticket", "right": "Tag", "kind": "many-to-many", "principal": null }],
+            "expected": "join-table",
+            "hidden": false
+          },
+          {
+            "id": "one-to-one-dependent-is-not-principal",
+            "args": [{ "left": "Ticket", "right": "TicketDetail", "kind": "one-to-one", "principal": "Ticket" }],
+            "expected": "TicketDetail",
+            "hidden": false
+          },
+          {
+            "id": "one-to-one-other-direction",
+            "args": [{ "left": "Ticket", "right": "TicketDetail", "kind": "one-to-one", "principal": "TicketDetail" }],
+            "expected": "Ticket",
+            "hidden": false
+          },
+          {
+            "id": "unrecognised-kind-is-not-guessed",
+            "args": [{ "left": "Ticket", "right": "Comment", "kind": "has-some", "principal": null }],
+            "expected": "unknown",
+            "hidden": false
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c601",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Navigation or column?",
+      "conceptIds": ["efcore.entities"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what a navigation property is.",
+      "lessonId": "v3-l16",
+      "type": "recall",
+      "primaryConceptId": "efcore.entities",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "`Ticket` has `public List<Comment> Comments { get; set; }`. What column does that property map to?",
+      "answerMarkdown": "None. It is a **navigation property**, not a mapped column — no cell can hold a list of rows. EF Core populates it by querying `Comment` rows whose `TicketId` matches this ticket's `Id`. The relationship itself is stored only in `Comment.TicketId`.",
+      "explanationMarkdown": "This is the distinction that makes the rest of EF Core legible. Navigations are a C#-side convenience for traversing a relationship; exactly one scalar foreign key column stores it. If you can say which column disappears when the relationship does, you can predict the schema from the classes."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c602",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Where does a one-to-one key go?",
+      "conceptIds": ["efcore.relationships"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the placement rule to the case where it does not decide itself.",
+      "lessonId": "v3-l16",
+      "type": "transfer",
+      "primaryConceptId": "efcore.relationships",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "For one-to-many the foreign key goes on the many end. A ticket has exactly one `TicketDetail`. Which end holds the key, and how does EF Core know?",
+      "answerMarkdown": "The **dependent** end holds it — the one that does not exist on its own, here `TicketDetail`. EF Core cannot infer it, because both ends have exactly one row and the structural rule ('put it on the many end') has nothing to point at. You declare the principal explicitly, for example with `.HasOne(t => t.Detail).WithOne(d => d.Ticket).HasForeignKey<TicketDetail>(d => d.TicketId)`.",
+      "explanationMarkdown": "The general rule is really 'the key goes on the end that can have more than one row'. One-to-one is the case where that rule is silent, so the model has to carry the decision instead of deriving it. If EF Core throws at model-build time asking you to configure the relationship, this is usually why."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l17",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Migrations that a reviewer can read",
+      "conceptIds": ["efcore.migrations"],
+      "prerequisiteIds": ["sql.migrations", "ops.deployment-order"],
+      "chapterId": "v3-ch06",
+      "sortOrder": 1,
+      "objectives": [
+        "Describe what `dotnet ef migrations add` produces and what it compares against.",
+        "Order a schema change so it can be deployed without breaking the running version.",
+        "Recognise a migration that will fail or lose data when applied to a populated database."
+      ],
+      "estimatedMinutes": 17,
+      "bodyMarkdown": "A migration is a versioned, ordered description of how the schema changes. EF Core generates them, but the important word is *ordered*: migrations form a history, each one assuming the ones before it, and that history — not the live database — is what defines the schema.\n\nThe workflow is two commands with very different characters.\n\n`dotnet ef migrations add <Name>` **writes code**. It touches no database. It compares your entity model against a checked-in snapshot of the model as it stood after the last migration, and emits the difference as a C# class with an `Up` and a `Down`.\n\n`dotnet ef database update` **runs code**. It looks at a table in the database recording which migrations have been applied, and applies the ones that have not, in order.\n\nSeparating them is what makes the schema reviewable. The migration is a file in your repository; you read it in a pull request the way you would read hand-written SQL, and `dotnet ef migrations script` will show you the SQL if that is easier to judge. A schema change that nobody reads is a schema change nobody has agreed to.\n\nBecause generation diffs against a snapshot rather than the database, the database can drift. Change a column by hand and the snapshot does not know, so the next generated migration is a diff against a schema that no longer exists — and it will fail, later, during somebody else's unrelated deployment. This is the single most common way an EF Core project gets into a confusing state.\n\nThe other half of the lesson is *when* to apply a change, and here the language is irrelevant. During any rollout, two versions of your application are running at once. That fact, not the framework, dictates the rules:\n\n- **Additive changes go first.** A new column, a new table, a new nullable field — old code ignores what it does not know about, so applying the migration before the deployment is safe.\n- **Destructive changes go last.** Dropping or renaming is only safe once every running instance has stopped referring to the thing being removed, which means after the new version is fully deployed.\n\nA rename is both at once, which is why it cannot be one step. Add the new column, deploy code that writes both, deploy code that uses only the new one, then drop the old. Three deployments to rename a column feels absurd until the first time a single-step rename takes the site down during a rolling restart.\n\nOne last thing the chapter-10 version of you already knows: the failures worth catching all involve rows that already exist. A development database with four rows will apply almost any migration happily. Rehearse against a copy of something real.",
+      "workedExampleMarkdown": "You add a column:\n\n```csharp\npublic class Ticket\n{\n    public long Id { get; set; }\n    public string Subject { get; set; } = \"\";\n    public string Priority { get; set; } = \"normal\";   // new\n}\n```\n\nThen:\n\n```bash\ndotnet ef migrations add AddTicketPriority\ndotnet ef database update\n```\n\nThe first command does **not** look at your database. It compares your current model against a snapshot of the model as of the last migration — a checked-in file — and writes the difference as code:\n\n```csharp\npublic partial class AddTicketPriority : Migration\n{\n    protected override void Up(MigrationBuilder migrationBuilder)\n    {\n        migrationBuilder.AddColumn<string>(\n            name: \"Priority\", table: \"Tickets\",\n            nullable: false, defaultValue: \"normal\");\n    }\n\n    protected override void Down(MigrationBuilder migrationBuilder)\n    {\n        migrationBuilder.DropColumn(name: \"Priority\", table: \"Tickets\");\n    }\n}\n```\n\nThree things follow from 'it compares against a snapshot, not the database'.\n\n**The migration is a reviewable artefact.** It is C# in your repository. Read it before applying it, the same way you would read hand-written SQL. `dotnet ef migrations script` prints the SQL if you would rather review that.\n\n**`defaultValue` matters for existing rows.** The column is `NOT NULL`; every row already in the table needs a value at the moment the column appears. Without the default, applying this to a populated database fails — which is far better than the alternative of finding out in production, and is exactly why you apply migrations to a copy first.\n\n**Drift is possible.** If someone changes the database by hand, the snapshot no longer describes reality, and the next migration will be computed from a fiction. The database is not the source of truth; the migration history is.\n\nThe deployment ordering question is the same one from chapter 12, unchanged by the language. A migration that adds something is safe to apply *before* the new code ships, because old code ignores a column it does not know about. A migration that removes or renames something is only safe *after* every running instance has stopped referring to it. That is why a rename is usually three deployments — add the new, write both, drop the old — rather than one clever step.",
+      "commonMistakes": [
+        "Adding a `NOT NULL` column with no default and applying it to a populated table, which fails at the moment of deployment rather than at review time.",
+        "Treating `Down` as decoration. It is what a rollback runs; an untested `Down` is a rollback plan you have never rehearsed.",
+        "Editing an already-applied migration instead of adding a new one. The applied history is what other environments have executed, and rewriting it makes them silently divergent.",
+        "Changing the database by hand and letting the model snapshot drift, so the next generated migration is a diff against something that no longer exists.",
+        "Shipping a rename as a single migration, so the old code — still running during the rollout — queries a column that has just disappeared.",
+        "Assuming `dotnet ef database update` in development proves the migration works. Development databases are usually near-empty, and the interesting failures are all about existing rows."
+      ],
+      "summaryMarkdown": "A migration is generated by diffing your model against a checked-in snapshot, and it is code you should read. Additive changes are safe before the new deployment; removals and renames are only safe after the old code has stopped running. The failures that matter all involve rows that already exist, which is why an empty development database proves very little.",
+      "exerciseIds": ["v3-e604", "v3-e605", "v3-e606"],
+      "reviewCardIds": ["v3-c603", "v3-c604"],
+      "references": [
+        { "label": "EF Core — Migrations overview", "url": "https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/" },
+        { "label": "EF Core — Applying migrations", "url": "https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying" },
+        { "label": "EF Core — Managing migrations", "url": "https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/managing" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e604",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "A migration that fails on real data",
+      "conceptIds": ["efcore.migrations"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Reading a generated migration for what it does to rows that already exist.",
+      "lessonId": "v3-l17",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "primaryConceptId": "efcore.migrations",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "This migration was generated, reviewed quickly, and applied to a staging database holding 40,000 tickets.\n\n```csharp\nprotected override void Up(MigrationBuilder migrationBuilder)\n{\n    migrationBuilder.AddColumn<string>(\n        name: \"Priority\",\n        table: \"Tickets\",\n        type: \"text\",\n        nullable: false);\n}\n```\n\nWhat happens, and why?",
+      "hints": [
+        "Ask what value the 40,000 existing rows have in a column that did not exist a moment ago.",
+        "The column is declared `nullable: false`. There is no `defaultValue` argument.",
+        "PostgreSQL must give every existing row a value for a NOT NULL column at the moment it is added. With nothing to use, it refuses."
+      ],
+      "solution": {
+        "modelAnswer": "It fails: a NOT NULL column with no default cannot be added to a table that already has rows.",
+        "explanationMarkdown": "The 40,000 existing rows need a value the instant the column exists, and the migration supplies none, so the statement is rejected and the migration does not apply. This is the good outcome — the failure is loud, at deployment time, on staging. The fix is either `defaultValue: \"normal\"` so existing rows get a value, or the three-step route (add nullable, backfill, then tighten to NOT NULL) when the correct value differs per row. Note that an empty development database would have applied this migration without complaint, which is precisely why 'it worked locally' is not evidence here."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "fails-not-null",
+            "textMarkdown": "The migration fails — a `NOT NULL` column with no default cannot be added to a table that already contains rows.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Every existing row needs a value at the moment the column appears, and none is supplied. Adding `defaultValue`, or splitting into add-nullable / backfill / tighten, are the two real fixes."
+          },
+          {
+            "id": "nulls-inserted",
+            "textMarkdown": "It succeeds; the existing rows get `NULL` and new rows are required to supply a value.",
+            "correct": false,
+            "explanationMarkdown": "That would mean the column is nullable for old rows and not for new ones, which no single column definition can express. `NOT NULL` is a property of the column, not of when a row was written."
+          },
+          {
+            "id": "empty-string",
+            "textMarkdown": "It succeeds; PostgreSQL fills existing rows with the empty string because the column is `text`.",
+            "correct": false,
+            "explanationMarkdown": "There is no implicit per-type default. C# gives you `\"\"` for an uninitialised string, which is probably where the intuition comes from, but the database has no such rule — it requires an explicit default."
+          },
+          {
+            "id": "works-then-fails",
+            "textMarkdown": "It succeeds, and the failure appears later when the application first reads a ticket with no priority.",
+            "correct": false,
+            "explanationMarkdown": "This describes a nullable column being read into a non-nullable C# property — a real failure mode, but a different one. Here the database refuses the schema change up front, so there is never a row to read."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e605",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Order a rename across a rollout",
+      "conceptIds": ["efcore.migrations", "ops.deployment-order"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Sequencing a destructive change so the version currently running never sees a column vanish.",
+      "lessonId": "v3-l17",
+      "sortOrder": 1,
+      "type": "predict-output",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "primaryConceptId": "efcore.migrations",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Larkspur is renaming `Tickets.Subject` to `Tickets.Title`. There are always at least two application instances running during a deploy, so old and new code overlap.\n\nThese five steps are listed out of order:\n\n```\nA  deploy code that reads Title and writes both Subject and Title\nB  migration: drop column Subject\nC  migration: add nullable column Title, backfill from Subject\nD  deploy code that reads and writes Title only\nE  migration: make Title NOT NULL\n```\n\nGive the safe order as five letters separated by commas, for example `A, B, C, D, E`.",
+      "hints": [
+        "At every point in your sequence, ask what the currently-running code would do — including the old version that has not been replaced yet.",
+        "Adding something is safe before the code that uses it ships, because code that does not know about a column ignores it. Dropping is only safe once nothing refers to it.",
+        "Write to both columns during the overlap, so whichever version handles a request leaves the row correct. Only tighten the constraint once every writer fills it."
+      ],
+      "solution": {
+        "modelAnswer": "C, A, D, E, B",
+        "explanationMarkdown": "`C` first: the new column exists and is populated, but is nullable and unused, so the old code is unaffected. `A` next: the new deployment reads `Title` and writes both, so rows stay correct no matter which instance serves a request during the overlap. `D` once every instance is on that version: writers can stop maintaining `Subject`. `E` after that, because only now is every row guaranteed to have a `Title`. `B` last, when nothing has referred to `Subject` for a full deployment. The tempting single step — rename in one migration — breaks the old instances the moment it applies, and they are still serving traffic."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": { "trim": true, "collapseWhitespace": true, "caseSensitive": false },
+        "expected": "C, A, D, E, B",
+        "acceptedAlternatives": ["C,A,D,E,B", "C A D E B", "c, a, d, e, b"]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e606",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain the drift",
+      "conceptIds": ["efcore.migrations"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written answer. You are explaining a real failure to a colleague who applied a hotfix by hand.",
+      "lessonId": "v3-l17",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "primaryConceptId": "efcore.migrations",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "During an incident, someone fixed production by running `ALTER TABLE \"Tickets\" ADD COLUMN \"Priority\" text;` directly against the database. The application worked again and everyone moved on.\n\nTwo weeks later a colleague adds an unrelated property, runs `dotnet ef migrations add AddAssignee`, and the generated migration contains an `AddColumn` for **Priority** as well.\n\nIn a few sentences: explain why that happened, what will go wrong when this migration is applied to production, and what should have been done during the incident.",
+      "hints": [
+        "`migrations add` never inspects your database. Ask what it *does* compare against.",
+        "The model snapshot is a checked-in file describing the schema as of the last migration. The hand-run ALTER never updated it.",
+        "So EF Core believes `Priority` does not exist yet and generates a migration to create it — against a production database where it already does."
+      ],
+      "solution": {
+        "modelAnswer": "`migrations add` diffs the current model against the checked-in model snapshot, not against the live database. The hand-run ALTER changed production but left the snapshot untouched, so EF Core still believes Priority does not exist and generates an AddColumn for it. Applied to production, that will fail because the column is already there — and the failure lands in the middle of an unrelated deployment. During the incident the change should have been made as a migration and applied normally, or, if the emergency genuinely required raw SQL, a matching migration should have been added immediately afterwards and marked as already applied so the history and the database agreed again.",
+        "explanationMarkdown": "The point is that the migration history — not the database — is the source of truth about the schema. Any change that bypasses it creates drift, and drift is not discovered at the moment it is created; it is discovered later, by someone else, during a change that has nothing to do with it. That delay is what makes it expensive."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that `migrations add` compares the model against the checked-in snapshot, not against the live database.",
+          "Identifies that the hand-run ALTER updated the database but not the snapshot, so EF Core still believes the column is missing.",
+          "Predicts a concrete failure: applying the migration to production errors because the column already exists.",
+          "Notes that the failure surfaces during an unrelated later deployment rather than at the time of the hotfix.",
+          "Proposes a real remedy — make the change as a migration, or add a matching migration afterwards and record it as applied so history and database agree."
+        ],
+        "modelAnswerMarkdown": "`dotnet ef migrations add` does not look at the database. It diffs the current model against `ModelSnapshot.cs`, a file in the repository describing the schema as of the last migration. The incident fix changed production directly and left that snapshot untouched, so EF Core still believes `Priority` has never been created — and helpfully generates an `AddColumn` for it alongside the assignee change.\n\nApplied to production, that migration fails: the column already exists. Worse, the failure arrives during a deployment that has nothing to do with the incident, so whoever is on call has to reconstruct two weeks of history to understand it.\n\nThe right move during the incident was to write the change as a migration and apply it. If raw SQL was genuinely the only option under pressure, the follow-up is to generate the equivalent migration immediately and insert it into the applied-history table (`dotnet ef migrations add` then recording it as applied), so that the snapshot, the history and the live schema describe the same thing again."
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c603",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does `migrations add` compare against?",
+      "conceptIds": ["efcore.migrations"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the input to migration generation.",
+      "lessonId": "v3-l17",
+      "type": "recall",
+      "primaryConceptId": "efcore.migrations",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "When you run `dotnet ef migrations add`, what two things does EF Core compare to produce the migration?",
+      "answerMarkdown": "Your **current model** (the entity classes plus `OnModelCreating` configuration) against the **model snapshot** checked into the repository, which describes the schema as of the last migration. It does not connect to the database at all.",
+      "explanationMarkdown": "This is why hand-editing the database causes drift: the snapshot is unaware, so the next generated migration is a diff against a schema that no longer exists. It is also why migration generation works offline, and why the migration history — not the live database — is the authority on what the schema should be."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c604",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why is a rename three deployments?",
+      "conceptIds": ["efcore.migrations", "ops.deployment-order"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the additive-then-destructive rule to a concrete change.",
+      "lessonId": "v3-l17",
+      "type": "transfer",
+      "primaryConceptId": "efcore.migrations",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "Renaming a column looks like one migration. Why is it normally add-new / write-both / drop-old instead?",
+      "answerMarkdown": "Because old and new code run at the same time during a rollout. A single rename removes `Subject` while instances still querying `Subject` are serving traffic, so they fail immediately. Adding the new column first is invisible to old code; writing both keeps rows correct whichever version handles a request; dropping the old column is safe only once nothing has referenced it for a full deployment.",
+      "explanationMarkdown": "The underlying rule is that additive changes are safe *before* the code that needs them, and destructive changes are safe only *after* the code that used them has gone. A rename is both at once, which is why it has to be taken apart. This is identical to the Node deployment ordering from chapter 12 — the framework changed, the constraint did not."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l18",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Tracking, projection, and reading the generated SQL",
+      "conceptIds": ["efcore.tracking", "efcore.projection", "efcore.generated-sql"],
+      "prerequisiteIds": ["linq.deferred-execution", "linq.projection"],
+      "chapterId": "v3-ch06",
+      "sortOrder": 2,
+      "objectives": [
+        "Explain what the change tracker stores and when tracking is the wrong default.",
+        "Project to only the columns a screen needs, and say what that changes in the SQL.",
+        "Read generated SQL and recognise a translation that is not the query you would have written."
+      ],
+      "estimatedMinutes": 20,
+      "bodyMarkdown": "This lesson is about the gap between what you wrote and what ran.\n\nWhen a query returns entities, EF Core does not simply hand you objects. It **tracks** them: for each entity it keeps a snapshot of the original values, so that when you call `SaveChanges` it can compare current against original and generate UPDATE statements for exactly the properties that changed. You never write that comparison, which is a real convenience — and it is bookkeeping performed on the assumption that you are going to write something.\n\nFor a read-only screen that assumption is false, and the bookkeeping is pure cost. `AsNoTracking()` removes it. Be precise about what that buys: it saves memory and CPU **in your application**. It does not change the SQL, and it does not fetch fewer columns. Anyone expecting a database-side win from it will measure no difference and conclude the advice was wrong.\n\nFetching fewer columns is a different tool: **projection**. `Select` into a small type and EF Core translates it into the SELECT clause, so the database sends three columns instead of eleven. A projection to a non-entity type is also inherently untracked — there is no entity identity to snapshot — so it gives you both benefits at once. For list screens, projection is usually the right default rather than an optimisation.\n\nBut projection only works if EF Core can *translate* it. LINQ against a `DbSet` builds an expression tree that a provider turns into SQL. Call a C# method inside `Select` that has no SQL equivalent and the translation fails; depending on version and configuration you get an exception, or — historically, and still possible when you force evaluation early — the work silently finishes in memory after the whole table has been fetched. This is the deferred-execution material from D03 with real consequences attached: *where* a LINQ operator runs decides whether it is a WHERE clause or a loop over everything.\n\nThe same gap produces the most common EF Core performance bug. With lazy loading enabled, touching a navigation property that has not been loaded issues a query. Inside a loop, that is one query per iteration — the N+1 pattern — and the guilty line looks like a property access, not a database call. `Include` turns it into a join; `AsSplitQuery` turns it into one query per navigation instead of a wide join that repeats parent rows.\n\nAll of which leads to one habit worth more than any individual API in this chapter. **Log the SQL.** `optionsBuilder.LogTo(Console.WriteLine)` in development, or capture it in a test and assert on it for queries that matter. EF Core is a translator, and you would not ship a translation you had never read.",
+      "workedExampleMarkdown": "Two queries that look almost identical, and the SQL they produce.\n\n```csharp\n// (1) tracked entities\nvar tickets = await db.Tickets\n    .Where(t => t.OwnerId == ownerId)\n    .ToListAsync();\n```\n\n```sql\nSELECT t.\"Id\", t.\"Subject\", t.\"Body\", t.\"Priority\", t.\"OwnerId\", t.\"CreatedAt\", t.\"ClosedAt\"\nFROM \"Tickets\" AS t\nWHERE t.\"OwnerId\" = @ownerId\n```\n\nEvery column, and every returned object is now held by the change tracker, which keeps a snapshot of its original values so `SaveChanges` can work out what changed. That is exactly what you want when you are about to modify them, and pure overhead when you are not.\n\n```csharp\n// (2) a projection\nvar rows = await db.Tickets\n    .Where(t => t.OwnerId == ownerId)\n    .Select(t => new TicketRow(t.Id, t.Subject, t.Priority))\n    .ToListAsync();\n```\n\n```sql\nSELECT t.\"Id\", t.\"Subject\", t.\"Priority\"\nFROM \"Tickets\" AS t\nWHERE t.\"OwnerId\" = @ownerId\n```\n\nThree columns instead of seven, and nothing is tracked — a projection to a non-entity type is not something EF Core could track even if it wanted to, because there is no entity to compare against. For a read-only list screen, (2) is simply the better query, and `AsNoTracking()` gets you the untracked half when you do want whole entities.\n\nNow the failure this lesson exists for:\n\n```csharp\nvar tickets = await db.Tickets.Where(t => t.OwnerId == ownerId).ToListAsync();\nforeach (var ticket in tickets)\n{\n    Console.WriteLine(ticket.Comments.Count);   // lazy loading enabled\n}\n```\n\nOne query for the tickets, then **one more per ticket** for its comments. Forty tickets, forty-one queries. Nothing in the C# looks like a loop over the database — the expensive part is a property access — which is why this is the classic EF Core performance bug rather than an exotic one.\n\nThe fix is to say what you need up front:\n\n```csharp\nvar tickets = await db.Tickets\n    .Where(t => t.OwnerId == ownerId)\n    .Include(t => t.Comments)\n    .ToListAsync();\n```\n\n`Include` produces a join, so the comment rows arrive with the tickets. If the join duplicates too much parent data, `AsSplitQuery()` sends one query per navigation instead — two queries, not forty-one. Either is a decision; lazy loading is a decision too, just one nobody wrote down.\n\nHow do you know which happened? Look. Log the SQL with `optionsBuilder.LogTo(Console.WriteLine)`, or capture it in a test. The rule for this chapter: **if you have not seen the SQL for a query on a hot path, you do not know what that query does.**",
+      "commonMistakes": [
+        "Loading full tracked entities for a read-only list, then wondering why a page that displays three fields is slow.",
+        "Believing `AsNoTracking()` makes a query cheaper on the database. It removes tracker overhead in memory; it does not change the SQL or the columns fetched.",
+        "Accessing a navigation property inside a loop and not recognising that a property access is issuing a query.",
+        "Adding `Include` for every navigation defensively, producing a join that returns the parent row once per child and moves far more data than needed.",
+        "Reading the LINQ and assuming the SQL. The only way to know a translation is reasonable is to read the SQL it generated.",
+        "Projecting into a type EF Core cannot translate — calling a C# method inside `Select` — and silently pulling the whole table into memory to finish the work client-side."
+      ],
+      "summaryMarkdown": "Tracking exists so `SaveChanges` knows what changed; for read-only work it is cost without benefit, and a projection avoids it while also fetching fewer columns. The expensive mistakes are invisible in the C#: a navigation touched in a loop is N+1, and an untranslatable `Select` finishes the work in memory. Read the generated SQL for anything on a hot path — that habit, not any single API, is what this lesson is for.",
+      "exerciseIds": ["v3-e607", "v3-e608", "v3-e609"],
+      "reviewCardIds": ["v3-c605", "v3-c606"],
+      "references": [
+        { "label": "EF Core — Tracking vs. no-tracking queries", "url": "https://learn.microsoft.com/en-us/ef/core/querying/tracking" },
+        { "label": "EF Core — Loading related data", "url": "https://learn.microsoft.com/en-us/ef/core/querying/related-data/" },
+        { "label": "EF Core — Single vs. split queries", "url": "https://learn.microsoft.com/en-us/ef/core/querying/single-split-queries" },
+        { "label": "EF Core — Efficient querying", "url": "https://learn.microsoft.com/en-us/ef/core/performance/efficient-querying" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e607",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Find the N+1 in the C#",
+      "conceptIds": ["efcore.generated-sql", "efcore.query-performance"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The query count is not visible in the shape of the code. That is the whole problem.",
+      "lessonId": "v3-l18",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "primaryConceptId": "efcore.generated-sql",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Lazy loading is enabled. `db.Tickets` matches 40 rows for this owner.\n\n```csharp\nvar tickets = await db.Tickets\n    .Where(t => t.OwnerId == ownerId)\n    .OrderBy(t => t.CreatedAt)\n    .ToListAsync();\n\nvar summaries = new List<string>();\nforeach (var ticket in tickets)\n{\n    summaries.Add($\"{ticket.Subject}: {ticket.Comments.Count} comments\");\n}\n```\n\nHow many SQL queries does this send, and which line is responsible for the ones after the first?",
+      "hints": [
+        "Count the statements that reach the database, not the statements in the file.",
+        "`ToListAsync()` executes once. Then ask what happens the first time each ticket's `Comments` is touched.",
+        "With lazy loading, reading a navigation property that has not been loaded issues a query — once per ticket, inside the loop."
+      ],
+      "solution": {
+        "modelAnswer": "41 queries: one for the tickets, plus one per ticket issued by `ticket.Comments` inside the loop.",
+        "explanationMarkdown": "`ToListAsync()` runs the first query. Then `ticket.Comments` is a lazy navigation: the first access on each ticket loads that ticket's comments with its own SELECT. Forty tickets, forty extra round trips, and the line that causes them looks like a property read rather than a query. `Include(t => t.Comments)` before `ToListAsync()` collapses it to one query (a join), or `AsSplitQuery()` to two. The general lesson: with lazy loading on, a property access is a potential query, so the cost of a loop is invisible in its shape."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "forty-one",
+            "textMarkdown": "41 — one for the tickets, then one per ticket caused by `ticket.Comments` in the loop.",
+            "correct": true,
+            "explanationMarkdown": "Correct. This is the N+1 pattern: the `+1` is the list query, the `N` are lazy navigation loads, and the guilty line reads like a property access rather than a database call."
+          },
+          {
+            "id": "one",
+            "textMarkdown": "1 — LINQ is composed into a single statement before it executes.",
+            "correct": false,
+            "explanationMarkdown": "Composition applies to the query being built before `ToListAsync()`. Once results are materialised, later navigation access is a separate operation — and here it happens forty times."
+          },
+          {
+            "id": "two",
+            "textMarkdown": "2 — one for tickets and one that loads all the comments when the loop starts.",
+            "correct": false,
+            "explanationMarkdown": "That is what `AsSplitQuery()` with an `Include` would do, and it is the fix rather than the behaviour. Lazy loading has no view of the loop; it responds to each navigation access on its own."
+          },
+          {
+            "id": "forty",
+            "textMarkdown": "40 — the ticket query is merged into the first comment query.",
+            "correct": false,
+            "explanationMarkdown": "Nothing merges them: the ticket list has already been fetched and materialised before the loop begins, so its query is a genuine extra one on top of the forty."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e608",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which read-only queries are needlessly tracked?",
+      "conceptIds": ["efcore.tracking", "efcore.projection"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A review pass over a list of queries. Pure selection logic — the decision, not the framework call.",
+      "lessonId": "v3-l18",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "primaryConceptId": "efcore.tracking",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "You are auditing a service. Each query has been described as:\n\n```js\n{ id: \"ticket-list\", writes: false, tracked: true }\n```\n\n- `writes` — whether the loaded entities are later modified and saved.\n- `tracked` — whether the query currently returns tracked entities.\n\nImplement `untrackedReadCandidates(queries)`.\n\nReturn an array of the **ids** of the queries that should be switched to no-tracking: those that do **not** write and are currently tracked. Preserve the input order, and do not modify the input.\n\nA query that writes must keep tracking, whatever else is true of it.",
+      "hints": [
+        "This is a selection followed by a shape change: pick the queries that qualify, then report only their ids.",
+        "A query qualifies when both conditions hold — it does not write, and it is tracked today. A query that already avoids tracking needs no change.",
+        "`queries.filter(q => q.writes === false && q.tracked === true).map(q => q.id)` — filter first, then take the id from each survivor."
+      ],
+      "solution": {
+        "code": "function untrackedReadCandidates(queries) {\n  const candidates = queries.filter(q => q.writes === false && q.tracked === true);\n  return candidates.map(q => q.id);\n}",
+        "explanationMarkdown": "Both conditions matter, and for different reasons. `writes === false` is the safety condition: tracking is what lets `SaveChanges` detect modifications, so removing it from a query whose entities are later saved silently stops those saves working. `tracked === true` is the usefulness condition: a query that already avoids tracking is not a change worth making. Filtering and then mapping keeps the two steps legible — select which queries qualify, then report the identifier rather than the whole record. An empty result is a perfectly good answer; it means the service is already right."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "untrackedReadCandidates",
+        "starterCode": "function untrackedReadCandidates(queries) {\n  // Which of these are read-only AND still tracked?\n  return queries.map(q => q.id);\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "no-queries",
+            "args": [[]],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "mixed-service",
+            "args": [
+              [
+                { "id": "ticket-list", "writes": false, "tracked": true },
+                { "id": "close-ticket", "writes": true, "tracked": true },
+                { "id": "tag-lookup", "writes": false, "tracked": false },
+                { "id": "owner-dashboard", "writes": false, "tracked": true }
+              ]
+            ],
+            "expected": ["ticket-list", "owner-dashboard"],
+            "hidden": false
+          },
+          {
+            "id": "writers-are-left-alone",
+            "args": [
+              [
+                { "id": "close-ticket", "writes": true, "tracked": true },
+                { "id": "reassign", "writes": true, "tracked": true }
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "already-untracked",
+            "args": [
+              [
+                { "id": "report", "writes": false, "tracked": false },
+                { "id": "export", "writes": false, "tracked": false }
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "all-qualify-in-order",
+            "args": [
+              [
+                { "id": "b-second", "writes": false, "tracked": true },
+                { "id": "a-first", "writes": false, "tracked": true }
+              ]
+            ],
+            "expected": ["b-second", "a-first"],
+            "hidden": false
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e609",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the generated SQL",
+      "conceptIds": ["efcore.generated-sql", "efcore.projection"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written review. You have the LINQ and the SQL it produced; say whether you would ship it.",
+      "lessonId": "v3-l18",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "primaryConceptId": "efcore.generated-sql",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "A colleague adds a ticket list endpoint. The screen shows only subject and priority.\n\n```csharp\nvar rows = await db.Tickets\n    .Where(t => t.OwnerId == ownerId)\n    .Include(t => t.Comments)\n    .ToListAsync();\n\nreturn rows.Select(t => new { t.Subject, t.Priority }).ToList();\n```\n\nThe logged SQL:\n\n```sql\nSELECT t.\"Id\", t.\"Subject\", t.\"Body\", t.\"Priority\", t.\"OwnerId\", t.\"CreatedAt\", t.\"ClosedAt\",\n       c.\"Id\", c.\"Body\", c.\"AuthorId\", c.\"TicketId\", c.\"CreatedAt\"\nFROM \"Tickets\" AS t\nLEFT JOIN \"Comments\" AS c ON t.\"Id\" = c.\"TicketId\"\nWHERE t.\"OwnerId\" = @ownerId\nORDER BY t.\"Id\"\n```\n\nIn a few sentences: identify what this query fetches that the screen never uses, explain why the final `Select` does not help, and give the LINQ you would write instead.",
+      "hints": [
+        "Compare the columns in the SQL against the two the screen displays.",
+        "Where does the final `Select` run — in the database, or after every row has already arrived?",
+        "Moving the projection *into* the query is the fix: `.Select(...)` before `ToListAsync()` is translated into the SELECT clause, and it also removes the need for `Include` entirely."
+      ],
+      "solution": {
+        "modelAnswer": "The query fetches all seven ticket columns plus every column of every comment, joined, when the screen uses only Subject and Priority. The final Select runs in memory after all of that has already been transferred and materialised, so it discards data rather than avoiding it. The Include is pure cost here — no comment field is ever displayed — and the join also repeats the whole ticket row once per comment. I would write db.Tickets.Where(t => t.OwnerId == ownerId).Select(t => new TicketRow(t.Subject, t.Priority)).ToListAsync(), which translates to a two-column SELECT with no join and no tracking.",
+        "explanationMarkdown": "The distinction that matters is *where* a projection runs. Inside the query it becomes the SELECT clause; after `ToListAsync()` it is ordinary C# over data that has already crossed the network. Both compile, both produce the same list, and only one of them is a reasonable query."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Identifies that all ticket columns and all comment columns are fetched while only Subject and Priority are used.",
+          "States that the final `Select` runs in memory after materialisation, so it discards data rather than avoiding fetching it.",
+          "Notes that `Include` is unnecessary because no comment data reaches the screen.",
+          "Mentions that the join repeats the ticket row once per comment, multiplying the transferred data.",
+          "Gives concrete corrected LINQ that projects inside the query, before `ToListAsync()`."
+        ],
+        "modelAnswerMarkdown": "The SQL fetches seven ticket columns and five comment columns for every matching row; the screen uses two. `Include(t => t.Comments)` is the reason the comment columns and the `LEFT JOIN` are there at all, and nothing downstream ever reads a comment — so it is pure transfer cost. The join also repeats the entire ticket row once per comment, so a ticket with twelve comments arrives twelve times.\n\nThe trailing `.Select(...)` does not help because it runs *after* `ToListAsync()`. By then every column has already been queried, transferred and materialised into tracked entities; the projection just throws most of it away in memory.\n\nWhat I would write:\n\n```csharp\nvar rows = await db.Tickets\n    .Where(t => t.OwnerId == ownerId)\n    .Select(t => new TicketRow(t.Subject, t.Priority))\n    .ToListAsync();\n```\n\nNow the projection is part of the query, so it becomes `SELECT t.\"Subject\", t.\"Priority\"` with no join, no comment rows, and no change tracking — because there is no entity to track."
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c605",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does the change tracker hold?",
+      "conceptIds": ["efcore.tracking"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall why tracking exists at all.",
+      "lessonId": "v3-l18",
+      "type": "recall",
+      "primaryConceptId": "efcore.tracking",
+      "promptMarkdown": "What does EF Core's change tracker keep for each entity returned by a tracked query, and what is it for?",
+      "answerMarkdown": "A snapshot of the entity's **original values**, so that at `SaveChanges` time it can compare current values against them and generate UPDATE statements for exactly the properties that changed. For a read-only query nothing will ever be compared, so the snapshot is memory and CPU spent for no benefit — that is what `AsNoTracking()` (or a projection) avoids.",
+      "explanationMarkdown": "Knowing *what* is stored explains the whole trade-off: tracking is bookkeeping for a future write. It also explains why a projection to a non-entity type is inherently untracked — there is no entity identity to snapshot against.",
+      "gradingOrigin": "self_reported"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c606",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Spot the N+1",
+      "conceptIds": ["efcore.generated-sql"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Debugging recall: the shape of the bug in code.",
+      "lessonId": "v3-l18",
+      "type": "debugging",
+      "primaryConceptId": "efcore.generated-sql",
+      "promptMarkdown": "A page that lists 25 orders takes 4 seconds. The C# has one `ToListAsync()` and a `foreach` that reads `order.Customer.Name`. What is happening, and what is the first thing you would check?",
+      "answerMarkdown": "It is N+1: with lazy loading, `order.Customer` issues a query the first time it is touched for each order, so 25 orders means 26 queries. The first thing to check is the **generated SQL** — log it with `LogTo` or capture it in a test — because the query count is invisible in the C#. The fix is `.Include(o => o.Customer)` (a join) or a projection that selects only the fields the page shows.",
+      "explanationMarkdown": "The reason this is worth having as a reflex is that the guilty line does not look like a database call — it is a property access inside a loop. Any time a page is slow and the code touches navigations in a loop, count the queries before theorising about indexes.",
+      "gradingOrigin": "self_reported"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v3-a06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "EF Core placement check",
+      "conceptIds": [
+        "efcore.entities",
+        "efcore.relationships",
+        "efcore.migrations",
+        "efcore.tracking",
+        "efcore.projection",
+        "efcore.generated-sql"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering chapter D06. Answer from reasoning about the model, the migration and the SQL; no hints are shown until you submit.",
+      "chapterId": "v3-ch06",
+      "qualification": { "minimumCorrect": 4, "requireAllCritical": true },
+      "items": [
+        {
+          "id": "v3-a06-i1",
+          "objectiveIds": ["efcore.relationships", "efcore.entities"],
+          "critical": true,
+          "promptMarkdown": "An `Invoice` has many `LineItem`s. Which class gets the foreign key property, and what is the navigation on the other side?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "lineitem-fk",
+                "textMarkdown": "`LineItem` gets `InvoiceId`; `Invoice` gets a `List<LineItem>` navigation.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The many end stores the key, because each line item needs to name its single invoice. The collection on `Invoice` is a navigation, stored nowhere."
+              },
+              {
+                "id": "invoice-fk",
+                "textMarkdown": "`Invoice` gets `LineItemId`; `LineItem` gets an `Invoice` navigation.",
+                "correct": false,
+                "explanationMarkdown": "One invoice would then be able to point at exactly one line item. There is no column that holds many ids, which is why the key must go on the many end instead."
+              },
+              {
+                "id": "both",
+                "textMarkdown": "Both classes get a foreign key so the relationship can be traversed from either side.",
+                "correct": false,
+                "explanationMarkdown": "Traversal from either side is what the navigations are for; they do not need their own columns. Two keys would be two independent facts that could disagree."
+              },
+              {
+                "id": "join-table",
+                "textMarkdown": "Neither — a join table stores the pairing.",
+                "correct": false,
+                "explanationMarkdown": "A join table is for many-to-many, where neither end can hold a single id. Here the line-item end can, so the extra table would add a join for nothing."
+              }
+            ]
+          },
+          "explanationMarkdown": "The placement rule is structural: the foreign key belongs on the end that can have more than one row."
+        },
+        {
+          "id": "v3-a06-i2",
+          "objectiveIds": ["efcore.migrations"],
+          "critical": true,
+          "promptMarkdown": "A migration adds a `NOT NULL` column with no default to a table containing 2 million rows. What is the outcome?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "fails",
+                "textMarkdown": "It fails — the existing rows have no value for a column that forbids NULL.",
+                "correct": true,
+                "explanationMarkdown": "Correct, and the failure is the desirable outcome: it happens at deployment rather than producing silently wrong data."
+              },
+              {
+                "id": "backfills",
+                "textMarkdown": "It succeeds and EF Core backfills the C# default for the property's type.",
+                "correct": false,
+                "explanationMarkdown": "EF Core does not run a backfill you did not write. The C# default for a type has no bearing on what the database does with existing rows."
+              },
+              {
+                "id": "nullable-anyway",
+                "textMarkdown": "It succeeds, adding the column as nullable and tightening it on the next migration.",
+                "correct": false,
+                "explanationMarkdown": "That two-step is a technique you can choose deliberately; nothing applies it automatically. The migration does exactly what it says."
+              },
+              {
+                "id": "locks",
+                "textMarkdown": "It succeeds but locks the table until every row is rewritten.",
+                "correct": false,
+                "explanationMarkdown": "Locking duration is a real concern for large tables, but it is not what happens here — the statement is rejected before any rewriting begins."
+              }
+            ]
+          },
+          "explanationMarkdown": "The interesting migration failures are all about rows that already exist, which an empty development database cannot reveal."
+        },
+        {
+          "id": "v3-a06-i3",
+          "objectiveIds": ["efcore.tracking", "efcore.projection"],
+          "critical": false,
+          "promptMarkdown": "Which statement about `AsNoTracking()` is accurate?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "memory-only",
+                "textMarkdown": "It removes the change-tracking snapshot, saving memory and CPU in the application; the SQL is unchanged.",
+                "correct": true,
+                "explanationMarkdown": "Correct. It is a client-side decision about bookkeeping. To fetch fewer columns you need a projection, which is a different change."
+              },
+              {
+                "id": "fewer-columns",
+                "textMarkdown": "It makes EF Core select fewer columns, because untracked entities need no key.",
+                "correct": false,
+                "explanationMarkdown": "The key is still needed to materialise the entity, and the same columns are fetched. Column reduction comes from `Select`, not from tracking behaviour."
+              },
+              {
+                "id": "read-only-db",
+                "textMarkdown": "It opens the connection in a read-only mode, so writes fail fast.",
+                "correct": false,
+                "explanationMarkdown": "It has no effect on the connection. You can still save through the same context; the entities from that query simply will not be detected as modified."
+              },
+              {
+                "id": "disables-lazy",
+                "textMarkdown": "It disables lazy loading for the returned entities.",
+                "correct": false,
+                "explanationMarkdown": "Different feature. Lazy loading is configured separately, and its N+1 behaviour is unaffected by whether the parent entities are tracked."
+              }
+            ]
+          },
+          "explanationMarkdown": "Tracking is about what the context remembers; projection is about what the database sends. Conflating them leads to optimisations that change nothing."
+        },
+        {
+          "id": "v3-a06-i4",
+          "objectiveIds": ["efcore.generated-sql", "efcore.projection"],
+          "critical": true,
+          "promptMarkdown": "Read this LINQ and the SQL it generated.\n\n```csharp\nvar names = (await db.Customers.ToListAsync())\n    .Where(c => c.Region == \"north\")\n    .Select(c => c.Name)\n    .ToList();\n```\n\n```sql\nSELECT c.\"Id\", c.\"Name\", c.\"Region\", c.\"CreatedAt\" FROM \"Customers\" AS c\n```\n\nWhat is wrong?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "client-side",
+                "textMarkdown": "`ToListAsync()` runs first, so the whole table is fetched and both the filter and the projection happen in memory.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The `await ... ToListAsync()` is parenthesised and executes before anything else, so `Where` and `Select` are ordinary LINQ-to-Objects over every customer row."
+              },
+              {
+                "id": "missing-index",
+                "textMarkdown": "There is no index on `Region`, so the filter cannot be pushed down.",
+                "correct": false,
+                "explanationMarkdown": "An index would matter if the filter reached the database at all. Here no WHERE clause was generated, so indexing `Region` changes nothing."
+              },
+              {
+                "id": "needs-notracking",
+                "textMarkdown": "The query tracks entities it never modifies; adding `AsNoTracking()` fixes it.",
+                "correct": false,
+                "explanationMarkdown": "True but minor, and it would not stop the entire table being transferred. The structural bug is that the query executed before the filter was applied."
+              },
+              {
+                "id": "nothing",
+                "textMarkdown": "Nothing — EF Core will translate the `Where` and `Select` on the next execution.",
+                "correct": false,
+                "explanationMarkdown": "There is no next execution. Once results are materialised into a `List`, subsequent LINQ operators run against objects in memory, not against the database."
+              }
+            ]
+          },
+          "explanationMarkdown": "Where the query stops being a query and starts being a list is the single most useful thing to spot when reading EF Core code."
+        },
+        {
+          "id": "v3-a06-i5",
+          "objectiveIds": ["efcore.relationships", "efcore.migrations"],
+          "critical": false,
+          "promptMarkdown": "A team wants to rename `Customers.Region` to `Customers.Territory` with zero downtime, while several application instances are running. Which sequence is safe?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "add-both-drop",
+                "textMarkdown": "Add `Territory` (nullable, backfilled) → deploy code writing both → deploy code using `Territory` only → drop `Region`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Every step is invisible to the version running at the time, and the destructive step happens only after nothing refers to the old column."
+              },
+              {
+                "id": "single-rename",
+                "textMarkdown": "One migration performing `RenameColumn`, deployed together with the new code.",
+                "correct": false,
+                "explanationMarkdown": "The instances still running the old code query `Region` the moment it disappears. 'Deployed together' is not simultaneous — that overlap is the whole problem."
+              },
+              {
+                "id": "drop-first",
+                "textMarkdown": "Drop `Region`, then add `Territory`, then deploy the new code.",
+                "correct": false,
+                "explanationMarkdown": "This loses the data outright and breaks the running version immediately. Dropping is always the last step, never the first."
+              },
+              {
+                "id": "view",
+                "textMarkdown": "Rename the column and add a database view called `Region` so old code keeps working.",
+                "correct": false,
+                "explanationMarkdown": "Inventive, but a view over a table does not make the old code's writes land, and it leaves a permanent compatibility artefact that someone must later remember to remove."
+              }
+            ]
+          },
+          "explanationMarkdown": "Additive before, destructive after. The rule is about which versions of your code are running, not about which framework generated the migration."
+        }
+      ]
+    }
+  ]
+}

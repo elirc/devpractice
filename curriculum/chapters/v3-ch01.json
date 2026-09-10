@@ -1,0 +1,1080 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v3-ch01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "C# fundamentals",
+      "conceptIds": [
+        "dotnet.values-nullability",
+        "dotnet.control-flow",
+        "dotnet.methods",
+        "dotnet.ts-to-csharp"
+      ],
+      "prerequisiteIds": ["ts.types", "ts.nullability", "js.functions"],
+      "bodyMarkdown": "You already know a typed language. That is an advantage and a trap in equal measure, because the two type systems answer different questions.\n\nTypeScript's types describe the shape of values that a JavaScript runtime will handle at run time, and then they vanish. C#'s types describe how memory is laid out and what the machine will actually do, and they are still there at run time — you can ask an object what type it is, and the answer is authoritative. That single difference explains nearly everything that will surprise you in this chapter: why `struct` and `class` behave differently on assignment, why nullable reference types feel weaker than `strictNullChecks` and nullable value types feel stronger, and why two types with identical members are still not interchangeable.\n\nThis chapter is deliberately not a syntax table. Syntax you can look up in an afternoon. What costs you a week of debugging is assuming that a familiar-looking construct means the same thing. So each lesson takes a place where your TypeScript instinct is nearly right, and shows exactly where it stops being right.\n\nThe running example is the same support desk you built in V1 and V2, now being reimplemented on .NET 10. Nothing in this chapter runs in the browser: C# needs the SDK on your machine, so the practice here is reading, predicting and explaining, and the real keyboard time happens in the .NET missions.",
+      "trackId": "v1-track",
+      "lessonIds": ["v3-l01", "v3-l02", "v3-l03"],
+      "assessmentId": "v3-a01",
+      "objectiveIds": [
+        "dotnet.values-nullability",
+        "dotnet.control-flow",
+        "dotnet.methods",
+        "dotnet.ts-to-csharp"
+      ],
+      "missionIds": [],
+      "sortOrder": 20
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Values, references and nullability",
+      "conceptIds": ["dotnet.values-nullability", "dotnet.ts-to-csharp"],
+      "prerequisiteIds": ["ts.nullability"],
+      "bodyMarkdown": "In JavaScript every object is a reference and every primitive is copied, and you rarely have to think about which is which. C# makes you choose, and the choice is part of the type.\n\nA **value type** — `int`, `bool`, `DateTime`, `decimal`, anything declared `struct` — is copied on assignment and when passed to a method. Two variables holding the same value type are two independent pieces of data. A **reference type** — anything declared `class`, plus `string` and arrays — copies only the reference, so two variables point at one object and a change through either is visible through both.\n\nThe practical consequence bites when a value type contains mutable-looking state. Assign a `struct` to a new variable, change a field on the copy, and the original is untouched. Do the same with a `class` and the original changes. Neither is wrong; picking the wrong one produces a bug that looks like magic.\n\nNullability then splits along the same seam, and this is where TypeScript intuition misleads most.\n\n**Nullable value types** are a real, run-time construct. `int?` is `Nullable<int>` — a distinct type with `HasValue` and `Value`. The compiler will not let you use it as an `int` without dealing with the absent case, and that guarantee holds at run time.\n\n**Nullable reference types** are the opposite: an analysis feature, not a run-time one. In a project with nullable enabled, `string` means \"I intend this never to be null\" and `string?` means \"this may be null\". The compiler warns when you break the intent. But the annotation is erased — there is no run-time difference between a `string` and a `string?`, and a value arriving from JSON deserialisation, reflection, or a library compiled without the feature can be null in a variable the compiler swears is not. That is the same lesson as V1's `as Order`: an annotation is a claim, and a claim about data you have not inspected is only as good as the source.\n\nTwo operators are worth committing to memory because they look alike and differ sharply. `?.` returns null instead of throwing. `??` supplies a default only for null. And `!` — the null-forgiving operator — silences the warning without changing a single byte, which makes it the exact C# analogue of a TypeScript non-null assertion and just as dangerous.",
+      "chapterId": "v3-ch01",
+      "sortOrder": 0,
+      "objectives": [
+        "Predict whether a change through one variable is visible through another, given a value type or a reference type.",
+        "Distinguish a nullable value type, which is enforced at run time, from a nullable reference type, which is only analysed at compile time.",
+        "Choose between `?.`, `??` and `!` for a possibly-absent value and say what each does not protect against."
+      ],
+      "estimatedMinutes": 9,
+      "workedExampleMarkdown": "A ticket counter, written twice.\n\n```csharp\npublic struct CountsStruct { public int Open; public int Closed; }\npublic class CountsClass  { public int Open; public int Closed; }\n\nvar a = new CountsStruct { Open = 3, Closed = 1 };\nvar b = a;            // the whole value is copied\nb.Open = 99;\n// a.Open is still 3 — b is a separate piece of data\n\nvar c = new CountsClass { Open = 3, Closed = 1 };\nvar d = c;            // only the reference is copied\nd.Open = 99;\n// c.Open is now 99 — c and d are the same object\n```\n\nNow the nullability half, in a project with nullable reference types enabled:\n\n```csharp\nint? reopenedCount = null;          // a real nullable value type\nint total = reopenedCount + 1;      // will not compile: int? is not int\nint safe = (reopenedCount ?? 0) + 1;// fine, and honest about the absent case\n\nstring? assignee = ticket.Assignee; // may be null, and the compiler knows\nint len = assignee.Length;          // warning: possible null dereference\nint ok  = assignee?.Length ?? 0;    // no warning, and no crash\n\nstring name = LoadFromJson().Name!; // compiles silently; can still be null at run time\n```\n\nThe last line is the one to remember. `!` removes the warning, not the risk. If `LoadFromJson` deserialised a payload with a missing `name`, that variable holds null and the crash arrives at the first use, exactly as it did in V1's `as Order` example.",
+      "commonMistakes": [
+        "Assuming a `struct` behaves like a JavaScript object, so a change made through a copy is expected to be visible through the original.",
+        "Believing nullable reference type annotations are enforced at run time. They are analysis only; a null can arrive from deserialisation, reflection or older libraries.",
+        "Reaching for `!` to clear a warning. It changes the compiler's mind and nothing else — the same failure mode as a TypeScript non-null assertion.",
+        "Using `??` and `||` interchangeably. C# has no `||` fallback for arbitrary values, and `??` substitutes only for null, never for `0` or an empty string."
+      ],
+      "summaryMarkdown": "Value types copy the data; reference types copy the pointer. `int?` is a real run-time type with a real guarantee. `string?` is a compile-time annotation with no run-time existence, so data crossing a boundary still needs a genuine check. `?.` avoids the throw, `??` supplies a default for null only, and `!` supplies nothing but silence.",
+      "exerciseIds": ["v3-e001", "v3-e002", "v3-e003"],
+      "reviewCardIds": ["v3-c001", "v3-c002"],
+      "references": [
+        {
+          "label": "Nullable reference types (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/nullable-references"
+        },
+        {
+          "label": "Value types and reference types (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/builtin-types/value-types"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e001",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a struct copy that discards an update",
+      "conceptIds": ["dotnet.values-nullability", "dotnet.ts-to-csharp"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A counter update that silently does nothing.",
+      "lessonId": "v3-l01",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "Support reports that the queue summary never changes. `Totals` is declared `public struct Totals { public int Open; }`.\n\n```csharp\npublic class QueueSummary\n{\n    private readonly Dictionary<string, Totals> _byQueue = new();\n\n    public void RecordOpened(string queue)\n    {\n        var totals = _byQueue[queue];\n        totals.Open += 1;\n    }\n\n    public int OpenIn(string queue) => _byQueue[queue].Open;\n}\n```\n\nNo exception is thrown and the dictionary already contains every queue. Why does `OpenIn` never grow?",
+      "hints": [
+        "Ask what kind of thing `totals` is, and whether it is connected to what lives inside the dictionary.",
+        "`Totals` is a struct, so reading it out of the dictionary produces a copy of the value rather than a handle on the stored one.",
+        "The increment updates the local copy and the copy is then discarded. Either write the modified value back into the dictionary, or make `Totals` a class so the stored object and the local variable are the same object."
+      ],
+      "solution": {
+        "modelAnswer": "`Totals` is a value type, so `var totals = _byQueue[queue]` copies the stored value into a local. `totals.Open += 1` updates that local copy, which goes out of scope at the end of the method, leaving the dictionary entry untouched. The fix is either to assign the modified copy back (`_byQueue[queue] = totals;`) or to declare `Totals` as a class, in which case the local holds a reference to the same object the dictionary holds.",
+        "explanationMarkdown": "This is the single most common value-type surprise for someone arriving from JavaScript, because the JavaScript version of exactly this code works. There, the dictionary would hold a reference and the mutation would be visible. C# copies the value out, and nothing warns you, because copying a value type is not an error — it is the defining behaviour of the type. Note that the compiler does not even let you write `_byQueue[queue].Open += 1` for a struct value, precisely because that would be modifying a temporary copy; that error message is the language telling you about the same trap in advance."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "struct-copy-discarded",
+            "textMarkdown": "Reading a struct out of the dictionary yields a copy; the increment updates the copy and the copy is discarded, so the stored value never changes.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Assign the modified value back into the dictionary, or model `Totals` as a class so the local and the stored entry are one object."
+          },
+          {
+            "id": "dictionary-not-thread-safe",
+            "textMarkdown": "`Dictionary` is not thread-safe, so concurrent updates are being lost.",
+            "correct": false,
+            "explanationMarkdown": "A plausible worry in a web application, but the update is lost even when a single call runs in isolation. Concurrency would produce intermittent loss, not consistent loss."
+          },
+          {
+            "id": "readonly-field",
+            "textMarkdown": "`_byQueue` is `readonly`, so its contents cannot be modified.",
+            "correct": false,
+            "explanationMarkdown": "`readonly` prevents reassigning the field to a different dictionary. It says nothing about the entries inside, which remain fully mutable."
+          },
+          {
+            "id": "needs-await",
+            "textMarkdown": "`RecordOpened` should be `async` so the write is flushed before `OpenIn` reads.",
+            "correct": false,
+            "explanationMarkdown": "There is no asynchronous work here and nothing to flush. Adding `async` would change nothing about which piece of memory the increment lands on."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.values-nullability",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e002",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Model a field declaration for a possibly-absent value",
+      "conceptIds": ["dotnet.values-nullability", "dotnet.ts-to-csharp"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Decide how a field should be declared, given whether the value can be absent and whether its type is a value type.",
+      "lessonId": "v3-l01",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "You are generating C# field declarations from a schema. The browser cannot run C#, so you are writing the **decision logic** a generator would use, in JavaScript.\n\nImplement `declareField(spec)` returning the C# type string.\n\n`spec` has `{ type, optional, isValueType }`:\n\n- `type` is the base C# type name, for example `\"int\"`, `\"string\"`, `\"DateTime\"`.\n- `optional` is `true` when the value can legitimately be absent.\n- `isValueType` is `true` for types like `int` and `DateTime`, `false` for `string` and class types.\n\nRules:\n\n- Not optional: return the base type unchanged.\n- Optional: append `?`.\n\nThat much is uniform. The reason it matters differs by kind, and one extra rule captures it: when a value type is optional the declaration is genuinely enforced at run time, so also return the base type unchanged if `type` is already suffixed with `?` (the schema sometimes pre-annotates). Never produce a double `??`.\n\nDo not modify the input object.",
+      "hints": [
+        "Start with the two straightforward branches, then think about what makes the third one necessary.",
+        "Guard against a base type that already ends in `?` before you append anything, or a pre-annotated schema entry will produce `string??`.",
+        "Check `spec.type.endsWith('?')` first and return it as-is; otherwise append `?` only when `spec.optional` is true, and return `spec.type` unchanged when it is not."
+      ],
+      "solution": {
+        "code": "function declareField(spec) {\n  if (spec.type.endsWith('?')) {\n    return spec.type;\n  }\n  if (spec.optional === true) {\n    return spec.type + '?';\n  }\n  return spec.type;\n}",
+        "explanationMarkdown": "The shape of the answer is deliberately the same for both kinds, because the C# *syntax* is the same — and that is exactly the trap this exercise is built around. `int?` and `string?` look identical and mean quite different things: `int?` is `Nullable<int>`, a distinct type the run time knows about, while `string?` is an annotation the compiler uses for analysis and then discards. Writing the generator makes the syntactic uniformity concrete, so that when the run-time behaviour diverges you attribute it to the type system rather than to the punctuation. The already-suffixed guard exists because generators are run over schemas more than once, and `string??` is not valid C#."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "declareField",
+        "starterCode": "function declareField(spec) {\n  // Appends unconditionally, and ignores a type that is already annotated.\n  return spec.type + '?';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "required-value-type",
+            "args": [{ "type": "int", "optional": false, "isValueType": true }],
+            "expected": "int",
+            "hidden": false
+          },
+          {
+            "id": "optional-value-type",
+            "args": [{ "type": "int", "optional": true, "isValueType": true }],
+            "expected": "int?",
+            "hidden": false
+          },
+          {
+            "id": "required-reference-type",
+            "args": [{ "type": "string", "optional": false, "isValueType": false }],
+            "expected": "string",
+            "hidden": false
+          },
+          {
+            "id": "optional-reference-type",
+            "args": [{ "type": "string", "optional": true, "isValueType": false }],
+            "expected": "string?",
+            "hidden": false
+          },
+          {
+            "id": "already-annotated-is-left-alone",
+            "args": [{ "type": "DateTime?", "optional": true, "isValueType": true }],
+            "expected": "DateTime?",
+            "hidden": false
+          },
+          {
+            "id": "already-annotated-but-marked-required",
+            "args": [{ "type": "string?", "optional": false, "isValueType": false }],
+            "expected": "string?",
+            "hidden": true
+          },
+          {
+            "id": "optional-class-type",
+            "args": [{ "type": "Ticket", "optional": true, "isValueType": false }],
+            "expected": "Ticket?",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.values-nullability",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e003",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain what a nullable annotation does not promise",
+      "conceptIds": ["dotnet.values-nullability", "dotnet.ts-to-csharp"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written answer, self-assessed against explicit criteria.",
+      "lessonId": "v3-l01",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "A colleague turns on nullable reference types across the support desk service and says: \"good, now a `string` can never be null, so we can delete the null checks at the API boundary.\"\n\nIn a few sentences, explain why that conclusion is wrong, what the feature actually gives them, and what should happen at the boundary instead. Say explicitly how `int?` differs from `string?` in this respect.",
+        "hints": [
+        "Separate two questions: what the compiler checks while building, and what exists while the program runs.",
+        "Ask where a value can enter the process without passing through any C# the compiler analysed — deserialisation and reflection are the usual doors.",
+        "Contrast the two kinds directly: `int?` is `Nullable<int>`, a distinct run-time type, whereas `string?` is metadata the compiler uses for warnings and then erases."
+      ],
+      "solution": {
+        "modelAnswer": "Nullable reference types are a static analysis feature. The compiler tracks intent and warns when code dereferences something that might be null, which is genuinely valuable — it moves a class of crash into the build. But the annotation has no run-time existence: `string` and `string?` compile to the same thing, and nothing checks a value on the way in. Any value that arrives without passing through analysed C# can be null anyway — JSON deserialisation of a payload missing the field, reflection, a library compiled without the feature, or a `!` somewhere upstream. `int?` is different in kind: it is `Nullable<int>`, a real type with `HasValue`, so the absent case cannot be ignored at run time. So the boundary keeps its validation: deserialise, then check the required fields explicitly (or use a validation attribute or schema) and reject the request with a clear error before the value reaches business logic.",
+        "explanationMarkdown": "The point of this exercise is to transfer a V1 lesson rather than learn a new one. V1 chapter 5 established that a TypeScript annotation is erased and an `as` assertion checks nothing, which is why HTTP input needs runtime validation. C# reaches the same conclusion by a different route for reference types, while offering a genuinely stronger guarantee for value types. Recognising which of the two you are holding is what tells you whether the compiler's promise survives to run time."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that nullable reference type annotations are compile-time analysis and are erased, so they impose no run-time check.",
+          "Names at least one realistic way a null arrives despite the annotation — deserialisation of a missing field, reflection, an unannotated library, or an upstream `!`.",
+          "Contrasts this with `int?` / `Nullable<int>`, which is a real run-time type whose absent case cannot be silently ignored.",
+          "Concludes that boundary validation stays, and describes it concretely rather than as a slogan.",
+          "Acknowledges what the feature does buy — warnings that surface unhandled absence during the build."
+        ],
+        "modelAnswerMarkdown": "See the model answer: the feature is analysis, not enforcement, for reference types; `int?` is enforcement; therefore untrusted input still gets an explicit check at the boundary."
+      },
+      "primaryConceptId": "dotnet.ts-to-csharp",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c001",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "int? against string?",
+      "conceptIds": ["dotnet.values-nullability"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the difference in kind between the two nullable annotations.",
+      "lessonId": "v3-l01",
+      "type": "recall",
+      "promptMarkdown": "In C#, how does `int?` differ from `string?` — not in syntax, but in what exists at run time?",
+      "answerMarkdown": "`int?` is `Nullable<int>`: a distinct value type with `HasValue` and `Value`, present and enforced at run time. `string?` is a compile-time annotation only — it produces warnings during the build and is erased, so a `string` variable can still hold null at run time if the value came from deserialisation, reflection, an unannotated library, or a `!`.",
+      "explanationMarkdown": "The identical `?` hides a real difference in kind. Value-type nullability is a run-time construct with a guarantee; reference-type nullability is advice the compiler gives you and then forgets. This is why a typed boundary still needs a real check.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.values-nullability"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c002",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Where the copy lands",
+      "conceptIds": ["dotnet.values-nullability", "dotnet.ts-to-csharp"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the value/reference distinction to a change made through a second variable.",
+      "lessonId": "v3-l01",
+      "type": "transfer",
+      "promptMarkdown": "`Totals` is a struct with a field `Open`. You write `var b = a; b.Open = 99;`. What is `a.Open`, and what would it be if `Totals` were declared a class instead?",
+      "answerMarkdown": "As a struct, `a.Open` is unchanged — the assignment copied the whole value, so `b` is independent data. As a class, `a.Open` is `99`, because the assignment copied only the reference and both variables name the same object.",
+      "explanationMarkdown": "Same code, opposite outcome, decided entirely by one keyword in a declaration you may not have written. When an update seems to vanish, checking whether the type is a struct is a fast and frequently correct first guess.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.values-nullability"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Control flow and methods",
+      "conceptIds": ["dotnet.control-flow", "dotnet.methods"],
+      "prerequisiteIds": ["js.branching"],
+      "bodyMarkdown": "C# control flow will look familiar for about five minutes, and then you will meet the parts that have no JavaScript equivalent.\n\n`switch` is the first. C# has both a switch *statement* and a switch *expression*, and the expression form is the one you will reach for in modern code. It produces a value, it uses `=>` for each arm, and — this is the important part — the compiler warns when the arms do not cover every possibility of an enum. That is the same exhaustiveness safety net you built by hand in TypeScript with a `never` check, except here it comes free.\n\nPattern matching then makes those arms far more expressive than a value comparison. You can match on type (`is Ticket t`), on a property (`{ Status: TicketStatus.Open }`), on a relation (`> 100`), and combine them with `and`, `or` and `not`. A well-written switch expression over patterns replaces a stack of nested `if`s and, unlike the `if` stack, tells you when you have missed a case.\n\nMethods differ from JavaScript functions in ways that matter for API design. They are **overloaded** by parameter list, so one name can have several signatures and the compiler picks based on the arguments — there is no `arguments` object and no runtime type sniffing. Parameters can have **defaults** and callers can pass them **by name**, which is how you keep a call readable when it takes three booleans. And `out` parameters let a method return a second value alongside its result; the `TryParse` pattern you will meet everywhere in .NET uses exactly this — a `bool` for whether it worked and an `out` for the value — because it avoids throwing for input that is merely invalid.\n\nOne more distinction worth internalising early: an **expression-bodied member** (`public int Total => _open + _closed;`) is a method or property that computes a value each time it is read, not a stored field. Confusing the two produces performance surprises rather than wrong answers, but they are hard to spot later.",
+      "chapterId": "v3-ch01",
+      "sortOrder": 1,
+      "objectives": [
+        "Read a switch expression with patterns and predict which arm a given value takes.",
+        "Explain why exhaustiveness over an enum is checked by the compiler, and what happens when a new enum member is added.",
+        "Choose between an exception and the `Try` pattern for input that may legitimately be invalid."
+      ],
+      "estimatedMinutes": 9,
+      "workedExampleMarkdown": "Priority for a support ticket, as a switch expression over patterns.\n\n```csharp\npublic enum TicketStatus { Open, Waiting, Closed }\n\npublic static string Priority(Ticket ticket) => ticket switch\n{\n    { Status: TicketStatus.Closed }                 => \"none\",\n    { IsVip: true, AgeHours: > 4 }                  => \"critical\",\n    { IsVip: true }                                 => \"high\",\n    { AgeHours: > 48 }                              => \"high\",\n    { Status: TicketStatus.Waiting }                => \"low\",\n    _                                               => \"normal\",\n};\n```\n\nArms are tested top to bottom and the first match wins, so ordering is part of the logic: moving `{ IsVip: true }` above `{ IsVip: true, AgeHours: > 4 }` would make the critical arm unreachable, and the compiler will tell you so.\n\nAnd the `Try` pattern, for input that is invalid rather than exceptional:\n\n```csharp\nif (int.TryParse(request.Limit, out int limit) && limit is > 0 and <= 100)\n{\n    return Page(limit);\n}\nreturn BadRequest(\"limit must be a whole number between 1 and 100\");\n```\n\n`int.Parse` would throw on `\"abc\"`. A user typing `abc` into a query string is not an exceptional condition — it is Tuesday — so the version that returns a boolean is both faster and more honest about what happened.",
+      "commonMistakes": [
+        "Ordering switch arms from general to specific, which makes the specific arms unreachable. The compiler reports this, but only if you read the warning.",
+        "Using `Parse` on user input and catching the exception, when `TryParse` expresses the same logic without using exceptions for ordinary control flow.",
+        "Assuming `switch` on a non-enum type is exhaustively checked. Without a discard arm, a switch expression that matches nothing throws at run time.",
+        "Treating an expression-bodied property as though it were a stored field, so an expensive computation runs on every read."
+      ],
+      "summaryMarkdown": "Switch expressions produce values, match on patterns, and are checked for exhaustiveness over enums — the safety net you hand-rolled with `never` in TypeScript. Arms are ordered and the first match wins. Methods support overloads, default and named arguments, and `out` parameters; the `Try` pattern uses the last of these to handle invalid input without exceptions.",
+      "exerciseIds": ["v3-e004", "v3-e005", "v3-e006"],
+      "reviewCardIds": ["v3-c003", "v3-c004"],
+      "references": [
+        {
+          "label": "Pattern matching (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/functional/pattern-matching"
+        },
+        {
+          "label": "switch expression (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/switch-expression"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e004",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Predict the arm a switch expression takes",
+      "conceptIds": ["dotnet.control-flow"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Trace ordered pattern arms against one input.",
+      "lessonId": "v3-l02",
+      "sortOrder": 0,
+      "type": "predict-output",
+      "difficulty": "foundation",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "Given the `Priority` switch expression from this lesson:\n\n```csharp\npublic static string Priority(Ticket ticket) => ticket switch\n{\n    { Status: TicketStatus.Closed }  => \"none\",\n    { IsVip: true, AgeHours: > 4 }   => \"critical\",\n    { IsVip: true }                  => \"high\",\n    { AgeHours: > 48 }               => \"high\",\n    { Status: TicketStatus.Waiting } => \"low\",\n    _                                => \"normal\",\n};\n```\n\nWhat is printed by:\n\n```csharp\nConsole.WriteLine(Priority(new Ticket {\n    Status = TicketStatus.Waiting, IsVip = true, AgeHours = 2\n}));\n```\n\nType the exact output.",
+      "hints": [
+        "Arms are tested in the order written, and the first one that matches wins — later arms are never consulted.",
+        "Check each arm against all three properties: status is Waiting, IsVip is true, AgeHours is 2.",
+        "The Closed arm does not match, and the critical arm needs AgeHours above 4, so the third arm — `{ IsVip: true }` — is the first that matches."
+      ],
+      "solution": {
+        "modelAnswer": "high",
+        "explanationMarkdown": "The ticket is Waiting, which might draw the eye to the `low` arm, but that arm sits below `{ IsVip: true }` and is never reached. The critical arm is skipped because `AgeHours` is 2, not above 4. This is why arm order is part of the logic rather than a matter of style: a reader who scans for the arm that best describes the ticket will get the wrong answer, because the language takes the first that matches, not the most specific."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": { "trim": true, "collapseWhitespace": true, "caseSensitive": true },
+        "expected": "high",
+        "acceptedAlternatives": ["\"high\""]
+      },
+      "primaryConceptId": "dotnet.control-flow",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e005",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Implement first-match-wins arm selection",
+      "conceptIds": ["dotnet.control-flow", "dotnet.methods"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Model the ordered-arm evaluation a switch expression performs.",
+      "lessonId": "v3-l02",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "C# does not run in the browser, so you are implementing the **selection rule** a switch expression follows, over plain data.\n\nImplement `selectArm(arms, ticket)`.\n\n`arms` is an array of `{ result, match }` in source order. `match` is an object of property requirements; a ticket matches an arm when **every** key in `match` is satisfied:\n\n- a plain value must equal the ticket's value exactly\n- `{ greaterThan: n }` requires the ticket's value to be strictly greater than `n`\n- an empty `match` object matches anything (the discard arm `_`)\n\nReturn the `result` of the **first** arm that matches. If nothing matches, return `\"unmatched\"`.\n\nDo not modify the inputs.",
+      "hints": [
+        "The order of `arms` is the logic — walk it from the start and stop at the first success rather than collecting all matches.",
+        "For each arm, every key in its `match` must hold; a single failing key rules the arm out.",
+        "For each key, decide whether the requirement is a `greaterThan` object or a plain value, then compare accordingly; an arm whose `match` has no keys satisfies this vacuously and matches everything."
+      ],
+      "solution": {
+        "code": "function selectArm(arms, ticket) {\n  for (const arm of arms) {\n    const keys = Object.keys(arm.match);\n    let matched = true;\n    for (const key of keys) {\n      const requirement = arm.match[key];\n      const actual = ticket[key];\n      if (requirement !== null && typeof requirement === 'object') {\n        if (!(actual > requirement.greaterThan)) {\n          matched = false;\n        }\n      } else if (actual !== requirement) {\n        matched = false;\n      }\n    }\n    if (matched) {\n      return arm.result;\n    }\n  }\n  return 'unmatched';\n}",
+        "explanationMarkdown": "Two properties of the real language fall out of this implementation. First, returning inside the loop is what makes arm order meaningful — a later, more specific arm can never win. Second, an arm with no requirements matches everything, which is precisely why a discard arm must be written last and why the compiler flags any arm placed after it as unreachable. Writing the selector makes both facts mechanical rather than memorised, and the `unmatched` fallback stands in for the run-time exception a non-exhaustive switch expression throws when nothing matches."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "selectArm",
+        "starterCode": "function selectArm(arms, ticket) {\n  // Ignores ordering and returns the last matching arm.\n  let found = 'unmatched';\n  for (const arm of arms) {\n    if (Object.keys(arm.match).length === 0) {\n      found = arm.result;\n    }\n  }\n  return found;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "first-match-wins-over-later-specific",
+            "args": [
+              [
+                { "result": "high", "match": { "isVip": true } },
+                { "result": "critical", "match": { "isVip": true, "ageHours": { "greaterThan": 4 } } },
+                { "result": "normal", "match": {} }
+              ],
+              { "isVip": true, "ageHours": 10, "status": "open" }
+            ],
+            "expected": "high",
+            "hidden": false
+          },
+          {
+            "id": "specific-arm-first-wins",
+            "args": [
+              [
+                { "result": "critical", "match": { "isVip": true, "ageHours": { "greaterThan": 4 } } },
+                { "result": "high", "match": { "isVip": true } },
+                { "result": "normal", "match": {} }
+              ],
+              { "isVip": true, "ageHours": 10, "status": "open" }
+            ],
+            "expected": "critical",
+            "hidden": false
+          },
+          {
+            "id": "greater-than-is-strict",
+            "args": [
+              [
+                { "result": "critical", "match": { "ageHours": { "greaterThan": 4 } } },
+                { "result": "normal", "match": {} }
+              ],
+              { "isVip": false, "ageHours": 4, "status": "open" }
+            ],
+            "expected": "normal",
+            "hidden": false
+          },
+          {
+            "id": "no-arm-matches",
+            "args": [
+              [{ "result": "closed", "match": { "status": "closed" } }],
+              { "isVip": false, "ageHours": 1, "status": "open" }
+            ],
+            "expected": "unmatched",
+            "hidden": false
+          },
+          {
+            "id": "exact-value-comparison",
+            "args": [
+              [
+                { "result": "none", "match": { "status": "closed" } },
+                { "result": "low", "match": { "status": "waiting" } },
+                { "result": "normal", "match": {} }
+              ],
+              { "isVip": false, "ageHours": 1, "status": "waiting" }
+            ],
+            "expected": "low",
+            "hidden": false
+          },
+          {
+            "id": "discard-arm-matches-anything",
+            "args": [
+              [{ "result": "fallback", "match": {} }],
+              { "isVip": false, "ageHours": 0, "status": "open" }
+            ],
+            "expected": "fallback",
+            "hidden": true
+          },
+          {
+            "id": "all-requirements-must-hold",
+            "args": [
+              [
+                { "result": "critical", "match": { "isVip": true, "ageHours": { "greaterThan": 4 } } },
+                { "result": "normal", "match": {} }
+              ],
+              { "isVip": false, "ageHours": 99, "status": "open" }
+            ],
+            "expected": "normal",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.control-flow",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e006",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a parse that throws on ordinary input",
+      "conceptIds": ["dotnet.methods", "dotnet.control-flow"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Judge an exception used for input that is merely invalid.",
+      "lessonId": "v3-l02",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "This handler reads a page size from the query string.\n\n```csharp\npublic IActionResult List(string limit)\n{\n    try\n    {\n        int parsed = int.Parse(limit);\n        return Ok(Page(parsed));\n    }\n    catch (FormatException)\n    {\n        return BadRequest(\"invalid limit\");\n    }\n}\n```\n\nIt returns the right status codes. What is the strongest argument for rewriting it with `int.TryParse`?",
+      "hints": [
+        "The behaviour is already correct, so look for an argument that is not about correctness.",
+        "Consider how often this path runs in production and what the run time does when an exception is thrown and caught.",
+        "Also consider what the code fails to handle: `limit` being null, and a value that parses but is out of range, neither of which raises `FormatException`."
+      ],
+      "solution": {
+        "modelAnswer": "Invalid input from a query string is an ordinary, expected condition, not an exceptional one. `TryParse` expresses it as a boolean result, avoids the cost of throwing and unwinding on a hot path, and — most importantly — makes the other failure modes visible: a null `limit` raises `ArgumentNullException` rather than `FormatException` and escapes this handler entirely, and a value like `\"999999\"` parses successfully but is still not an acceptable page size. A single `if (int.TryParse(limit, out var parsed) && parsed is > 0 and <= 100)` handles all three cases in one place.",
+        "explanationMarkdown": "The catch block is the tell. Catching a specific exception in order to convert it into a routine response is a sign that the condition was never exceptional. The .NET library offers the `Try` pattern precisely for values that arrive from outside the program, and using it moves the validation into a single expression where the missing cases become obvious. Notice that the argument is only partly about performance: the version that throws is also silently incomplete, and that is the more serious defect."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "ordinary-condition-and-missing-cases",
+            "textMarkdown": "Invalid query input is an expected condition rather than an exceptional one, and the exception-based version silently misses null input and out-of-range values that parse successfully.",
+            "correct": true,
+            "explanationMarkdown": "Correct. `TryParse` combined with a range check handles all three cases in one expression, without using exceptions for ordinary control flow."
+          },
+          {
+            "id": "parse-is-deprecated",
+            "textMarkdown": "`int.Parse` is deprecated in modern .NET and will be removed.",
+            "correct": false,
+            "explanationMarkdown": "It is not deprecated. `Parse` is the right choice when a failure genuinely indicates a bug — parsing a value your own code wrote, for example."
+          },
+          {
+            "id": "try-catch-cannot-return",
+            "textMarkdown": "You cannot return a value from inside a `try` block, so the code will not compile.",
+            "correct": false,
+            "explanationMarkdown": "Returning from inside a `try` is perfectly legal C#. The code compiles and behaves as written."
+          },
+          {
+            "id": "catch-hides-all-errors",
+            "textMarkdown": "The catch block swallows every exception, hiding real failures inside `Page`.",
+            "correct": false,
+            "explanationMarkdown": "Close, but it catches only `FormatException`. A failure inside `Page` would propagate normally — the problem is the exceptions it does *not* catch, such as the `ArgumentNullException` from a null `limit`."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.methods",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c003",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Arm order in a switch expression",
+      "conceptIds": ["dotnet.control-flow"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall how a switch expression chooses among matching arms.",
+      "lessonId": "v3-l02",
+      "type": "recall",
+      "promptMarkdown": "When two arms of a switch expression both match a value, which one runs — and what does the compiler do about an arm that can never be reached?",
+      "answerMarkdown": "The first matching arm in source order runs; specificity is irrelevant. An arm that can never match because an earlier arm subsumes it is reported by the compiler as unreachable, and a discard arm (`_`) placed anywhere but last makes every following arm unreachable.",
+      "explanationMarkdown": "First-match-wins means the ordering is part of the logic rather than presentation. Reading arms as a set of rules and picking the one that best describes the value is the usual way to misread this code.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.control-flow"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c004",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choosing Try over Parse",
+      "conceptIds": ["dotnet.methods"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Decide which parsing style fits a given source of input.",
+      "lessonId": "v3-l02",
+      "type": "transfer",
+      "promptMarkdown": "You are reading a number from (a) an HTTP query string and (b) a configuration constant your own build wrote. Which of `Parse` and `TryParse` fits each, and why?",
+      "answerMarkdown": "The query string gets `TryParse`: invalid input is expected there, so a boolean result plus a range check is the honest expression of it. The build-written constant gets `Parse`: if that fails, something is genuinely broken and an exception is the correct, loud outcome — silently defaulting would hide the fault.",
+      "explanationMarkdown": "The question is never which method is better, but whether failure means \"a person typed something odd\" or \"an invariant of my own system is broken\". Exceptions suit the second.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.methods"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Where TypeScript intuition breaks",
+      "conceptIds": ["dotnet.ts-to-csharp", "dotnet.methods"],
+      "prerequisiteIds": ["ts.structural-typing", "ts.types"],
+      "bodyMarkdown": "This lesson collects the differences that cause real defects, as opposed to the ones that merely look unfamiliar.\n\n**Nominal, not structural.** In TypeScript, two types with the same members are the same type — a `{ id: string }` fits anywhere a `Ticket` with only an `id` is wanted. C# is nominal: a type is compatible with another only if it is declared to be, by inheriting from it or implementing an interface. Two records with identical members are unrelated types, and no amount of shape-matching will convert one to the other. This is why C# codebases carry explicit mapping code between layers where a TypeScript codebase often passes the object straight through.\n\n**The type survives.** `is`, `as` and `GetType()` interrogate a real run-time type. TypeScript's `as` is an assertion that checks nothing; C#'s `as` performs a genuine run-time conversion and yields null when the object is not of that type. Same keyword, opposite trustworthiness — worth pausing on, because it is the single most misleading similarity between the two languages.\n\n**Equality is opt-in.** `==` on a class compares references by default, so two separately constructed objects with identical contents are not equal. `record` types change this to value-based equality, and `string` overloads `==` to compare contents. Assuming JavaScript's `===` semantics transfers will produce a comparison that is always false and a test that mysteriously never passes.\n\n**Integer division truncates.** `7 / 2` is `3`, because both operands are `int`. In JavaScript that expression is `3.5`. To get a fractional result you must make one side non-integral: `7 / 2.0`, or a cast. This is a favourite source of quietly wrong money and percentage calculations.\n\n**Overloading replaces union parameters.** Where TypeScript would take `string | number` and branch on `typeof`, C# declares two methods with the same name and lets the compiler choose. There is no run-time argument inspection, and no `arguments` object.\n\n**Extension methods** let you add a method to a type you do not own, resolved at compile time from the `using` directives in scope. This is how LINQ appears to add dozens of methods to every collection, and it is worth understanding before the next chapter, where it will look like magic otherwise.",
+      "chapterId": "v3-ch01",
+      "sortOrder": 2,
+      "objectives": [
+        "Predict whether two structurally identical C# types are interchangeable, and say why.",
+        "Distinguish C#'s `as` and `is`, which inspect a real run-time type, from TypeScript's `as`, which checks nothing.",
+        "Recognise integer division and default reference equality as sources of quietly wrong results."
+      ],
+      "estimatedMinutes": 10,
+      "workedExampleMarkdown": "Four small differences, each shown against its TypeScript counterpart.\n\n```csharp\n// 1. Nominal typing — these are unrelated types.\npublic record TicketDto(string Id, string Subject);\npublic record TicketRow(string Id, string Subject);\n\nTicketDto dto = row;          // does not compile, despite identical members\nTicketDto ok = new TicketDto(row.Id, row.Subject);  // explicit mapping required\n\n// 2. as performs a real conversion, not an assertion.\nobject payload = LoadPayload();\nTicket? ticket = payload as Ticket;   // null when it is not a Ticket\nif (payload is Ticket t) { Use(t); }  // test and bind in one step\n\n// 3. Equality is decided by the type, not by the operator.\nvar a = new TicketRow(\"t-1\", \"Printer\");\nvar b = new TicketRow(\"t-1\", \"Printer\");\nbool same = a == b;                   // true: records compare by value\n\npublic class Plain { public string Id = \"t-1\"; }\nbool alsoSame = new Plain() == new Plain();  // false: reference comparison\n\n// 4. Integer division truncates.\nint pct = 7 / 2;        // 3\ndouble real = 7 / 2.0;  // 3.5\n```\n\nThe first item explains a shape you will see constantly in .NET services: explicit mapping between a database row, a domain object and a response DTO. In TypeScript that mapping is often skipped because the shapes are compatible by definition. In C# the compiler requires it, which costs a few lines and buys a boundary that cannot drift silently.",
+      "commonMistakes": [
+        "Expecting two identically-shaped types to be assignable to one another. C# is nominal; the declaration decides compatibility, not the members.",
+        "Reading C#'s `as` as TypeScript's `as`. C#'s performs a checked conversion and yields null on failure; TypeScript's inspects nothing at all.",
+        "Comparing two class instances with `==` and expecting content comparison. Use a `record`, or override equality deliberately.",
+        "Writing `total / count` with two ints and wondering where the decimals went."
+      ],
+      "summaryMarkdown": "C# types are nominal and survive to run time, so `is` and `as` are real checks and identical shapes are still different types. Equality compares references unless the type says otherwise, and `record` is the usual way to say otherwise. Integer division truncates. Overloads replace union parameters, and extension methods explain how LINQ appears in the next chapter.",
+      "exerciseIds": ["v3-e007", "v3-e008", "v3-e009"],
+      "reviewCardIds": ["v3-c005", "v3-c006"],
+      "references": [
+        {
+          "label": "Type-testing and cast operators (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/type-testing-and-cast"
+        },
+        {
+          "label": "Equality comparisons (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/statements-expressions-operators/equality-comparisons"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e007",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Fix a comparison that is always false",
+      "conceptIds": ["dotnet.ts-to-csharp"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A deduplication check that never finds a duplicate.",
+      "lessonId": "v3-l03",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "This guard is supposed to stop the same customer being added twice, but duplicates keep appearing.\n\n```csharp\npublic class Customer\n{\n    public string Email { get; init; } = \"\";\n    public string Name  { get; init; } = \"\";\n}\n\nbool AlreadyPresent(List<Customer> existing, Customer candidate)\n{\n    foreach (var c in existing)\n    {\n        if (c == candidate) return true;\n    }\n    return false;\n}\n```\n\n`candidate` is constructed fresh from the request body each time. Why does the guard never fire?",
+      "hints": [
+        "Ask what `==` means for this particular type, rather than what you would like it to mean.",
+        "`Customer` is a class, and a class compares by reference unless it says otherwise — two separately constructed objects are never the same reference.",
+        "Either declare `Customer` as a `record`, which gives value-based equality across all members, or compare the field that actually identifies a customer, such as `c.Email == candidate.Email`."
+      ],
+      "solution": {
+        "modelAnswer": "`Customer` is a class, so `==` compares object references. `candidate` is a newly constructed object, so it is never reference-equal to anything already in the list, no matter how identical the contents. Either make `Customer` a `record` — which generates value-based equality over its members — or compare the identifying field explicitly, for example `c.Email == candidate.Email`. Choosing between them is a modelling decision: value equality over every member is right for a data-carrying type, while email-only comparison expresses the actual business identity.",
+        "explanationMarkdown": "This one bites hardest coming from JavaScript, where object comparison is also by reference but where you would probably have compared `c.email === candidate.email` out of habit rather than compared whole objects. The trap in C# is that comparing whole objects *looks* like it should work, especially once you have seen `record` types elsewhere in the codebase behaving exactly that way. `string` also overloads `==` to compare contents, which reinforces the wrong intuition. The rule worth carrying: for `==`, the type decides, not the operator."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "reference-equality-on-class",
+            "textMarkdown": "`Customer` is a class, so `==` compares references; a freshly constructed candidate is never the same reference as a stored one.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Use a `record` for value-based equality, or compare the identifying field explicitly."
+          },
+          {
+            "id": "init-properties-break-equality",
+            "textMarkdown": "`init` properties cannot be compared, so `==` always returns false for this type.",
+            "correct": false,
+            "explanationMarkdown": "`init` controls when a property may be set, not how instances compare. A record with `init` properties compares by value perfectly well."
+          },
+          {
+            "id": "list-needs-contains",
+            "textMarkdown": "Iterating a `List` cannot detect duplicates; only `Contains` performs a correct comparison.",
+            "correct": false,
+            "explanationMarkdown": "`Contains` uses the same equality this loop does, so it would fail in exactly the same way. Changing the container does not change what `==` means."
+          },
+          {
+            "id": "strings-compare-by-reference",
+            "textMarkdown": "The `Email` strings are compared by reference, so identical text still compares unequal.",
+            "correct": false,
+            "explanationMarkdown": "`string` overloads `==` to compare contents, so string comparison would work. The problem is at the level of the `Customer` objects, which are never compared field by field at all."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.ts-to-csharp",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e008",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Decide whether one type is assignable to another",
+      "conceptIds": ["dotnet.ts-to-csharp"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Implement the nominal assignability rule and contrast it with the structural one.",
+      "lessonId": "v3-l03",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "TypeScript decides assignability by comparing members. C# decides it by consulting declarations. Implement the C# rule so the difference is explicit.\n\nImplement `isAssignable(types, sourceName, targetName)`.\n\n`types` maps a type name to `{ members, implements }`:\n\n- `members` is an array of member names — used ONLY to show that shape is irrelevant here.\n- `implements` is an array of type names this type is declared to be compatible with (a base type or an interface).\n\nReturn `true` when a value of `sourceName` may be assigned to a variable of `targetName` under nominal rules:\n\n- a type is assignable to itself\n- a type is assignable to anything in its `implements` list, directly or transitively\n\nOtherwise return `false` — even when the two types have identical members. Return `false` if either name is missing from `types`.\n\nDo not modify the input.",
+      "hints": [
+        "Identical `members` arrays must not influence the answer at all — that is the whole point of the exercise.",
+        "`implements` can chain, so a type may reach its target through an intermediate type; walk the chain rather than checking one level.",
+        "Do a breadth-first or depth-first walk from the source over `implements`, marking visited names so a cycle cannot loop forever, and return true if you ever reach the target."
+      ],
+      "solution": {
+        "code": "function isAssignable(types, sourceName, targetName) {\n  if (!types[sourceName] || !types[targetName]) {\n    return false;\n  }\n  const seen = {};\n  const queue = [sourceName];\n  while (queue.length > 0) {\n    const current = queue.shift();\n    if (current === targetName) {\n      return true;\n    }\n    if (seen[current]) {\n      continue;\n    }\n    seen[current] = true;\n    const entry = types[current];\n    if (entry) {\n      for (const next of entry.implements) {\n        queue.push(next);\n      }\n    }\n  }\n  return false;\n}",
+        "explanationMarkdown": "The implementation never reads `members`, and that omission is the lesson. A structural checker would compare member lists and answer `true` for two identically-shaped types; the nominal checker walks declarations and answers `false`. Transitivity matters because a type reaches an interface through its base class as often as directly. The visited set is not decoration — declaration graphs are user-written and a malformed one can contain a cycle, which would otherwise hang the check. This rule is why .NET codebases carry explicit mapping between a database row, a domain type and a response DTO: the compiler will not accept the shapes as interchangeable no matter how identical they are."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "isAssignable",
+        "starterCode": "function isAssignable(types, sourceName, targetName) {\n  // Structural rule: compares members, which is the TypeScript answer.\n  const a = types[sourceName];\n  const b = types[targetName];\n  if (!a || !b) {\n    return false;\n  }\n  return JSON.stringify(a.members) === JSON.stringify(b.members);\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "identical-shape-is-not-assignable",
+            "args": [
+              {
+                "TicketDto": { "members": ["Id", "Subject"], "implements": [] },
+                "TicketRow": { "members": ["Id", "Subject"], "implements": [] }
+              },
+              "TicketRow",
+              "TicketDto"
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "declared-interface-is-assignable",
+            "args": [
+              {
+                "ITicket": { "members": ["Id"], "implements": [] },
+                "Ticket": { "members": ["Id", "Subject"], "implements": ["ITicket"] }
+              },
+              "Ticket",
+              "ITicket"
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "transitive-through-base-class",
+            "args": [
+              {
+                "IEntity": { "members": ["Id"], "implements": [] },
+                "EntityBase": { "members": ["Id"], "implements": ["IEntity"] },
+                "Ticket": { "members": ["Id", "Subject"], "implements": ["EntityBase"] }
+              },
+              "Ticket",
+              "IEntity"
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "assignable-to-itself",
+            "args": [
+              { "Ticket": { "members": ["Id"], "implements": [] } },
+              "Ticket",
+              "Ticket"
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "unrelated-types",
+            "args": [
+              {
+                "Ticket": { "members": ["Id"], "implements": [] },
+                "Invoice": { "members": ["Number"], "implements": [] }
+              },
+              "Ticket",
+              "Invoice"
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "unknown-type-name",
+            "args": [
+              { "Ticket": { "members": ["Id"], "implements": [] } },
+              "Ticket",
+              "Missing"
+            ],
+            "expected": false,
+            "hidden": true
+          },
+          {
+            "id": "direction-matters",
+            "args": [
+              {
+                "ITicket": { "members": ["Id"], "implements": [] },
+                "Ticket": { "members": ["Id", "Subject"], "implements": ["ITicket"] }
+              },
+              "ITicket",
+              "Ticket"
+            ],
+            "expected": false,
+            "hidden": true
+          },
+          {
+            "id": "cycle-does-not-hang",
+            "args": [
+              {
+                "A": { "members": ["X"], "implements": ["B"] },
+                "B": { "members": ["X"], "implements": ["A"] },
+                "C": { "members": ["X"], "implements": [] }
+              },
+              "A",
+              "C"
+            ],
+            "expected": false,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.ts-to-csharp",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e009",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Contrast the two meanings of as",
+      "conceptIds": ["dotnet.ts-to-csharp"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written comparison, self-assessed against explicit criteria.",
+      "lessonId": "v3-l03",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "In V1 you learned that `payload as Order` in TypeScript checks nothing, and that a crash can follow far from the assertion.\n\nA teammate writes `var ticket = payload as Ticket;` in C# and says \"same trap as TypeScript, we should avoid it\".\n\nExplain in a few sentences how C#'s `as` actually differs, what it produces when the conversion does not apply, and what a careless use of it still gets wrong. Mention `is` as part of your answer.",
+      "hints": [
+        "The two languages use the same keyword for genuinely different operations — start by naming what each one does at run time.",
+        "C# types survive compilation, so the run time can answer \"is this object really a `Ticket`?\" — and `as` asks exactly that.",
+        "The remaining risk is not a false conversion but an unchecked result: `as` yields null on failure, and ignoring that null just moves the crash to the first dereference."
+      ],
+      "solution": {
+        "modelAnswer": "They are different operations that share a keyword. TypeScript's `as` is a compile-time assertion: no code runs, nothing is inspected, and a wrong claim surfaces later as a crash. C#'s `as` is a real run-time conversion — types still exist at run time, so it can genuinely test the object and, if the conversion does not apply, it produces null rather than throwing. So the teammate is wrong about the mechanism. The residual risk is different: `as` never lies about the type, but it does hand you a null that is easy to ignore, so `ticket.Subject` on the next line throws a `NullReferenceException`. Using `if (payload is Ticket ticket)` tests and binds in one step and leaves no null to forget, which is why it is usually preferred; `as` earns its place when null is a meaningful outcome you intend to handle.",
+        "explanationMarkdown": "This is the most dangerous false friend between the two languages, because the syntax is identical and the trustworthiness is opposite. Getting it right also sets up the rest of the track: because C# types are present at run time, `is`, `as`, `GetType()` and pattern matching are all real inspections, and that is what makes exhaustive pattern matching over a type hierarchy a sound technique rather than a hopeful one."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that TypeScript's `as` is a compile-time assertion that inspects nothing, while C#'s `as` performs a real run-time conversion.",
+          "Explains that this is possible because C# types are present at run time, unlike erased TypeScript annotations.",
+          "Says that C#'s `as` yields null when the conversion does not apply, rather than throwing.",
+          "Identifies the remaining risk as an unchecked null leading to a `NullReferenceException` at the first use.",
+          "Recommends `is` with a pattern for the test-and-bind case, and says when `as` is still appropriate."
+        ],
+        "modelAnswerMarkdown": "See the model answer: different operations sharing a keyword; C#'s is checked and returns null; the risk moves from a false type claim to an ignored null; `is` with a pattern avoids it."
+      },
+      "primaryConceptId": "dotnet.ts-to-csharp",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c005",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Nominal against structural typing",
+      "conceptIds": ["dotnet.ts-to-csharp"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall which language decides compatibility by shape and which by declaration.",
+      "lessonId": "v3-l03",
+      "type": "recall",
+      "promptMarkdown": "Two C# records declare exactly the same members. Can a value of one be assigned to a variable of the other, and how does this differ from TypeScript?",
+      "answerMarkdown": "No. C# is nominally typed: compatibility comes from declarations — inheriting a base type or implementing an interface — not from matching members. TypeScript is structurally typed, so identical shapes are interchangeable there. In C# you write an explicit mapping between the two types.",
+      "explanationMarkdown": "This is why .NET services carry visible mapping code between persistence, domain and transport types. It costs a few lines and buys a boundary that cannot drift without the compiler noticing.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.ts-to-csharp"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c006",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Integer division",
+      "conceptIds": ["dotnet.ts-to-csharp"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply C# numeric rules to a percentage calculation.",
+      "lessonId": "v3-l03",
+      "type": "debugging",
+      "promptMarkdown": "`int resolved = 7; int total = 2;` and a report shows `resolved / total` as `3`. What happened, and what is the smallest correct fix?",
+      "answerMarkdown": "Both operands are `int`, so C# performs integer division and truncates toward zero: `3`, not `3.5`. The smallest fix is to make one side non-integral — `resolved / (double)total`, or `resolved / 2.0` — and to hold the result in a `double` or `decimal`. For money, prefer `decimal`.",
+      "explanationMarkdown": "JavaScript has one number type, so this class of bug does not exist there and the habit of checking operand types never forms. Percentages, averages and per-unit prices are where it usually surfaces, and the wrong answer is plausible enough to survive review.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.ts-to-csharp"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v3-a01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "C# fundamentals placement check",
+      "conceptIds": [
+        "dotnet.values-nullability",
+        "dotnet.control-flow",
+        "dotnet.methods",
+        "dotnet.ts-to-csharp"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items on copy semantics, nullability, pattern arms, method design and the differences from TypeScript. Explanations appear after you submit.",
+      "chapterId": "v3-ch01",
+      "items": [
+        {
+          "id": "v3-a01-i1",
+          "objectiveIds": ["dotnet.values-nullability"],
+          "critical": true,
+          "promptMarkdown": "`public struct Point { public int X; }`. After `var p = new Point { X = 1 }; var q = p; q.X = 5;`, what is `p.X`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "one",
+                "textMarkdown": "`1`",
+                "correct": true,
+                "explanationMarkdown": "Correct. A struct is copied on assignment, so `q` is independent data and `p` is untouched."
+              },
+              {
+                "id": "five",
+                "textMarkdown": "`5`",
+                "correct": false,
+                "explanationMarkdown": "That is the answer for a class, where the assignment copies a reference and both names refer to one object."
+              },
+              {
+                "id": "compile-error",
+                "textMarkdown": "It does not compile — a struct field cannot be assigned after construction.",
+                "correct": false,
+                "explanationMarkdown": "A public field on a struct held in a local variable is freely assignable. The restriction you may be thinking of applies to a struct returned from a property or held in a collection, where the target is a temporary copy."
+              },
+              {
+                "id": "zero",
+                "textMarkdown": "`0`",
+                "correct": false,
+                "explanationMarkdown": "The object initialiser set `X` to 1 before the copy, so the original retains 1."
+              }
+            ]
+          },
+          "explanationMarkdown": "Copy semantics are decided by the declaration, not by how the variable is used. This is the difference that most often makes an update appear to vanish."
+        },
+        {
+          "id": "v3-a01-i2",
+          "objectiveIds": ["dotnet.values-nullability"],
+          "critical": true,
+          "promptMarkdown": "A project has nullable reference types enabled. A method parameter is declared `string subject`. Which statement is true at run time?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "can-still-be-null",
+                "textMarkdown": "`subject` can still be null — the annotation is compile-time analysis and is erased.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Deserialisation, reflection, an unannotated library or an upstream `!` can all supply null, which is why boundaries keep their validation."
+              },
+              {
+                "id": "runtime-throws",
+                "textMarkdown": "The run time throws automatically if null is passed.",
+                "correct": false,
+                "explanationMarkdown": "No check is generated. You can add one explicitly with `ArgumentNullException.ThrowIfNull`, but nothing happens by default."
+              },
+              {
+                "id": "guaranteed-non-null",
+                "textMarkdown": "It is guaranteed non-null, the same way `int?` is guaranteed to be checked.",
+                "correct": false,
+                "explanationMarkdown": "That guarantee belongs to nullable *value* types, which are real run-time types. Reference annotations carry no such guarantee."
+              },
+              {
+                "id": "becomes-string-empty",
+                "textMarkdown": "A null argument is converted to an empty string.",
+                "correct": false,
+                "explanationMarkdown": "No conversion occurs anywhere in the language for this case; the null is passed through unchanged."
+              }
+            ]
+          },
+          "explanationMarkdown": "The value/reference split runs through nullability too: one side is enforced, the other is advisory."
+        },
+        {
+          "id": "v3-a01-i3",
+          "objectiveIds": ["dotnet.control-flow"],
+          "critical": false,
+          "promptMarkdown": "A switch expression has an arm `{ IsVip: true }` placed above `{ IsVip: true, AgeHours: > 4 }`. What does the compiler report?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "unreachable-arm",
+                "textMarkdown": "That the second arm is unreachable, because the earlier arm already matches everything it would match.",
+                "correct": true,
+                "explanationMarkdown": "Correct. First-match-wins means a more specific arm placed after a broader one can never run, and the compiler detects it."
+              },
+              {
+                "id": "no-diagnostic",
+                "textMarkdown": "Nothing — arms are tried most-specific-first, so the order is irrelevant.",
+                "correct": false,
+                "explanationMarkdown": "Arms are tried in source order, not by specificity. Ordering is part of the logic."
+              },
+              {
+                "id": "runtime-exception",
+                "textMarkdown": "Nothing at compile time; a run-time exception is thrown when both arms match.",
+                "correct": false,
+                "explanationMarkdown": "Two matching arms are not an error at run time — the first simply wins. The run-time exception occurs when *no* arm matches."
+              },
+              {
+                "id": "requires-discard",
+                "textMarkdown": "That a discard arm is required before any property pattern may be used.",
+                "correct": false,
+                "explanationMarkdown": "A discard arm is about exhaustiveness, not about permitting property patterns, and it must come last."
+              }
+            ]
+          },
+          "explanationMarkdown": "Unreachable-arm diagnostics are one of the practical benefits of the expression form over a chain of `if` statements."
+        },
+        {
+          "id": "v3-a01-i4",
+          "objectiveIds": ["dotnet.methods"],
+          "critical": false,
+          "promptMarkdown": "Which situation is the better fit for `int.Parse` rather than `int.TryParse`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "own-invariant",
+                "textMarkdown": "Reading a numeric constant that your own build wrote, where a failure means your system is broken.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A failure there is genuinely exceptional, and an exception is the loud, correct outcome rather than a silent default."
+              },
+              {
+                "id": "query-string",
+                "textMarkdown": "Reading a page size from an HTTP query string.",
+                "correct": false,
+                "explanationMarkdown": "Invalid input from a user is expected, not exceptional. `TryParse` plus a range check handles it without throwing."
+              },
+              {
+                "id": "csv-upload",
+                "textMarkdown": "Reading a quantity from a customer-supplied CSV upload.",
+                "correct": false,
+                "explanationMarkdown": "External file content is untrusted by definition, and a malformed row should produce a reported error rather than an exception per row."
+              },
+              {
+                "id": "always-parse",
+                "textMarkdown": "Always — `TryParse` is only for performance-critical code.",
+                "correct": false,
+                "explanationMarkdown": "The choice is about whether failure indicates a broken invariant, not about performance."
+              }
+            ]
+          },
+          "explanationMarkdown": "The deciding question is what a failure means: a person typing something odd, or an invariant of your own system being violated."
+        },
+        {
+          "id": "v3-a01-i5",
+          "objectiveIds": ["dotnet.ts-to-csharp"],
+          "critical": true,
+          "promptMarkdown": "`object payload` holds a `Ticket`. Compare `payload as Ticket` in C# with `payload as Ticket` in TypeScript. Which description is accurate?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "csharp-checked-ts-not",
+                "textMarkdown": "C# performs a real run-time conversion and yields null when it does not apply; TypeScript inspects nothing and simply changes the compiler's view.",
+                "correct": true,
+                "explanationMarkdown": "Correct. C# types survive to run time, so the check is genuine. The residual C# risk is an ignored null, not a false type claim."
+              },
+              {
+                "id": "both-unchecked",
+                "textMarkdown": "Both are compile-time assertions that check nothing.",
+                "correct": false,
+                "explanationMarkdown": "That describes TypeScript only. C#'s `as` is a checked conversion."
+              },
+              {
+                "id": "csharp-throws",
+                "textMarkdown": "C# throws `InvalidCastException` when the conversion does not apply.",
+                "correct": false,
+                "explanationMarkdown": "That is the behaviour of a direct cast, `(Ticket)payload`. The `as` operator produces null instead."
+              },
+              {
+                "id": "ts-checked",
+                "textMarkdown": "TypeScript validates the object's shape at run time before allowing the conversion.",
+                "correct": false,
+                "explanationMarkdown": "No shape validation occurs. The annotation is erased and the assertion generates no code at all."
+              }
+            ]
+          },
+          "explanationMarkdown": "Identical syntax, opposite trustworthiness — the most misleading similarity between the two languages."
+        }
+      ],
+      "qualification": { "minimumCorrect": 4, "requireAllCritical": true }
+    }
+  ]
+}

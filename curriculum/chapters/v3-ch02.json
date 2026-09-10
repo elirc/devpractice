@@ -1,0 +1,1047 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v3-ch02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "C# modelling",
+      "conceptIds": [
+        "dotnet.records",
+        "dotnet.classes",
+        "dotnet.interfaces",
+        "dotnet.composition",
+        "dotnet.collections",
+        "dotnet.generics"
+      ],
+      "prerequisiteIds": ["dotnet.ts-to-csharp", "dotnet.values-nullability"],
+      "bodyMarkdown": "Modelling in C# means committing to decisions the compiler will hold you to. That is the whole trade: more declaration up front, fewer surprises later.\n\nThree decisions carry most of the weight. **Record or class** determines whether two instances with the same contents are equal, and whether the type reads as data or as behaviour. **Interface or concrete type** determines what a caller is allowed to depend on, which in turn determines what you can change without breaking them. **Which collection** determines what is cheap: looking something up by key, keeping order, or guaranteeing uniqueness.\n\nGenerics then let you write one implementation that serves many types without losing type safety — and, unlike TypeScript generics, C# generics are present at run time. A `List<Ticket>` genuinely knows its element type. That is why you can constrain a type parameter and rely on the constraint, and why reflection over a generic type can tell you something useful.\n\nThe support desk gives us a concrete thread to follow: a ticket that arrives as a database row, becomes a domain object, and leaves as a response payload. In V1 those three shapes could often be the same object. Here they will be three types, and this chapter is about making that separation carry its weight rather than becoming ceremony.",
+      "trackId": "v1-track",
+      "lessonIds": ["v3-l04", "v3-l05", "v3-l06"],
+      "assessmentId": "v3-a02",
+      "objectiveIds": [
+        "dotnet.records",
+        "dotnet.classes",
+        "dotnet.interfaces",
+        "dotnet.composition",
+        "dotnet.collections",
+        "dotnet.generics"
+      ],
+      "missionIds": [],
+      "sortOrder": 21
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Records and classes",
+      "conceptIds": ["dotnet.records", "dotnet.classes"],
+      "prerequisiteIds": ["dotnet.ts-to-csharp"],
+      "bodyMarkdown": "A `record` and a `class` are both reference types. The difference is what the compiler generates for you, and that difference is large enough to change how you design.\n\nDeclare a record and you get **value-based equality** over all its members, a matching `GetHashCode`, a readable `ToString`, deconstruction, and a `with` expression that produces a modified copy while leaving the original untouched. Declare a class and you get none of those — equality falls back to reference identity, which is the defect you met in the previous chapter.\n\nThe `with` expression deserves attention because it is the idiomatic answer to a question you solved differently in JavaScript. Where you would write `{ ...ticket, status: 'closed' }`, C# gives you `ticket with { Status = TicketStatus.Closed }`. Both produce a new object; the C# version is checked, so a typo in a member name is a compile error rather than a silently added property.\n\nMutability is a separate axis from record-versus-class, and conflating them is a common mistake. A property declared `init` may be set during construction and never again, which makes the type immutable after creation. A property declared `set` may be changed at any time. Records default to positional `init` members, so they are usually immutable, but a record can have mutable properties and a class can be fully immutable. Choose the equality semantics and the mutability separately.\n\nSo: reach for a record when the type *is* its data — a DTO, a query result, a value in a domain model. Reach for a class when the type has identity or behaviour that outlives its field values — a service, a repository, an entity whose identity is its `Id` rather than the sum of its columns. That last distinction matters for persistence: an entity row whose fields change is still the same ticket, so value equality would be actively wrong.",
+      "chapterId": "v3-ch02",
+      "sortOrder": 0,
+      "objectives": [
+        "Choose between a record and a class from how the type's equality should behave.",
+        "Use a `with` expression to produce a modified copy, and say why it is safer than a spread.",
+        "Separate the mutability decision (`init` against `set`) from the record-or-class decision."
+      ],
+      "estimatedMinutes": 9,
+      "workedExampleMarkdown": "The same ticket shape, declared three ways.\n\n```csharp\n// A positional record: immutable, value equality, deconstruction, with-expressions.\npublic record TicketDto(string Id, string Subject, TicketStatus Status);\n\nvar a = new TicketDto(\"t-1\", \"Printer jam\", TicketStatus.Open);\nvar b = new TicketDto(\"t-1\", \"Printer jam\", TicketStatus.Open);\nbool same = a == b;                                  // true — every member matches\n\nvar closed = a with { Status = TicketStatus.Closed }; // new object; a is unchanged\nvar (id, subject, _) = a;                             // deconstruction\n\n// A class entity: identity is the Id, not the field values.\npublic class Ticket\n{\n    public required string Id { get; init; }\n    public string Subject { get; set; } = \"\";\n    public TicketStatus Status { get; set; }\n}\n\nvar t1 = new Ticket { Id = \"t-1\", Subject = \"Printer jam\" };\nvar t2 = new Ticket { Id = \"t-1\", Subject = \"Printer jam\" };\nbool alsoSame = t1 == t2;                            // false — reference comparison\n\n// An immutable class: mutability is a separate axis from equality.\npublic class AuditStamp\n{\n    public required string Actor { get; init; }\n    public required DateTimeOffset At { get; init; }\n}\n```\n\nThe entity is the interesting case. `t1` and `t2` describe the same ticket, and yet `==` is false — which is correct, because a `Ticket` whose subject is edited is still that ticket. Value equality would say the edit produced a different ticket, and any code that relied on it would misbehave the moment a field changed.",
+      "commonMistakes": [
+        "Using a record for a persistence entity. When a column changes, value equality reports a different object, which breaks change tracking and identity-based lookups.",
+        "Assuming `record` means immutable. A record can declare `set` properties, and a class can be fully `init`-only; the two decisions are independent.",
+        "Reaching for a class out of habit and then hand-writing `Equals` and `GetHashCode`, when a record generates both correctly.",
+        "Expecting `with` to perform a deep copy. It copies members; a member that is itself a mutable reference is shared with the original."
+      ],
+      "summaryMarkdown": "Records generate value equality, `ToString`, deconstruction and `with`; classes give you reference identity. Pick the one whose equality is right for the type: records for data, classes for things with identity or behaviour. Mutability is decided separately by `init` against `set`. `with` is the checked equivalent of an object spread, and it is shallow.",
+      "exerciseIds": ["v3-e010", "v3-e011", "v3-e012"],
+      "reviewCardIds": ["v3-c007", "v3-c008"],
+      "references": [
+        {
+          "label": "Records (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/builtin-types/record"
+        },
+        {
+          "label": "init-only setters (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/init"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e010",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a record used as a tracked entity",
+      "conceptIds": ["dotnet.records", "dotnet.classes"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An identity model that stops working as soon as a field is edited.",
+      "lessonId": "v3-l04",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "The support desk caches open tickets in a set so a background sweep can skip ones it has already seen.\n\n```csharp\npublic record Ticket(string Id, string Subject, TicketStatus Status);\n\nvar seen = new HashSet<Ticket>();\nseen.Add(ticket);\n\n// ... elsewhere, an agent edits the subject ...\nvar edited = ticket with { Subject = \"Printer jam (second floor)\" };\n\nbool alreadyProcessed = seen.Contains(edited);   // false\n```\n\nThe sweep reprocesses the ticket every time anyone edits it. What is the modelling error?",
+      "hints": [
+        "Ask what `HashSet` uses to decide whether two entries are the same, and what this type says that should be.",
+        "A record's equality and hash code are computed from every member, so changing any member produces a value that is unequal to the original.",
+        "The ticket's identity is its `Id`, not the sum of its columns. Model it as a class with identity semantics, or key the set on the id rather than on the whole object."
+      ],
+      "solution": {
+        "modelAnswer": "`Ticket` is declared as a record, so equality and `GetHashCode` are derived from all three members. Editing the subject produces an object that is unequal to the original and hashes differently, so the set no longer recognises it. But a ticket whose subject is edited is still the same ticket — its identity is its `Id`. The fix is to model identity explicitly: make `Ticket` a class (identity by reference, or with equality overridden on `Id`), or keep the record and store `HashSet<string>` of ids instead of whole objects.",
+        "explanationMarkdown": "Records are so convenient that they get applied to everything, and this is where that habit fails. The question to ask of any type is: if one field changes, is it still the same thing? For a DTO or a query result the answer is no — a different total genuinely is a different value — and a record is right. For a ticket, an order or a customer the answer is yes, and value equality actively contradicts the domain. This is also why ORM entities are classes: change tracking depends on identity surviving a field edit, which is exactly the property a record removes."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "value-equality-wrong-for-identity",
+            "textMarkdown": "A record derives equality and hash code from all members, so editing any field yields an unequal object — but the ticket's identity is its `Id`, so value equality is the wrong model.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Model the type with identity semantics, or key the set on the `Id` rather than the whole object."
+          },
+          {
+            "id": "hashset-needs-comparer",
+            "textMarkdown": "`HashSet` always requires an explicit `IEqualityComparer`; without one it falls back to reference comparison.",
+            "correct": false,
+            "explanationMarkdown": "`HashSet` uses the type's own `Equals` and `GetHashCode` by default, and for a record those are value-based. A custom comparer is one possible fix, not a requirement."
+          },
+          {
+            "id": "with-breaks-hashing",
+            "textMarkdown": "`with` produces an object whose hash code is left uninitialised, so lookups always miss.",
+            "correct": false,
+            "explanationMarkdown": "`with` produces a fully formed record whose hash code is computed normally from its members. The hash is correct — it simply reflects the new subject."
+          },
+          {
+            "id": "mutable-record",
+            "textMarkdown": "Records are mutable by default, so the stored entry was modified in place and corrupted the set's buckets.",
+            "correct": false,
+            "explanationMarkdown": "Positional record members are `init`-only, and `with` creates a new object rather than mutating the stored one. Mutating a stored key is a real hazard in general, but it is not what happened here."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.records",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e011",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Implement record value equality",
+      "conceptIds": ["dotnet.records"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Build the member-wise comparison a record generates.",
+      "lessonId": "v3-l04",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "A record's `==` is generated by the compiler: it compares the declared members, one by one. Implement that rule in JavaScript so the semantics are explicit.\n\nImplement `recordsEqual(members, left, right)`.\n\n- `members` is an array of the declared member names, in declaration order.\n- `left` and `right` are objects holding those members.\n\nReturn `true` when **every** declared member is strictly equal (`===`) in both objects. Members not in the list are **not** compared, even if present — the compiler only generates comparisons for declared members.\n\nReturn `false` if either object is missing a declared member that the other has with a defined value. An empty `members` list means there is nothing to distinguish the two, so return `true`.\n\nDo not modify the inputs.",
+      "hints": [
+        "Drive the comparison from `members`, not from the keys of the objects — an undeclared key must never affect the answer.",
+        "A single mismatching member is enough to make the whole comparison false, so you can stop as soon as you find one.",
+        "Loop over `members`, compare `left[name] === right[name]` for each, return false on the first difference and true if the loop completes."
+      ],
+      "solution": {
+        "code": "function recordsEqual(members, left, right) {\n  for (const name of members) {\n    if (left[name] !== right[name]) {\n      return false;\n    }\n  }\n  return true;\n}",
+        "explanationMarkdown": "Two properties of generated record equality fall out of this. First, it is driven by the declaration, not by the runtime contents — an extra key that no member declares is invisible to the comparison, which is why a record's equality is predictable from reading its declaration alone. Second, it is shallow: `===` on a member that holds a reference compares references, so two records holding different-but-identical lists are not equal. C# behaves the same way, comparing each member with its own `Equals`, so a member that is itself a record compares by value while a member that is a plain class compares by reference. Knowing this stops the surprise when a record containing a collection refuses to compare equal."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "recordsEqual",
+        "starterCode": "function recordsEqual(members, left, right) {\n  // Compares every key present, not just the declared members.\n  const keys = Object.keys(left);\n  for (const key of keys) {\n    if (left[key] !== right[key]) {\n      return false;\n    }\n  }\n  return true;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "all-members-match",
+            "args": [
+              ["id", "subject"],
+              { "id": "t-1", "subject": "Printer jam" },
+              { "id": "t-1", "subject": "Printer jam" }
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "one-member-differs",
+            "args": [
+              ["id", "subject"],
+              { "id": "t-1", "subject": "Printer jam" },
+              { "id": "t-1", "subject": "Scanner jam" }
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "undeclared-key-is-ignored",
+            "args": [
+              ["id"],
+              { "id": "t-1", "internalNote": "escalated" },
+              { "id": "t-1", "internalNote": "quiet" }
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "missing-member-on-one-side",
+            "args": [
+              ["id", "assignee"],
+              { "id": "t-1", "assignee": "rowan" },
+              { "id": "t-1" }
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "no-declared-members",
+            "args": [[], { "id": "t-1" }, { "id": "t-2" }],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "comparison-is-shallow",
+            "args": [
+              ["tags"],
+              { "tags": ["urgent"] },
+              { "tags": ["urgent"] }
+            ],
+            "expected": false,
+            "hidden": true
+          },
+          {
+            "id": "numeric-member-differs",
+            "args": [
+              ["id", "ageHours"],
+              { "id": "t-9", "ageHours": 3 },
+              { "id": "t-9", "ageHours": 4 }
+            ],
+            "expected": false,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.records",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e012",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Predict what a with expression copies",
+      "conceptIds": ["dotnet.records"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Trace a shallow copy over a member that holds a reference.",
+      "lessonId": "v3-l04",
+      "sortOrder": 2,
+      "type": "predict-output",
+      "difficulty": "core",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "```csharp\npublic record Ticket(string Id, List<string> Tags);\n\nvar original = new Ticket(\"t-1\", new List<string> { \"printer\" });\nvar copy = original with { Id = \"t-2\" };\n\ncopy.Tags.Add(\"urgent\");\n\nConsole.WriteLine(original.Tags.Count);\n```\n\nWhat is printed? Type the exact output.",
+      "hints": [
+        "A `with` expression produces a new record by copying each member across — ask what \"copying\" means for a member whose type is a list.",
+        "`List<string>` is a reference type, so copying the member copies the reference, not the list.",
+        "Both records therefore point at one list, and adding through either is visible through both."
+      ],
+      "solution": {
+        "modelAnswer": "2",
+        "explanationMarkdown": "`with` performs a shallow copy: each member is copied, and for a reference-typed member that means the reference is copied. `original.Tags` and `copy.Tags` are the same `List<string>`, so the `Add` is visible through both and the count is 2. This is exactly the behaviour of a JavaScript object spread, which is worth noting because the rest of records feels so much stricter than JavaScript that people expect deep copying here too. If you need independence, copy the collection explicitly: `original with { Id = \"t-2\", Tags = new List<string>(original.Tags) }`, or model the member as an immutable collection so the question cannot arise."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": { "trim": true, "collapseWhitespace": true, "caseSensitive": true },
+        "expected": "2",
+        "acceptedAlternatives": []
+      },
+      "primaryConceptId": "dotnet.records",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c007",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Record or class",
+      "conceptIds": ["dotnet.records", "dotnet.classes"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the question that decides between the two.",
+      "lessonId": "v3-l04",
+      "type": "recall",
+      "promptMarkdown": "What single question decides whether a type should be a record or a class, and which one suits a persistence entity?",
+      "answerMarkdown": "Ask: if one field changes, is it still the same thing? If no — a different total is a different value — it is data, and a record's value equality is right. If yes — a ticket with an edited subject is still that ticket — identity matters, and a class is right. Persistence entities are classes, because change tracking depends on identity surviving a field edit.",
+      "explanationMarkdown": "Framing it as an equality question rather than a syntax preference keeps the decision stable. Records are not simply the modern default; they encode a specific claim about what equality means for the type.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.records"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c008",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "with is shallow",
+      "conceptIds": ["dotnet.records"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply copy semantics to a record holding a collection.",
+      "lessonId": "v3-l04",
+      "type": "transfer",
+      "promptMarkdown": "You write `var copy = original with { Id = \"t-2\" };` on a record whose members include a `List<string>`. Mutating `copy`'s list — what happens to `original`?",
+      "answerMarkdown": "`original` sees the change. `with` copies each member, and copying a reference-typed member copies the reference, so both records share one list. To get independence, construct a new collection explicitly in the `with`, or model the member as an immutable collection type.",
+      "explanationMarkdown": "The same shallow-copy rule as a JavaScript object spread. It surprises people because records otherwise feel much stricter than JavaScript, so a deep copy is assumed.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.records"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Interfaces and composition",
+      "conceptIds": ["dotnet.interfaces", "dotnet.composition"],
+      "prerequisiteIds": ["dotnet.classes"],
+      "bodyMarkdown": "An interface is a promise about what a caller may rely on. Because C# is nominally typed, that promise is explicit: a type participates only by declaring that it implements the interface. Nothing accidentally satisfies it, which makes the set of implementations knowable by reading the code.\n\nThat explicitness is what makes interfaces useful for **seams**. When a handler depends on `ITicketStore` rather than on `SqlTicketStore`, you can supply a different implementation in a test, swap the storage technology, or wrap the real one with logging, without touching the handler. This is the mechanism behind dependency injection, which you meet properly in chapter D05 — the interface is the joint, and the container is what decides which implementation fills it.\n\nThe design question is what belongs in the interface. A narrow interface — two or three methods that one caller genuinely needs — is easy to implement, easy to fake, and rarely changes. A wide one, listing every operation any caller might want, forces every implementation to provide methods it does not care about and changes whenever any caller's needs change. When you find yourself writing an implementation full of methods that throw \"not supported\", the interface is too wide.\n\n**Composition against inheritance** is the other half. C# supports single inheritance of classes, and inheritance couples you to a base class's data, constructor and behaviour all at once. Composition — holding a dependency as a field and delegating to it — couples you only to the interface you chose. The practical guidance is durable: inherit when the derived type genuinely *is* the base type and you want to share implementation; compose when you want to *use* a capability. A `SlaCalculator` that needs a clock should hold an `IClock`, not inherit from one.\n\nOne C# specific worth knowing: an interface may declare a **default implementation** for a member. It is useful for adding a method to a widely-implemented interface without breaking every implementer, but it is not a substitute for a base class, and reaching for it early usually signals that the interface is doing too much.",
+      "chapterId": "v3-ch02",
+      "sortOrder": 1,
+      "objectives": [
+        "Judge whether an interface is the right width for its callers.",
+        "Choose composition or inheritance from whether the type *is* the other or merely *uses* it.",
+        "Explain how an interface creates a seam that makes an implementation replaceable in a test."
+      ],
+      "estimatedMinutes": 9,
+      "workedExampleMarkdown": "A calculator that needs the current time, written twice.\n\n```csharp\n// Inheritance: couples the calculator to a base class's data and construction.\npublic class ClockBase { protected DateTimeOffset Now() => DateTimeOffset.UtcNow; }\n\npublic class SlaCalculatorInherited : ClockBase\n{\n    public bool IsBreached(Ticket t) => Now() - t.OpenedAt > TimeSpan.FromHours(4);\n}\n// Testing this means subclassing it, and the calculator can never inherit anything else.\n\n// Composition: couples the calculator to one small promise.\npublic interface IClock { DateTimeOffset Now { get; } }\n\npublic class SystemClock : IClock { public DateTimeOffset Now => DateTimeOffset.UtcNow; }\n\npublic class SlaCalculator\n{\n    private readonly IClock _clock;\n    public SlaCalculator(IClock clock) => _clock = clock;\n\n    public bool IsBreached(Ticket t) => _clock.Now - t.OpenedAt > TimeSpan.FromHours(4);\n}\n\n// A test supplies a fixed clock — no subclassing, no waiting four hours.\npublic sealed class FixedClock : IClock\n{\n    public FixedClock(DateTimeOffset now) => Now = now;\n    public DateTimeOffset Now { get; }\n}\n```\n\nThe composed version is testable because the seam is explicit and narrow: `IClock` promises exactly one thing. Note also that the inherited version cannot inherit anything else, since C# allows only one base class — a cost you pay immediately and permanently in exchange for saving one constructor parameter.",
+      "commonMistakes": [
+        "Declaring an interface with one implementation and no seam in mind, adding indirection that buys nothing.",
+        "Growing a single wide interface until implementations must throw \"not supported\" for methods they do not serve.",
+        "Inheriting to reuse a helper method. That couples you to the base type's data and construction, and spends your one inheritance slot.",
+        "Treating default interface implementations as a base class, which spreads behaviour across the interface and its implementers."
+      ],
+      "summaryMarkdown": "Interfaces are explicit, nominal promises, which makes them good seams for testing and substitution. Keep them narrow enough that every implementation can honour all of them. Prefer composition — hold a dependency and delegate — unless the derived type genuinely is the base type; C# gives you only one inheritance slot, so spend it deliberately.",
+      "exerciseIds": ["v3-e013", "v3-e014", "v3-e015"],
+      "reviewCardIds": ["v3-c009", "v3-c010"],
+      "references": [
+        {
+          "label": "Interfaces (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/types/interfaces"
+        },
+        {
+          "label": "Inheritance in C# (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/object-oriented/inheritance"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e013",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review an interface that is too wide",
+      "conceptIds": ["dotnet.interfaces", "dotnet.composition"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Judge an abstraction by what its implementations are forced to do.",
+      "lessonId": "v3-l05",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "The support desk defines one storage interface for everything.\n\n```csharp\npublic interface ITicketStore\n{\n    Task<Ticket?> GetAsync(string id);\n    Task<IReadOnlyList<Ticket>> ListAsync(string ownerId);\n    Task SaveAsync(Ticket ticket);\n    Task DeleteAsync(string id);\n    Task<Stream> ExportCsvAsync();\n    Task ReindexSearchAsync();\n    Task<int> PurgeOlderThanAsync(DateTimeOffset cutoff);\n}\n\npublic sealed class InMemoryTicketStore : ITicketStore\n{\n    public Task<Stream> ExportCsvAsync() => throw new NotSupportedException();\n    public Task ReindexSearchAsync() => throw new NotSupportedException();\n    public Task<int> PurgeOlderThanAsync(DateTimeOffset cutoff) => throw new NotSupportedException();\n    // ... the four that are actually implemented ...\n}\n```\n\nWhat is the clearest signal here that the abstraction is wrong, and what follows from it?",
+      "hints": [
+        "Look at the test double rather than the interface itself — what is it forced to write?",
+        "Three methods throw `NotSupportedException`, which means the interface promises things some implementations cannot honour.",
+        "A caller holding an `ITicketStore` cannot tell which of its methods will actually work, so the type no longer describes a contract; split it by what each caller needs."
+      ],
+      "solution": {
+        "modelAnswer": "The test double is forced to throw `NotSupportedException` for three of the seven methods, which means the interface promises capabilities that not every implementation can provide. The consequence is that the promise is unreliable: a caller holding an `ITicketStore` cannot know from the type whether `ExportCsvAsync` will work, so the interface has stopped being a contract and become a menu. Split it by caller need — a narrow `ITicketStore` with the four CRUD operations, and separate `ITicketExporter`, `ITicketSearchIndex` and `ITicketRetention` interfaces implemented only by the storage that genuinely supports them.",
+        "explanationMarkdown": "Interfaces are usually judged by looking at the interface, which is why this defect survives review. The reliable signal is at the implementations: every `NotSupportedException` is a promise the type could not keep. The narrower split also improves the callers, because a handler that only reads tickets now depends on a two-method interface, and its test double is three lines instead of seven. This is the same reasoning that made narrow modules work in V1 — the difference is that C# forces the promise to be explicit, so the mismatch is visible in the code rather than in a comment."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "not-supported-signals-too-wide",
+            "textMarkdown": "Implementations throwing `NotSupportedException` show the interface promises more than every implementation can honour, so callers cannot rely on the contract; split it by what each caller needs.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The unimplementable methods are the evidence, and separate narrow interfaces make each promise honest."
+          },
+          {
+            "id": "should-be-abstract-class",
+            "textMarkdown": "It should be an abstract class so the unsupported methods can have a shared default implementation.",
+            "correct": false,
+            "explanationMarkdown": "That hides the mismatch rather than fixing it — the default would still fail at run time — and it spends the single inheritance slot of every implementation."
+          },
+          {
+            "id": "async-suffix",
+            "textMarkdown": "The methods should not be asynchronous, since an in-memory store has nothing to await.",
+            "correct": false,
+            "explanationMarkdown": "Returning a completed task from a synchronous implementation is normal and costs nothing. The signature style is not what makes three methods unimplementable."
+          },
+          {
+            "id": "needs-generics",
+            "textMarkdown": "The interface should be generic, `IStore<T>`, so it can be reused for other entity types.",
+            "correct": false,
+            "explanationMarkdown": "Making it generic would spread the same too-wide contract across more entity types. The width is the problem, not the lack of reuse."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.interfaces",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e014",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose a collection from its access pattern",
+      "conceptIds": ["dotnet.collections"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Encode the decision rule for picking a collection type.",
+      "lessonId": "v3-l05",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "foundation",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "Choosing a collection is a decision about which operation should be cheap. Implement that decision rule.\n\nImplement `chooseCollection(needs)` returning one of `\"Dictionary\"`, `\"HashSet\"`, `\"List\"`.\n\n`needs` has `{ lookupByKey, uniqueOnly, keepsInsertionOrder }`, all booleans.\n\nApply the rules in this order:\n\n1. If `lookupByKey` is true, return `\"Dictionary\"` — keyed access is the dominant requirement.\n2. Otherwise, if `uniqueOnly` is true **and** `keepsInsertionOrder` is false, return `\"HashSet\"`.\n3. Otherwise return `\"List\"`.\n\nNote rule 2: a `HashSet` does not promise an order, so wanting both uniqueness and insertion order rules it out — you would keep a `List` and enforce uniqueness yourself.\n\nDo not modify the input.",
+      "hints": [
+        "The rules are ordered, so evaluate them in sequence and return as soon as one applies.",
+        "Rule 2 needs BOTH conditions: unique on its own is not enough if insertion order also matters.",
+        "Check `lookupByKey` first and return early; then check `uniqueOnly && !keepsInsertionOrder`; otherwise fall through to `\"List\"`."
+      ],
+      "solution": {
+        "code": "function chooseCollection(needs) {\n  if (needs.lookupByKey === true) {\n    return 'Dictionary';\n  }\n  if (needs.uniqueOnly === true && needs.keepsInsertionOrder === false) {\n    return 'HashSet';\n  }\n  return 'List';\n}",
+        "explanationMarkdown": "The ordering encodes a real priority: keyed lookup is the requirement that most changes the shape of the code, so it wins outright. The second rule is the one people get wrong, because \"I need uniqueness\" feels like it should always mean a set. `HashSet` gives no ordering promise, so if the order tickets were added is part of the behaviour, a set silently loses it — and the loss shows up as a rendering bug rather than an exception. Writing the rule down forces the trade-off into the open: you keep the list and pay for uniqueness with an explicit check, or you accept that order does not matter."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "chooseCollection",
+        "starterCode": "function chooseCollection(needs) {\n  // Treats uniqueness as decisive and forgets ordering entirely.\n  if (needs.uniqueOnly === true) {\n    return 'HashSet';\n  }\n  return 'List';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "keyed-lookup-wins",
+            "args": [{ "lookupByKey": true, "uniqueOnly": true, "keepsInsertionOrder": false }],
+            "expected": "Dictionary",
+            "hidden": false
+          },
+          {
+            "id": "keyed-lookup-wins-even-with-order",
+            "args": [{ "lookupByKey": true, "uniqueOnly": false, "keepsInsertionOrder": true }],
+            "expected": "Dictionary",
+            "hidden": false
+          },
+          {
+            "id": "unique-without-order-is-a-set",
+            "args": [{ "lookupByKey": false, "uniqueOnly": true, "keepsInsertionOrder": false }],
+            "expected": "HashSet",
+            "hidden": false
+          },
+          {
+            "id": "unique-but-order-matters",
+            "args": [{ "lookupByKey": false, "uniqueOnly": true, "keepsInsertionOrder": true }],
+            "expected": "List",
+            "hidden": false
+          },
+          {
+            "id": "plain-sequence",
+            "args": [{ "lookupByKey": false, "uniqueOnly": false, "keepsInsertionOrder": true }],
+            "expected": "List",
+            "hidden": false
+          },
+          {
+            "id": "no-requirements-at-all",
+            "args": [{ "lookupByKey": false, "uniqueOnly": false, "keepsInsertionOrder": false }],
+            "expected": "List",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.collections",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e015",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Argue for composition over inheritance",
+      "conceptIds": ["dotnet.composition", "dotnet.interfaces"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written argument, self-assessed against explicit criteria.",
+      "lessonId": "v3-l05",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "A colleague proposes that `SlaCalculator` inherit from `ClockBase` so it can call `Now()` directly, arguing it saves a constructor parameter and a field.\n\nWrite a few sentences setting out what that choice costs, what the composed alternative buys, and when inheritance *would* be the right call. Be concrete about testing.",
+      "hints": [
+        "Start from what inheritance couples you to, as opposed to what a constructor parameter couples you to.",
+        "C# allows one base class — ask what happens the next time this type needs to share behaviour with something else.",
+        "For testing, describe what each version forces a test to do: substituting a fixed clock through a parameter, against subclassing the calculator to override a protected method."
+      ],
+      "solution": {
+        "modelAnswer": "Inheriting couples `SlaCalculator` to the whole of `ClockBase` — its data, its constructor and any future member it gains — in exchange for saving one parameter. It also spends the single inheritance slot C# allows, so the next capability the calculator needs cannot be obtained the same way. Testing becomes awkward: to control time you must subclass the calculator and override a protected member, so the test exercises a modified type rather than the real one. Composition couples the calculator to one narrow promise, `IClock`, and a test supplies a `FixedClock` through the constructor without touching the class under test. Inheritance would be right if `SlaCalculator` genuinely *were* a kind of the base type and you intended to share implementation across a family of calculators — an abstract `SlaCalculatorBase` with a template method, say. The rule of thumb: inherit when the type *is* the base, compose when it merely *uses* a capability.",
+        "explanationMarkdown": "The testing argument is the one that settles it in practice, because it is concrete and immediate. A seam expressed as a constructor parameter lets a test replace a dependency without modifying the type under test; a seam expressed as a protected base member forces the test to build a subclass, and from then on the thing under test is not quite the thing that ships. The inheritance-slot cost is worth naming too, since it is invisible at the moment of the decision and expensive to undo later."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that inheritance couples the type to the base class's data, constructor and future members, not just the one method it wanted.",
+          "Notes that C# permits a single base class, so the choice consumes a resource that cannot be reused.",
+          "Describes concretely how each option is tested — a substituted `IClock` through the constructor, against subclassing and overriding a protected member.",
+          "Identifies when inheritance is genuinely appropriate: an is-a relationship with shared implementation across a family of types.",
+          "Frames the decision as is-a against uses-a rather than as a style preference."
+        ],
+        "modelAnswerMarkdown": "See the model answer: inheritance couples broadly and spends the one slot; composition couples to a narrow promise and is trivially testable; inherit only for a genuine is-a with shared implementation."
+      },
+      "primaryConceptId": "dotnet.composition",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c009",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The signal that an interface is too wide",
+      "conceptIds": ["dotnet.interfaces"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the observable symptom of an over-broad abstraction.",
+      "lessonId": "v3-l05",
+      "type": "recall",
+      "promptMarkdown": "What is the clearest evidence that an interface promises too much, and where do you look for it?",
+      "answerMarkdown": "Look at the implementations, not the interface. Methods that throw `NotSupportedException` — or return a fixed empty value — are promises the type could not keep, which means callers cannot rely on the contract. Split the interface by what each caller actually needs.",
+      "explanationMarkdown": "Reviewing the interface in isolation tends to make every method look reasonable. The implementations are where the mismatch becomes visible, and a test double is often the first place it shows.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.interfaces"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c010",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "HashSet and ordering",
+      "conceptIds": ["dotnet.collections"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply collection guarantees to a requirement for uniqueness plus order.",
+      "lessonId": "v3-l05",
+      "type": "debugging",
+      "promptMarkdown": "You need a collection of unique tags that renders in the order the agent added them. Is `HashSet<string>` the right choice, and how would the wrong choice show up?",
+      "answerMarkdown": "No. `HashSet` guarantees uniqueness but promises nothing about order, so the rendered tags can appear in an order unrelated to entry. Keep a `List<string>` and enforce uniqueness on insert, or use a type that promises both. The wrong choice surfaces as a rendering bug — tags in a surprising order — rather than as an exception, so it can survive review and tests that only check membership.",
+      "explanationMarkdown": "\"I need uniqueness\" is not by itself enough information to pick a set. The failure is silent, which is what makes it worth remembering.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.collections"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Collections and generics",
+      "conceptIds": ["dotnet.collections", "dotnet.generics"],
+      "prerequisiteIds": ["dotnet.interfaces"],
+      "bodyMarkdown": "The .NET collection types are a small vocabulary worth learning precisely, because each one is a statement about which operation should be cheap.\n\n`List<T>` is a growable array: index access and appending are fast, searching by value is a scan. `Dictionary<TKey, TValue>` gives near-constant lookup by key and no ordering promise. `HashSet<T>` gives near-constant membership tests and, again, no ordering promise. `Queue<T>` and `Stack<T>` express intent about which end you work from. And the read-only interfaces — `IReadOnlyList<T>`, `IReadOnlyDictionary<TKey, TValue>` — let a method say \"I will not modify this\" in the signature rather than in a comment.\n\nWhat you accept as a **parameter** is a design decision of its own. Accepting `IEnumerable<T>` is maximally permissive but promises only that the sequence can be walked, possibly once and possibly lazily; if the method iterates twice, a lazy sequence will be evaluated twice, which is a real and often expensive surprise. Accepting `IReadOnlyList<T>` says you need indexing and a stable count. Returning the narrowest sensible type keeps your options open; accepting the widest sensible type keeps your callers' options open.\n\n**Generics** let you write the implementation once. `Repository<T>` or `Result<T>` serve every type without casting and without losing type information — and in C#, unlike TypeScript, that type information survives to run time. `List<Ticket>` really is a distinct constructed type, not a `List<object>` with annotations, which is why there is no boxing for value types and why `typeof(List<Ticket>)` is meaningful.\n\n**Constraints** are what make a generic method able to do anything with its type parameter. `where T : class`, `where T : struct`, `where T : IEntity`, `where T : new()` each unlock a specific capability: without a constraint the compiler assumes almost nothing, so you cannot call members, construct instances or compare for null in the way you might expect. Adding the constraint you need is the normal answer to \"why can't I call this method on T\".",
+      "chapterId": "v3-ch02",
+      "sortOrder": 2,
+      "objectives": [
+        "Choose a collection type from which operation must be cheap, and know what each promises about ordering.",
+        "Decide what a method should accept and return, given the cost of iterating a lazy sequence twice.",
+        "Apply a generic constraint to unlock the capability a generic method needs."
+      ],
+      "estimatedMinutes": 10,
+      "workedExampleMarkdown": "A generic repository, and the constraint that makes it work.\n\n```csharp\npublic interface IEntity { string Id { get; } }\n\npublic class Repository<T> where T : class, IEntity\n{\n    private readonly Dictionary<string, T> _byId = new();\n\n    public void Add(T item) => _byId[item.Id] = item;   // legal because of : IEntity\n    public T? Find(string id) => _byId.TryGetValue(id, out var found) ? found : null;\n}\n```\n\nWithout `where T : IEntity` the compiler rejects `item.Id`, because an unconstrained `T` might be any type at all. Without `where T : class` the `T?` return would mean a nullable value type, which is a different thing again.\n\nAnd the parameter-type decision, with the trap:\n\n```csharp\npublic int CountBreached(IEnumerable<Ticket> tickets)\n{\n    var total = tickets.Count();          // walks the sequence\n    var breached = tickets.Count(t => t.IsBreached);  // walks it a SECOND time\n    return breached;\n}\n```\n\nIf the caller passes a `List<Ticket>` this is merely wasteful. If it passes a lazily evaluated query — the next chapter's subject — the entire query runs twice, which may mean two round trips to the database. Accepting `IReadOnlyList<Ticket>` would state the requirement honestly, and materialising once with `ToList()` is the fix when the parameter type cannot change.",
+      "commonMistakes": [
+        "Iterating an `IEnumerable<T>` parameter more than once, so a lazy source is evaluated twice.",
+        "Returning `List<T>` from a public method when the caller should not modify it — `IReadOnlyList<T>` states the intent and prevents the mistake.",
+        "Fighting the compiler over what a generic type parameter can do, instead of adding the constraint that grants the capability.",
+        "Assuming generics are erased as they are in TypeScript. In C# a constructed generic type is a real run-time type."
+      ],
+      "summaryMarkdown": "Each collection makes one operation cheap and often gives up ordering to do it. Accept the widest sensible parameter type and return the narrowest sensible one, but never iterate an `IEnumerable<T>` twice. Generics keep their type information at run time, and constraints are how a generic method earns the right to call members, construct values or compare against null.",
+      "exerciseIds": ["v3-e016", "v3-e017", "v3-e018"],
+      "reviewCardIds": ["v3-c011", "v3-c012"],
+      "references": [
+        {
+          "label": "Generic constraints (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/generics/constraints-on-type-parameters"
+        },
+        {
+          "label": "Collections and data structures (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/standard/collections/"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e016",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a sequence walked twice",
+      "conceptIds": ["dotnet.collections"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A helper whose cost doubles depending on what the caller passes.",
+      "lessonId": "v3-l06",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "This helper is fast in unit tests and slow in production.\n\n```csharp\npublic static Summary Summarise(IEnumerable<Ticket> tickets)\n{\n    return new Summary(\n        Total: tickets.Count(),\n        Breached: tickets.Count(t => t.IsBreached),\n        Oldest: tickets.OrderBy(t => t.OpenedAt).FirstOrDefault());\n}\n```\n\nTests pass a `List<Ticket>` and it is instant. Production passes the result of a database query and it makes three round trips. What is the defect, and what is the minimal fix?",
+      "hints": [
+        "Count how many times the parameter is walked, then ask what walking it costs for different kinds of caller.",
+        "`IEnumerable<T>` promises only that the sequence can be enumerated — it says nothing about the cost, and a query-backed sequence re-executes on each enumeration.",
+        "Materialise once at the top of the method with `ToList()`, or change the parameter to `IReadOnlyList<Ticket>` so the requirement is stated in the signature."
+      ],
+      "solution": {
+        "modelAnswer": "The method enumerates its parameter three times — once for `Count()`, once for the filtered count, once for `OrderBy`. For a `List<Ticket>` that is merely three cheap walks over memory, which is why the tests look fine. For a lazily evaluated query the whole query runs on each enumeration, giving three round trips. The minimal fix is to materialise once: `var all = tickets.ToList();` at the top and then use `all` throughout. Better still, change the parameter to `IReadOnlyList<Ticket>` so the requirement — a sequence I can walk repeatedly — is stated in the signature and the caller decides where materialisation happens.",
+        "explanationMarkdown": "This is the defect that makes a test suite actively misleading. The fast path and the slow path differ only in what the caller supplies, and the unit test supplies the fast one by default. It is also the bridge to the next chapter: deferred execution is exactly what makes a LINQ query behave this way, and once queries are translated to SQL the cost of an extra enumeration stops being theoretical. The signature is where the fix belongs, because `IEnumerable<T>` accurately describes a sequence you intend to walk once, and this method never intended that."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "enumerated-three-times",
+            "textMarkdown": "The parameter is enumerated three times, and a lazily evaluated source re-executes on each enumeration; materialise once with `ToList()` or accept `IReadOnlyList<Ticket>`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A `List` makes the repeated walks cheap, which is exactly why the tests hide the problem."
+          },
+          {
+            "id": "orderby-is-slow",
+            "textMarkdown": "`OrderBy` is the problem: sorting the whole sequence to find one element is unnecessarily expensive.",
+            "correct": false,
+            "explanationMarkdown": "A real inefficiency worth fixing with `MinBy`, but it does not explain three round trips, and it would be just as slow when the caller passes a list."
+          },
+          {
+            "id": "needs-async",
+            "textMarkdown": "The database work should be asynchronous; the synchronous calls are blocking the request thread.",
+            "correct": false,
+            "explanationMarkdown": "Blocking would affect throughput, not the number of round trips. The query would still execute three times if it were awaited three times."
+          },
+          {
+            "id": "ienumerable-boxes",
+            "textMarkdown": "`IEnumerable<Ticket>` boxes each element, so production pays an allocation per ticket.",
+            "correct": false,
+            "explanationMarkdown": "`Ticket` is a reference type, and generic collections do not box their elements in any case. Allocation is not what distinguishes the two callers here."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.collections",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e017",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Decide whether a generic constraint is satisfied",
+      "conceptIds": ["dotnet.generics"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Implement the check the compiler performs when a generic type argument is supplied.",
+      "lessonId": "v3-l06",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "When you write `Repository<Ticket>`, the compiler checks the supplied type against every declared constraint. Implement that check.\n\nImplement `satisfiesConstraints(type, constraints)` returning `true` only when **all** constraints hold.\n\n`type` is `{ isValueType, isSealed, implements, hasParameterlessConstructor }` where `implements` is an array of interface or base type names.\n\nEach entry in `constraints` is one of:\n\n- `\"class\"` — requires `isValueType` to be false\n- `\"struct\"` — requires `isValueType` to be true\n- `\"new()\"` — requires `hasParameterlessConstructor` to be true\n- anything else — an interface or base type name, which must appear in `implements`\n\nAn empty `constraints` array is satisfied by any type. Do not modify the inputs.",
+      "hints": [
+        "Every constraint must hold, so a single failure decides the answer — but make sure you check them all rather than only the first.",
+        "Three of the four constraint kinds are recognised by an exact string; everything else is a type name to look for in `implements`.",
+        "Handle `\"class\"`, `\"struct\"` and `\"new()\"` as special cases, then fall back to checking whether `implements` contains the constraint string."
+      ],
+      "solution": {
+        "code": "function satisfiesConstraints(type, constraints) {\n  for (const constraint of constraints) {\n    if (constraint === 'class') {\n      if (type.isValueType !== false) {\n        return false;\n      }\n    } else if (constraint === 'struct') {\n      if (type.isValueType !== true) {\n        return false;\n      }\n    } else if (constraint === 'new()') {\n      if (type.hasParameterlessConstructor !== true) {\n        return false;\n      }\n    } else if (!type.implements.includes(constraint)) {\n      return false;\n    }\n  }\n  return true;\n}",
+        "explanationMarkdown": "Writing the check makes clear why constraints exist at all. The compiler assumes nothing about an unconstrained type parameter, so it cannot let you call a member, construct an instance or decide what null means for it — every capability has to be unlocked by a promise the caller's type can be checked against. Notice that `class` and `struct` are mutually exclusive, so a generic declared `where T : class, struct` can never be satisfied; the real compiler rejects that combination outright rather than waiting for a type argument. The interface case is a plain membership test precisely because C# is nominal: the type must have *declared* the relationship, and no amount of shape-matching substitutes for it."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "satisfiesConstraints",
+        "starterCode": "function satisfiesConstraints(type, constraints) {\n  // Only checks the first constraint and ignores the rest.\n  if (constraints.length === 0) {\n    return true;\n  }\n  const first = constraints[0];\n  if (first === 'class') {\n    return type.isValueType === false;\n  }\n  return true;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "class-and-interface-both-hold",
+            "args": [
+              { "isValueType": false, "isSealed": true, "implements": ["IEntity"], "hasParameterlessConstructor": true },
+              ["class", "IEntity"]
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "interface-missing",
+            "args": [
+              { "isValueType": false, "isSealed": true, "implements": ["IAuditable"], "hasParameterlessConstructor": true },
+              ["class", "IEntity"]
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "struct-required-but-reference-type",
+            "args": [
+              { "isValueType": false, "isSealed": false, "implements": [], "hasParameterlessConstructor": true },
+              ["struct"]
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "needs-parameterless-constructor",
+            "args": [
+              { "isValueType": false, "isSealed": false, "implements": ["IEntity"], "hasParameterlessConstructor": false },
+              ["class", "IEntity", "new()"]
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "no-constraints-anything-goes",
+            "args": [
+              { "isValueType": true, "isSealed": true, "implements": [], "hasParameterlessConstructor": false },
+              []
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "value-type-satisfies-struct",
+            "args": [
+              { "isValueType": true, "isSealed": true, "implements": ["IComparable"], "hasParameterlessConstructor": true },
+              ["struct", "IComparable"]
+            ],
+            "expected": true,
+            "hidden": true
+          },
+          {
+            "id": "later-constraint-fails",
+            "args": [
+              { "isValueType": false, "isSealed": false, "implements": ["IEntity"], "hasParameterlessConstructor": true },
+              ["class", "IEntity", "IAuditable"]
+            ],
+            "expected": false,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.generics",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e018",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose the parameter and return types for a method",
+      "conceptIds": ["dotnet.collections", "dotnet.generics"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the accept-wide, return-narrow guidance to a concrete signature.",
+      "lessonId": "v3-l06",
+      "sortOrder": 2,
+      "type": "choice",
+      "difficulty": "core",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "You are writing `FilterOpen`, which takes a set of tickets, walks it **once**, and returns the open ones. Callers must not modify what comes back, and the implementation builds a new list internally.\n\nWhich signature best expresses that?",
+      "hints": [
+        "Take the two halves separately: what the method needs from its input, and what it wants to promise about its output.",
+        "It walks the input once and needs no indexing, so the most permissive input type is honest here.",
+        "For the return, the caller must not modify the result, so expose a read-only view rather than the concrete list you happened to build."
+      ],
+      "solution": {
+        "modelAnswer": "`public IReadOnlyList<Ticket> FilterOpen(IEnumerable<Ticket> tickets)`",
+        "explanationMarkdown": "Accepting `IEnumerable<Ticket>` is honest precisely because the method walks the sequence once — the guidance against that parameter type applies to methods that enumerate repeatedly, not to this one. Returning `IReadOnlyList<Ticket>` states that the result is a stable, countable, indexable collection the caller should not modify, without leaking the fact that a `List<Ticket>` was used to build it. Returning `List<Ticket>` would invite mutation and lock you into that representation; returning `IEnumerable<Ticket>` would understate what you have and tempt callers into the very double-enumeration problem you just avoided."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "enumerable-in-readonlylist-out",
+            "textMarkdown": "`IReadOnlyList<Ticket> FilterOpen(IEnumerable<Ticket> tickets)`",
+            "correct": true,
+            "explanationMarkdown": "Correct. The widest honest input for a single walk, and a read-only view out that neither invites mutation nor leaks the internal representation."
+          },
+          {
+            "id": "list-in-list-out",
+            "textMarkdown": "`List<Ticket> FilterOpen(List<Ticket> tickets)`",
+            "correct": false,
+            "explanationMarkdown": "It needlessly refuses callers holding an array or a query result, and hands back a mutable list that callers may modify."
+          },
+          {
+            "id": "enumerable-in-enumerable-out",
+            "textMarkdown": "`IEnumerable<Ticket> FilterOpen(IEnumerable<Ticket> tickets)`",
+            "correct": false,
+            "explanationMarkdown": "The input is right, but returning `IEnumerable` understates a collection you have already materialised and encourages callers to enumerate it more than once."
+          },
+          {
+            "id": "readonlylist-in-list-out",
+            "textMarkdown": "`List<Ticket> FilterOpen(IReadOnlyList<Ticket> tickets)`",
+            "correct": false,
+            "explanationMarkdown": "This is backwards on both halves: it demands more of callers than a single walk requires, and promises less about the result than it should."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.collections",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c011",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Iterating IEnumerable twice",
+      "conceptIds": ["dotnet.collections"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the cost of enumerating a lazy sequence more than once.",
+      "lessonId": "v3-l06",
+      "type": "recall",
+      "promptMarkdown": "Why is enumerating an `IEnumerable<T>` parameter twice a defect, and why do unit tests usually fail to catch it?",
+      "answerMarkdown": "`IEnumerable<T>` promises only that the sequence can be walked; it says nothing about cost or repeatability. A lazily evaluated source — most importantly a database query — re-executes on every enumeration, so two walks mean two round trips. Tests usually pass a `List<T>`, where repeated walks are cheap, so the fast path is the only one exercised.",
+      "explanationMarkdown": "The fix is either to materialise once with `ToList()` or to state the requirement in the signature with `IReadOnlyList<T>`. This is the same defect that makes LINQ's deferred execution surprising.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.collections"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c012",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What a constraint unlocks",
+      "conceptIds": ["dotnet.generics"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply generic constraints to a compiler complaint.",
+      "lessonId": "v3-l06",
+      "type": "transfer",
+      "promptMarkdown": "Inside `Repository<T>` the compiler rejects `item.Id` and `new T()`. What is missing, and what does that tell you about unconstrained type parameters?",
+      "answerMarkdown": "The declaration needs `where T : IEntity` to permit `item.Id`, and `where T : new()` to permit `new T()`. An unconstrained parameter grants almost nothing: the compiler must assume `T` could be any type, so members, construction and null semantics are all unavailable until a constraint promises otherwise.",
+      "explanationMarkdown": "\"Why can't I call this on T\" nearly always has the same answer — you have not yet told the compiler what T is guaranteed to be. Constraints are how a generic earns capabilities rather than restrictions on the caller.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.generics"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v3-a02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "C# modelling placement check",
+      "conceptIds": [
+        "dotnet.records",
+        "dotnet.classes",
+        "dotnet.interfaces",
+        "dotnet.composition",
+        "dotnet.collections",
+        "dotnet.generics"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items on equality semantics, abstraction width, composition, collection guarantees and generic constraints. Explanations appear after you submit.",
+      "chapterId": "v3-ch02",
+      "items": [
+        {
+          "id": "v3-a02-i1",
+          "objectiveIds": ["dotnet.records", "dotnet.classes"],
+          "critical": true,
+          "promptMarkdown": "An order entity is stored in a `Dictionary<Order, string>` and its `Total` is corrected after a pricing fix. Lookups then fail. Which modelling decision explains it?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "record-for-entity",
+                "textMarkdown": "`Order` is a record, so its hash and equality derive from all members; changing `Total` produces a different key.",
+                "correct": true,
+                "explanationMarkdown": "Correct. An entity's identity is its id, not the sum of its fields, so value equality is the wrong model for it."
+              },
+              {
+                "id": "dictionary-needs-string-keys",
+                "textMarkdown": "`Dictionary` keys must be strings or value types; object keys are unsupported.",
+                "correct": false,
+                "explanationMarkdown": "Any type may be a key provided its equality and hashing are sensible. The problem is what \"sensible\" means for this type."
+              },
+              {
+                "id": "total-is-decimal",
+                "textMarkdown": "`Total` is a `decimal`, and decimal comparison is imprecise, so hashing is unstable.",
+                "correct": false,
+                "explanationMarkdown": "`decimal` is exact for its range and hashes deterministically. The instability comes from the key changing, not from the numeric type."
+              },
+              {
+                "id": "needs-concurrent-dictionary",
+                "textMarkdown": "A `ConcurrentDictionary` is required whenever stored values are modified.",
+                "correct": false,
+                "explanationMarkdown": "Thread safety is a separate concern; a single-threaded reproduction of this fails in exactly the same way."
+              }
+            ]
+          },
+          "explanationMarkdown": "Mutating any object used as a dictionary key is hazardous, and a record makes every field part of the key by default."
+        },
+        {
+          "id": "v3-a02-i2",
+          "objectiveIds": ["dotnet.interfaces"],
+          "critical": false,
+          "promptMarkdown": "Which observation most strongly suggests an interface should be split?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "implementations-throw",
+                "textMarkdown": "Several implementations throw `NotSupportedException` for a subset of its members.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Those are promises the type cannot keep, so callers cannot rely on the contract."
+              },
+              {
+                "id": "more-than-three-methods",
+                "textMarkdown": "It declares more than three methods.",
+                "correct": false,
+                "explanationMarkdown": "Width is judged by whether implementations can honour the promise, not by a member count."
+              },
+              {
+                "id": "single-implementation",
+                "textMarkdown": "It currently has only one implementation.",
+                "correct": false,
+                "explanationMarkdown": "That may suggest the abstraction is premature, but it does not indicate the interface is too wide."
+              },
+              {
+                "id": "async-methods",
+                "textMarkdown": "It mixes asynchronous and synchronous members.",
+                "correct": false,
+                "explanationMarkdown": "A stylistic inconsistency worth tidying, but unrelated to whether the contract is honest."
+              }
+            ]
+          },
+          "explanationMarkdown": "Look at the implementations, not the declaration; the unimplementable members are the evidence."
+        },
+        {
+          "id": "v3-a02-i3",
+          "objectiveIds": ["dotnet.composition"],
+          "critical": false,
+          "promptMarkdown": "A `ReportBuilder` needs to format currency. Formatting lives in `CurrencyFormatter`. Which relationship fits?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "compose",
+                "textMarkdown": "Composition — hold a formatter and delegate to it, since the builder *uses* formatting.",
+                "correct": true,
+                "explanationMarkdown": "Correct. It is a uses-a relationship, and composing keeps the single inheritance slot free and the dependency substitutable in tests."
+              },
+              {
+                "id": "inherit",
+                "textMarkdown": "Inheritance — derive `ReportBuilder` from `CurrencyFormatter` to call its methods directly.",
+                "correct": false,
+                "explanationMarkdown": "A report builder is not a kind of currency formatter. This couples it to the formatter's data and construction and spends its only base class."
+              },
+              {
+                "id": "static-helper",
+                "textMarkdown": "Neither — make formatting a static method, since it has no state.",
+                "correct": false,
+                "explanationMarkdown": "Tempting, and workable for a pure function, but it removes the seam: locale-specific or test-specific formatting can no longer be substituted."
+              },
+              {
+                "id": "partial-class",
+                "textMarkdown": "Declare both as `partial` classes so they share one implementation.",
+                "correct": false,
+                "explanationMarkdown": "`partial` splits one type across files. It cannot join two distinct types."
+              }
+            ]
+          },
+          "explanationMarkdown": "Is-a chooses inheritance; uses-a chooses composition. Almost every dependency is uses-a."
+        },
+        {
+          "id": "v3-a02-i4",
+          "objectiveIds": ["dotnet.collections"],
+          "critical": true,
+          "promptMarkdown": "A method receives `IEnumerable<Ticket>` and calls `.Any()` then `.Count()` then `.First()`. The caller supplies a database query. What is the consequence?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "query-runs-three-times",
+                "textMarkdown": "The query executes three times — once per enumeration — so the method makes three round trips.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Materialise once with `ToList()`, or accept a type that promises repeatable enumeration."
+              },
+              {
+                "id": "cached-after-first",
+                "textMarkdown": "The result is cached after the first enumeration, so there is one round trip.",
+                "correct": false,
+                "explanationMarkdown": "`IEnumerable<T>` makes no caching promise. Some sources cache, a query does not."
+              },
+              {
+                "id": "compile-error",
+                "textMarkdown": "It does not compile — an `IEnumerable<T>` may only be enumerated once.",
+                "correct": false,
+                "explanationMarkdown": "Repeated enumeration is perfectly legal, which is exactly what makes this defect easy to write."
+              },
+              {
+                "id": "throws-at-runtime",
+                "textMarkdown": "The second enumeration throws `InvalidOperationException`.",
+                "correct": false,
+                "explanationMarkdown": "No exception is raised; the sequence is simply evaluated again, silently and at full cost."
+              }
+            ]
+          },
+          "explanationMarkdown": "The silence is the danger: the code is correct and merely expensive, and a list-backed test never shows it."
+        },
+        {
+          "id": "v3-a02-i5",
+          "objectiveIds": ["dotnet.generics"],
+          "critical": false,
+          "promptMarkdown": "`public T Create<T>() => new T();` does not compile. What is required?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "new-constraint",
+                "textMarkdown": "A `where T : new()` constraint, promising the type has an accessible parameterless constructor.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Without it the compiler cannot assume `T` is constructible at all."
+              },
+              {
+                "id": "class-constraint",
+                "textMarkdown": "A `where T : class` constraint.",
+                "correct": false,
+                "explanationMarkdown": "That promises `T` is a reference type, which says nothing about whether it can be constructed without arguments."
+              },
+              {
+                "id": "reflection-required",
+                "textMarkdown": "Nothing can fix it — generic types can only be created through reflection.",
+                "correct": false,
+                "explanationMarkdown": "`Activator.CreateInstance` is one option, but the `new()` constraint makes `new T()` legal directly and is checked at compile time."
+              },
+              {
+                "id": "make-it-static",
+                "textMarkdown": "The method must be `static` for `new T()` to be legal.",
+                "correct": false,
+                "explanationMarkdown": "Whether the method is static has no bearing on what may be done with a type parameter."
+              }
+            ]
+          },
+          "explanationMarkdown": "Constraints grant capabilities. Each one you add is the compiler being told something it may now rely on."
+        }
+      ],
+      "qualification": { "minimumCorrect": 4, "requireAllCritical": true }
+    }
+  ]
+}

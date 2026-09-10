@@ -690,6 +690,474 @@
       "title": "Rollback and recovery",
       "description": "Restoring service and understanding what a rollback does to data.",
       "release": "v1"
+    },
+    {
+      "id": "db.index-selection",
+      "title": "Index selection",
+      "description": "Choosing an index that a query can actually use, and recognising when one is not helping.",
+      "release": "v2"
+    },
+    {
+      "id": "db.query-plan",
+      "title": "Reading a query plan",
+      "description": "Interpreting the database's execution plan to explain why a query is slow.",
+      "release": "v2"
+    },
+    {
+      "id": "db.cursor-pagination",
+      "title": "Cursor pagination",
+      "description": "Paging with a stable sort key so rows are neither repeated nor skipped between pages.",
+      "release": "v2"
+    },
+    {
+      "id": "db.optimistic-concurrency",
+      "title": "Optimistic concurrency",
+      "description": "Using a revision or version column so a stale edit is rejected rather than silently overwriting.",
+      "release": "v2"
+    },
+    {
+      "id": "db.multi-table-invariants",
+      "title": "Multi-table invariants",
+      "description": "Rules that must hold across more than one table, and keeping them true under concurrent writes.",
+      "release": "v2"
+    },
+    {
+      "id": "db.isolation-levels",
+      "title": "Isolation levels",
+      "description": "What each isolation level does and does not prevent.",
+      "release": "v2"
+    },
+    {
+      "id": "db.locking",
+      "title": "Locking",
+      "description": "How row and table locks serialise conflicting work, and the cost of holding them.",
+      "release": "v2"
+    },
+    {
+      "id": "db.idempotent-submission",
+      "title": "Idempotent submission",
+      "description": "Accepting a repeated submission once, using a stored key rather than hoping for no retries.",
+      "release": "v2"
+    },
+    {
+      "id": "api.filtering",
+      "title": "Filtering and querying",
+      "description": "Exposing filters that are expressive without becoming an open query language.",
+      "release": "v2"
+    },
+    {
+      "id": "api.versioning",
+      "title": "Versioned contracts",
+      "description": "Evolving a response shape without breaking a client that has not been updated.",
+      "release": "v2"
+    },
+    {
+      "id": "api.pagination-compatibility",
+      "title": "Pagination compatibility",
+      "description": "Changing a listing endpoint while existing cursors remain valid.",
+      "release": "v2"
+    },
+    {
+      "id": "api.schema-change-safety",
+      "title": "Safe schema and API change",
+      "description": "Sequencing a change so old and new callers both work during the rollout.",
+      "release": "v2"
+    },
+    {
+      "id": "jobs.state-machine",
+      "title": "Job state machines",
+      "description": "Modelling background work as explicit states rather than implicit flags.",
+      "release": "v2"
+    },
+    {
+      "id": "jobs.retry-backoff",
+      "title": "Retries and backoff",
+      "description": "Retrying transient failures without amplifying an outage.",
+      "release": "v2"
+    },
+    {
+      "id": "jobs.idempotency",
+      "title": "Job idempotency",
+      "description": "Ensuring a rerun does not duplicate committed effects.",
+      "release": "v2"
+    },
+    {
+      "id": "jobs.interrupted-work",
+      "title": "Interrupted work",
+      "description": "Recovering a job that stopped midway without double-applying its effects.",
+      "release": "v2"
+    },
+    {
+      "id": "authz.resource-scoped-permissions",
+      "title": "Resource-scoped permissions",
+      "description": "Deciding access from the resource and the actor together, not from a role alone.",
+      "release": "v2"
+    },
+    {
+      "id": "security.input-output-boundaries",
+      "title": "Input and output boundaries",
+      "description": "Validating what enters the system and controlling what leaves it.",
+      "release": "v2"
+    },
+    {
+      "id": "security.dependency-management",
+      "title": "Dependency handling",
+      "description": "Keeping third-party code current and understanding what it is trusted to do.",
+      "release": "v2"
+    },
+    {
+      "id": "security.secret-handling",
+      "title": "Secret handling",
+      "description": "Keeping credentials out of code, logs, bundles and error responses.",
+      "release": "v2"
+    },
+    {
+      "id": "test.database-backed",
+      "title": "Database-backed tests",
+      "description": "Testing against a real database so constraints and transactions are exercised.",
+      "release": "v2"
+    },
+    {
+      "id": "test.contract-tests",
+      "title": "Contract tests",
+      "description": "Pinning the agreement between a caller and a third-party service.",
+      "release": "v2"
+    },
+    {
+      "id": "test.failure-injection",
+      "title": "Failure injection",
+      "description": "Deliberately failing a dependency to prove the failure path works.",
+      "release": "v2"
+    },
+    {
+      "id": "test.third-party-mocks",
+      "title": "Third-party mocks",
+      "description": "Standing in for an external service repeatably, including its error shapes.",
+      "release": "v2"
+    },
+    {
+      "id": "ui.complex-forms",
+      "title": "Complex forms",
+      "description": "Managing dependent fields, partial validity and submission state.",
+      "release": "v2"
+    },
+    {
+      "id": "ui.large-list-performance",
+      "title": "Large list performance",
+      "description": "Rendering long lists without making interaction slow.",
+      "release": "v2"
+    },
+    {
+      "id": "ui.accessible-async",
+      "title": "Accessible asynchronous interaction",
+      "description": "Announcing loading, success and failure so the interface is usable without sight.",
+      "release": "v2"
+    },
+    {
+      "id": "ui.optimistic-updates",
+      "title": "Optimistic updates",
+      "description": "Showing a result before the server confirms it, and reconciling when it does not.",
+      "release": "v2"
+    },
+    {
+      "id": "ops.structured-diagnostics",
+      "title": "Structured diagnostics",
+      "description": "Emitting logs and identifiers that let a specific request be traced afterwards.",
+      "release": "v2"
+    },
+    {
+      "id": "ops.deployment-recovery",
+      "title": "Deployment recovery",
+      "description": "Getting back to a working state after a bad release.",
+      "release": "v2"
+    },
+    {
+      "id": "ops.code-review",
+      "title": "Code review",
+      "description": "Reviewing a change for correctness, risk and clarity rather than style alone.",
+      "release": "v2"
+    },
+    {
+      "id": "ops.change-proposals",
+      "title": "Change proposals",
+      "description": "Describing a proposed change so someone else can judge it.",
+      "release": "v2"
+    },
+    {
+      "id": "dotnet.values-nullability",
+      "title": "Values and nullability in C#",
+      "description": "Value versus reference types, and what nullable reference types do and do not guarantee.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.control-flow",
+      "title": "C# control flow",
+      "description": "Branching, switching and iteration in C#, including pattern matching.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.methods",
+      "title": "Methods and parameters",
+      "description": "Declaring methods, overloads, optional and out parameters.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.ts-to-csharp",
+      "title": "TypeScript to C# differences",
+      "description": "Where intuition from TypeScript transfers to C# and where it misleads.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.records",
+      "title": "Records",
+      "description": "Value-based equality and non-destructive mutation with records.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.classes",
+      "title": "Classes and encapsulation",
+      "description": "State, behaviour and access control in a class.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.interfaces",
+      "title": "Interfaces",
+      "description": "Defining a contract that several implementations satisfy.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.composition",
+      "title": "Composition",
+      "description": "Assembling behaviour from parts instead of inheriting it.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.collections",
+      "title": "Collections",
+      "description": "Choosing among list, dictionary, set and sequence types.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.generics",
+      "title": "Generics",
+      "description": "Writing type-safe code that works across several types, with constraints.",
+      "release": "v3"
+    },
+    {
+      "id": "linq.filtering",
+      "title": "LINQ filtering",
+      "description": "Selecting elements with Where and its overloads.",
+      "release": "v3"
+    },
+    {
+      "id": "linq.projection",
+      "title": "LINQ projection",
+      "description": "Reshaping elements with Select and Select-many.",
+      "release": "v3"
+    },
+    {
+      "id": "linq.grouping",
+      "title": "LINQ grouping",
+      "description": "Grouping a sequence and working with the resulting groups.",
+      "release": "v3"
+    },
+    {
+      "id": "linq.aggregation",
+      "title": "LINQ aggregation",
+      "description": "Counting, summing and folding a sequence to a single value.",
+      "release": "v3"
+    },
+    {
+      "id": "linq.deferred-execution",
+      "title": "Deferred execution",
+      "description": "When a LINQ query actually runs, and the bugs deferral causes.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.tasks",
+      "title": "Tasks",
+      "description": "What a Task represents and how it completes.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.async-await",
+      "title": "async and await in C#",
+      "description": "Writing asynchronous methods and understanding what await yields.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.cancellation-tokens",
+      "title": "Cancellation tokens",
+      "description": "Propagating cancellation cooperatively through an async call chain.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.async-exceptions",
+      "title": "Exceptions across async boundaries",
+      "description": "How exceptions surface from Tasks, including when they are never observed.",
+      "release": "v3"
+    },
+    {
+      "id": "aspnet.routing",
+      "title": "ASP.NET Core routing",
+      "description": "Mapping a request path to an endpoint.",
+      "release": "v3"
+    },
+    {
+      "id": "aspnet.model-binding",
+      "title": "Model binding",
+      "description": "Turning a request into typed arguments, and what happens when it cannot.",
+      "release": "v3"
+    },
+    {
+      "id": "aspnet.middleware",
+      "title": "Middleware",
+      "description": "The request pipeline and the order its stages run in.",
+      "release": "v3"
+    },
+    {
+      "id": "aspnet.dependency-injection",
+      "title": "Dependency injection",
+      "description": "Registering services and choosing a lifetime that matches their state.",
+      "release": "v3"
+    },
+    {
+      "id": "aspnet.validation",
+      "title": "Request validation",
+      "description": "Rejecting invalid input at the boundary with a useful response.",
+      "release": "v3"
+    },
+    {
+      "id": "aspnet.error-contracts",
+      "title": "Error contracts",
+      "description": "Returning a consistent, non-leaking error shape.",
+      "release": "v3"
+    },
+    {
+      "id": "efcore.entities",
+      "title": "EF Core entities",
+      "description": "Mapping a class to a table.",
+      "release": "v3"
+    },
+    {
+      "id": "efcore.relationships",
+      "title": "EF Core relationships",
+      "description": "Modelling one-to-many and many-to-many relationships.",
+      "release": "v3"
+    },
+    {
+      "id": "efcore.migrations",
+      "title": "EF Core migrations",
+      "description": "Evolving a schema in versioned, reviewable steps.",
+      "release": "v3"
+    },
+    {
+      "id": "efcore.tracking",
+      "title": "Change tracking",
+      "description": "How the context tracks entities, and when tracking is the wrong default.",
+      "release": "v3"
+    },
+    {
+      "id": "efcore.projection",
+      "title": "Projection",
+      "description": "Selecting only the columns needed rather than whole entities.",
+      "release": "v3"
+    },
+    {
+      "id": "efcore.generated-sql",
+      "title": "Generated SQL",
+      "description": "Reading the SQL EF Core produces and recognising a bad translation.",
+      "release": "v3"
+    },
+    {
+      "id": "efcore.transactions",
+      "title": "EF Core transactions",
+      "description": "Grouping writes so they commit or roll back together.",
+      "release": "v3"
+    },
+    {
+      "id": "efcore.concurrency-tokens",
+      "title": "Concurrency tokens",
+      "description": "Detecting a conflicting edit instead of overwriting it.",
+      "release": "v3"
+    },
+    {
+      "id": "efcore.indexes",
+      "title": "Indexes in EF Core",
+      "description": "Declaring indexes and confirming queries use them.",
+      "release": "v3"
+    },
+    {
+      "id": "efcore.query-performance",
+      "title": "Query performance",
+      "description": "Finding and fixing N+1 and other avoidable query costs.",
+      "release": "v3"
+    },
+    {
+      "id": "aspnet.authentication-schemes",
+      "title": "Authentication schemes",
+      "description": "How a request is associated with an identity.",
+      "release": "v3"
+    },
+    {
+      "id": "aspnet.authorization-policies",
+      "title": "Authorization policies",
+      "description": "Expressing an access rule once and applying it consistently.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.resource-ownership",
+      "title": "Resource ownership in .NET",
+      "description": "Scoping data access to the owning user in the query itself.",
+      "release": "v3"
+    },
+    {
+      "id": "test.xunit",
+      "title": "Unit testing with xUnit",
+      "description": "Structuring tests, fixtures and assertions in xUnit.",
+      "release": "v3"
+    },
+    {
+      "id": "test.aspnet-integration",
+      "title": "ASP.NET Core integration tests",
+      "description": "Exercising the real pipeline in a test host.",
+      "release": "v3"
+    },
+    {
+      "id": "test.database-regression",
+      "title": "Database-backed regression tests",
+      "description": "Pinning a fixed defect with a test that runs against a real database.",
+      "release": "v3"
+    },
+    {
+      "id": "ops.dotnet-configuration",
+      "title": "Configuration in .NET",
+      "description": "Layered configuration and where secrets belong.",
+      "release": "v3"
+    },
+    {
+      "id": "ops.dotnet-logging",
+      "title": "Logging in .NET",
+      "description": "Structured logging and log levels.",
+      "release": "v3"
+    },
+    {
+      "id": "dotnet.background-services",
+      "title": "Background services",
+      "description": "Running work outside a request with a hosted service.",
+      "release": "v3"
+    },
+    {
+      "id": "ops.dotnet-deployment",
+      "title": "Deploying a .NET service",
+      "description": "Publishing, configuring and starting the application.",
+      "release": "v3"
+    },
+    {
+      "id": "compare.node-vs-dotnet",
+      "title": "Comparing Node and .NET designs",
+      "description": "Explaining where the two stacks differ in kind rather than syntax.",
+      "release": "v3"
     }
   ]
 }

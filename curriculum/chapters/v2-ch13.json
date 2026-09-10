@@ -1,0 +1,1452 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v2-ch13",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Persistence depth",
+      "conceptIds": [
+        "db.index-selection",
+        "db.query-plan",
+        "db.cursor-pagination",
+        "db.optimistic-concurrency"
+      ],
+      "prerequisiteIds": [
+        "sql.select",
+        "sql.ordering",
+        "sql.pagination",
+        "sql.transactions"
+      ],
+      "bodyMarkdown": "Fernwood Field Services now has four years of jobs in PostgreSQL. Nothing about the schema changed, but the dispatch board that felt instant on a demo database takes eleven seconds, and a dispatcher paging through this morning's jobs keeps seeing the same job twice.\n\nNeither problem is a bug in the usual sense. The queries return correct answers. What changed is scale and concurrency, and both expose assumptions the code never stated: that the database would find rows quickly whatever you asked for, that a page of results is a stable thing, and that whoever saved last had seen what they were overwriting.\n\nThis chapter is about making those assumptions explicit. You will learn to predict which index a query can actually use rather than hoping one helps, to read the plan the database publishes about its own decisions, to paginate on a key instead of an offset so rows are neither repeated nor skipped, and to detect a conflicting edit instead of silently discarding someone's work.\n\nThe through-line is that a database will tell you what it is doing if you ask it, and will enforce what you declare if you declare it. Guesswork is optional.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v2-l01",
+        "v2-l02",
+        "v2-l03"
+      ],
+      "assessmentId": "v2-a13",
+      "objectiveIds": [
+        "db.index-selection",
+        "db.query-plan",
+        "db.cursor-pagination",
+        "db.optimistic-concurrency"
+      ],
+      "missionIds": [],
+      "sortOrder": 12
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Indexes the planner will actually use",
+      "conceptIds": [
+        "db.index-selection",
+        "db.query-plan"
+      ],
+      "prerequisiteIds": [
+        "sql.select",
+        "sql.ordering"
+      ],
+      "bodyMarkdown": "An index is a sorted structure. Almost everything that surprises people about indexes follows from that one fact.\n\nPostgreSQL's default index is a B-tree, and a B-tree on `(depot_id, scheduled_for)` is sorted by `depot_id` first, then by `scheduled_for` within each depot. That ordering is why the **leading column rule** holds: the planner can only use a prefix of the index columns, starting from the left. A query filtering on `depot_id` can use it. A query filtering on `scheduled_for` alone cannot, any more than you could find every surname beginning with R in a phone book sorted by town.\n\nThe prefix extends while the predicates are **equalities**. Once you use a **range** (`<`, `>`, `BETWEEN`), the index is positioned at a span rather than a point, and columns after that one can no longer narrow the search — they are merely along for the ride. So with an index on `(depot_id, scheduled_for, status)`:\n\n- `depot_id = 3 AND scheduled_for = '2026-03-01'` uses two columns.\n- `depot_id = 3 AND scheduled_for > '2026-03-01' AND status = 'open'` still uses only two: the range stops the prefix, and `status` is filtered afterwards.\n\nThe second surprise is that a usable index is not always a *worthwhile* index. If 90% of rows have `status = 'open'`, an index on `status` identifies most of the table, and reading most of a table through an index is slower than reading it sequentially. This is **selectivity**, and it is why the planner sometimes refuses a perfectly valid index. A sequential scan is not a failure; it is often the right answer.\n\nWhich brings us to the plan. `EXPLAIN` asks the planner what it intends to do; `EXPLAIN ANALYZE` runs the query and reports what actually happened. The difference between those two is the single most useful diagnostic you have, because the planner chooses based on **estimates**. When the estimate says 12 rows and reality says 480,000, the plan was chosen for a query that does not exist, and the fix is usually statistics rather than a new index.\n\nRead a plan from the inside out: the most indented node runs first, and each node reports `cost`, `rows` (estimated) and, under ANALYZE, `actual rows` and `loops`.",
+      "chapterId": "v2-ch13",
+      "sortOrder": 0,
+      "objectives": [
+        "Predict which leading columns of a composite index a given query can use.",
+        "Explain why a valid index may still be rejected in favour of a sequential scan.",
+        "Name the cause of a slow plan from the gap between estimated and actual rows."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "The dispatch board query, and what the database says about it.\n\n```sql\nCREATE INDEX jobs_depot_sched ON jobs (depot_id, scheduled_for);\n\nEXPLAIN ANALYZE\nSELECT id, scheduled_for, status\n  FROM jobs\n WHERE depot_id = 3\n   AND scheduled_for >= DATE '2026-03-01'\n ORDER BY scheduled_for\n LIMIT 50;\n```\n\n```\nLimit  (cost=0.43..38.21 rows=50 width=24)\n        (actual time=0.031..0.204 rows=50 loops=1)\n  ->  Index Scan using jobs_depot_sched on jobs\n        (cost=0.43..1420.88 rows=1893 width=24)\n        (actual time=0.029..0.196 rows=50 loops=1)\n        Index Cond: ((depot_id = 3) AND (scheduled_for >= '2026-03-01'::date))\nPlanning Time: 0.180 ms\nExecution Time: 0.240 ms\n```\n\nFour things are worth reading carefully.\n\n**`Index Cond` lists both columns.** The equality on `depot_id` positions the scan; the range on `scheduled_for` bounds it. Both are inside the index, so neither costs a trip to the table to evaluate.\n\n**There is no `Sort` node.** The index is already ordered by `scheduled_for` within a depot, and the query filters to one depot, so the rows arrive in the requested order. That is the index doing a second job.\n\n**`rows=1893` versus `actual rows=50`.** Not an estimation error — the `LIMIT` stopped the scan early. The Index Scan node estimates what it *would* produce if drained.\n\n**Compare with the same query filtering on `status` instead:**\n\n```\nSeq Scan on jobs  (cost=0.00..9203.00 rows=442100 width=24)\n                  (actual time=0.012..286.4 rows=441866 loops=1)\n  Filter: (status = 'open'::text)\n  Rows Removed by Filter: 48134\n```\n\nAn index on `status` exists here and was not used. With 441,866 of 490,000 rows matching, the planner is right: an index scan would visit almost every row of the table in random order, which is slower than reading it straight through.",
+      "commonMistakes": [
+        "Adding an index per column in the WHERE clause instead of one composite index in the order the query filters.",
+        "Putting the range column before the equality column in a composite index, which throws away every column after it.",
+        "Reading `rows=` in a plan as a measurement; it is an estimate, and the gap to `actual rows` is the diagnostic.",
+        "Treating a Seq Scan as proof that an index is missing, when low selectivity means the planner deliberately declined one.",
+        "Adding an index to fix a slow query without re-running EXPLAIN afterwards to confirm it was adopted.",
+        "Forgetting that every index is maintained on write, so an index that serves one rare report taxes every insert."
+      ],
+      "summaryMarkdown": "A B-tree index is sorted left to right, so a query can use a prefix of its columns and no more. Equality predicates extend the prefix; the first range predicate ends it. A usable index is still declined when it is not selective, because reading most of a table through an index is slower than scanning it. `EXPLAIN ANALYZE` shows both the plan and the truth, and the gap between estimated and actual rows is usually where the answer is.",
+      "exerciseIds": [
+        "v2-e001",
+        "v2-e002",
+        "v2-e003"
+      ],
+      "reviewCardIds": [
+        "v2-c001",
+        "v2-c002"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: Multicolumn indexes",
+          "url": "https://www.postgresql.org/docs/current/indexes-multicolumn.html"
+        },
+        {
+          "label": "PostgreSQL: Using EXPLAIN",
+          "url": "https://www.postgresql.org/docs/current/using-explain.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e001",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose the index the query can use",
+      "conceptIds": [
+        "db.index-selection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the leading-column rule to a concrete dispatch query before writing any code.",
+      "lessonId": "v2-l01",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "The jobs table is large. This query runs on every dispatch board load:\n\n```sql\nSELECT id, scheduled_for\n  FROM jobs\n WHERE depot_id = 3\n   AND status = 'open'\n ORDER BY scheduled_for\n LIMIT 50;\n```\n\n`depot_id` has 40 distinct values across 500,000 rows. `status` is `'open'` for about 90% of rows.\n\nWhich index best serves this query?",
+      "hints": [
+        "Two of these columns narrow the search and one barely does. Which one eliminates the most rows?",
+        "A composite B-tree is usable left to right, and a column used only for ORDER BY can still be served by the index if it comes after the equality columns.",
+        "You want the selective equality first, then the column the query orders by, so the index both filters and supplies the sort order."
+      ],
+      "solution": {
+        "modelAnswer": "depot-sched",
+        "explanationMarkdown": "`(depot_id, scheduled_for)` filters on the selective column and then hands back rows already in `scheduled_for` order, so the `LIMIT 50` stops after fifty rows with no sort step. `status` is deliberately absent: at 90% selectivity it removes almost nothing, and adding it before `scheduled_for` would break the ordering benefit."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "depot-sched",
+            "textMarkdown": "`CREATE INDEX ON jobs (depot_id, scheduled_for)`",
+            "correct": true,
+            "explanationMarkdown": "Correct. The equality on `depot_id` positions the scan, and because the index is then ordered by `scheduled_for` within that depot, the ORDER BY and LIMIT are satisfied without a sort."
+          },
+          {
+            "id": "status-first",
+            "textMarkdown": "`CREATE INDEX ON jobs (status, depot_id, scheduled_for)`",
+            "correct": false,
+            "explanationMarkdown": "Leading with `status` wastes the most valuable position in the index. It matches 90% of rows, so the scan starts by positioning inside almost the whole table. Put the selective column first."
+          },
+          {
+            "id": "sched-only",
+            "textMarkdown": "`CREATE INDEX ON jobs (scheduled_for)`",
+            "correct": false,
+            "explanationMarkdown": "This supplies the ordering but does no filtering, so the database walks the whole date range checking each row's depot. It helps only if almost every row matched the filter anyway."
+          },
+          {
+            "id": "three-separate",
+            "textMarkdown": "Three separate single-column indexes on `depot_id`, `status` and `scheduled_for`",
+            "correct": false,
+            "explanationMarkdown": "A common instinct, and usually the wrong one. Separate indexes cannot be walked as one sorted structure; at best the planner combines two with a bitmap, which still costs a sort for the ORDER BY. One composite index in query order beats three single ones."
+          }
+        ]
+      },
+      "primaryConceptId": "db.index-selection",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e002",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Compute the usable index prefix",
+      "conceptIds": [
+        "db.index-selection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Turn the leading-column rule into code, so the rule stops being a thing you half-remember.",
+      "lessonId": "v2-l01",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Implement `usablePrefix(indexColumns, predicates)`.\n\n`indexColumns` is an array of column names in index order, e.g. `['depot_id', 'scheduled_for', 'status']`.\n\n`predicates` is an array of `{ column, op }`, where `op` is `'eq'` or `'range'`. Order within this array is irrelevant — a WHERE clause is a set of conditions, not a sequence.\n\nReturn **how many leading index columns the planner can use**, following the rule:\n\n- Walk the index from the left.\n- While the current column has an `'eq'` predicate, count it and continue.\n- If the current column has a `'range'` predicate, count it and **stop**.\n- Otherwise stop.\n\nDo not modify either argument.",
+      "hints": [
+        "The answer depends on index order, not on the order the predicates were written. What do you need to look up as you walk the columns?",
+        "Walking left to right, each column has one of three outcomes: an equality (keep going), a range (take it and stop), or nothing (stop). Only one of those continues the loop.",
+        "Loop over `indexColumns`; for each, search `predicates` for a matching column. On `'eq'` increment and continue; on `'range'` increment and break; if not found, break. Return the count."
+      ],
+      "solution": {
+        "code": "function usablePrefix(indexColumns, predicates) {\n  let used = 0;\n  for (let i = 0; i < indexColumns.length; i += 1) {\n    const column = indexColumns[i];\n    let op = null;\n    for (let j = 0; j < predicates.length; j += 1) {\n      if (predicates[j].column === column) {\n        op = predicates[j].op;\n        break;\n      }\n    }\n    if (op === 'eq') {\n      used += 1;\n    } else if (op === 'range') {\n      used += 1;\n      break;\n    } else {\n      break;\n    }\n  }\n  return used;\n}",
+        "explanationMarkdown": "The outer loop is the index order and the inner lookup is the WHERE clause — keeping those separate is the whole exercise, because the bug people write is to iterate the predicates and count matches, which returns 2 for an index on `(a, b)` queried by `b` and `a`... and also returns 2 when only `b` is present, which is wrong.\n\nThe `break` after a range predicate is the part that maps to real behaviour. Once the scan is positioned on a span rather than a point, later columns are not sorted within that span, so they cannot narrow it further. They are still *filtered*, just not *searched*, which is why the plan shows them under `Filter` rather than `Index Cond`."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "usablePrefix",
+        "starterCode": "function usablePrefix(indexColumns, predicates) {\n  // Counts every predicate that names an indexed column, ignoring order.\n  let used = 0;\n  for (let i = 0; i < predicates.length; i += 1) {\n    if (indexColumns.indexOf(predicates[i].column) !== -1) {\n      used += 1;\n    }\n  }\n  return used;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "no-predicates",
+            "args": [
+              [
+                "depot_id",
+                "scheduled_for"
+              ],
+              []
+            ],
+            "expected": 0,
+            "hidden": false
+          },
+          {
+            "id": "two-equalities",
+            "args": [
+              [
+                "depot_id",
+                "scheduled_for",
+                "status"
+              ],
+              [
+                {
+                  "column": "depot_id",
+                  "op": "eq"
+                },
+                {
+                  "column": "scheduled_for",
+                  "op": "eq"
+                }
+              ]
+            ],
+            "expected": 2,
+            "hidden": false
+          },
+          {
+            "id": "skips-leading-column",
+            "args": [
+              [
+                "depot_id",
+                "scheduled_for",
+                "status"
+              ],
+              [
+                {
+                  "column": "scheduled_for",
+                  "op": "eq"
+                },
+                {
+                  "column": "status",
+                  "op": "eq"
+                }
+              ]
+            ],
+            "expected": 0,
+            "hidden": false
+          },
+          {
+            "id": "range-ends-the-prefix",
+            "args": [
+              [
+                "depot_id",
+                "scheduled_for",
+                "status"
+              ],
+              [
+                {
+                  "column": "depot_id",
+                  "op": "eq"
+                },
+                {
+                  "column": "scheduled_for",
+                  "op": "range"
+                },
+                {
+                  "column": "status",
+                  "op": "eq"
+                }
+              ]
+            ],
+            "expected": 2,
+            "hidden": false
+          },
+          {
+            "id": "leading-range-counts-once",
+            "args": [
+              [
+                "scheduled_for",
+                "depot_id"
+              ],
+              [
+                {
+                  "column": "scheduled_for",
+                  "op": "range"
+                }
+              ]
+            ],
+            "expected": 1,
+            "hidden": false
+          },
+          {
+            "id": "predicate-order-is-irrelevant",
+            "args": [
+              [
+                "depot_id",
+                "scheduled_for",
+                "status"
+              ],
+              [
+                {
+                  "column": "status",
+                  "op": "eq"
+                },
+                {
+                  "column": "scheduled_for",
+                  "op": "eq"
+                },
+                {
+                  "column": "depot_id",
+                  "op": "eq"
+                }
+              ]
+            ],
+            "expected": 3,
+            "hidden": false
+          },
+          {
+            "id": "unindexed-predicate-ignored",
+            "args": [
+              [
+                "depot_id",
+                "scheduled_for"
+              ],
+              [
+                {
+                  "column": "depot_id",
+                  "op": "eq"
+                },
+                {
+                  "column": "crew_id",
+                  "op": "eq"
+                }
+              ]
+            ],
+            "expected": 1,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "db.index-selection",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e003",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the slow plan",
+      "conceptIds": [
+        "db.query-plan"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read a real plan and name the cause before proposing a change.",
+      "lessonId": "v2-l01",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "A nightly export got slow. The index it needs exists and is being used. Here is the plan:\n\n```\nNested Loop  (cost=0.86..184.20 rows=12 width=64)\n             (actual time=0.084..9412.7 rows=41883 loops=1)\n  ->  Index Scan using jobs_status_idx on jobs\n        (cost=0.43..18.60 rows=12 width=24)\n        (actual time=0.031..38.2 rows=41883 loops=1)\n        Index Cond: (status = 'exported'::text)\n  ->  Index Scan using crews_pkey on crews\n        (cost=0.43..13.80 rows=1 width=48)\n        (actual time=0.216..0.224 rows=1 loops=41883)\n        Index Cond: (id = jobs.crew_id)\nExecution Time: 9420.1 ms\n```\n\nWhat is the primary cause of the nine seconds?",
+      "hints": [
+        "Compare the estimated row count with the actual row count on the first Index Scan. How far apart are they?",
+        "The `loops=` value on the inner node tells you how many times it ran. A Nested Loop is a good choice for 12 outer rows and a poor one for tens of thousands.",
+        "The planner chose a join strategy that suits a tiny outer input. It believed the outer input was tiny because its estimate was wrong by three orders of magnitude — so the fix is the estimate, not the join."
+      ],
+      "solution": {
+        "modelAnswer": "stale-estimate",
+        "explanationMarkdown": "The first Index Scan estimated 12 rows and produced 41,883 — off by a factor of 3,500. Every downstream decision was made for a query returning a dozen rows. A Nested Loop is excellent there; at 41,883 outer rows it runs the inner scan 41,883 times, and `loops=41883` at 0.22 ms each is essentially the whole runtime.\n\nThe important habit is the order of reasoning. The Nested Loop is the *symptom*; the bad estimate is the *cause*. Forcing a different join, or adding another index, treats the symptom and leaves the planner still blind. Run `ANALYZE jobs` so the statistics reflect the current distribution, then re-check the plan — with a realistic estimate the planner will usually pick a hash join by itself."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "stale-estimate",
+            "textMarkdown": "The planner's row estimate for the outer scan is wrong by three orders of magnitude, so it chose a Nested Loop that then ran the inner scan 41,883 times.",
+            "correct": true,
+            "explanationMarkdown": "Correct. `rows=12` versus `actual rows=41883` is the tell, and `loops=41883` on the inner node is where the time went. Refresh the statistics with ANALYZE before changing anything else."
+          },
+          {
+            "id": "missing-index",
+            "textMarkdown": "The `crews` lookup has no index, so each iteration scans the table.",
+            "correct": false,
+            "explanationMarkdown": "The plan says otherwise: the inner node is an `Index Scan using crews_pkey` taking 0.22 ms. It is fast per call — the problem is that it is called 41,883 times."
+          },
+          {
+            "id": "wrong-index",
+            "textMarkdown": "`jobs_status_idx` is not selective enough and should be replaced with a composite index.",
+            "correct": false,
+            "explanationMarkdown": "Plausible, and worth considering separately, but the outer scan took only 38 ms of the 9,420. Replacing it cannot recover time that was spent in the inner loop."
+          },
+          {
+            "id": "too-much-data",
+            "textMarkdown": "41,883 rows is simply too much data to export in one query.",
+            "correct": false,
+            "explanationMarkdown": "41,883 rows is a small result set; a hash join would return it in well under a second. Treating volume as the cause hides a fixable planning problem."
+          }
+        ]
+      },
+      "primaryConceptId": "db.query-plan",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c001",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "How far into a composite index can a query reach?",
+      "conceptIds": [
+        "db.index-selection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the rule that decides how much of an index is usable.",
+      "lessonId": "v2-l01",
+      "type": "recall",
+      "promptMarkdown": "An index exists on `(a, b, c)`. A query filters `a = 1 AND b > 5 AND c = 9`. How many index columns can the planner use to search, and why?",
+      "answerMarkdown": "Two: `a` and `b`. The equality on `a` positions the scan, the range on `b` bounds it, and the prefix ends there. `c` is still checked, but as a filter on rows the index returned, not as part of the search.",
+      "explanationMarkdown": "A B-tree is sorted left to right, so rows are only ordered by `c` *within* a fixed `a` and `b`. A range on `b` spans many `b` values, and across that span `c` is not in order — so it cannot narrow the search. In a plan this shows up as `c` appearing under `Filter` rather than `Index Cond`.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.index-selection"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c002",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Estimated rows versus actual rows",
+      "conceptIds": [
+        "db.query-plan"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the plan-reading habit to a new plan.",
+      "lessonId": "v2-l01",
+      "type": "transfer",
+      "promptMarkdown": "A plan node reads `(cost=0.43..18.60 rows=9 width=24) (actual time=0.03..44.1 rows=88214 loops=1)`. What should you do first, and what should you *not* do first?",
+      "answerMarkdown": "First: refresh the statistics (`ANALYZE` the table) and re-read the plan, because every choice above this node was made for a nine-row input. Not first: add an index or rewrite the join — those treat the plan the estimate produced rather than the estimate itself.",
+      "explanationMarkdown": "A 9-versus-88,214 gap means the planner is optimising a query that does not exist. Join strategy, memory allocation and whether an index is worth using all follow from row estimates, so a wrong estimate can produce a badly wrong plan out of entirely reasonable rules. Fixing the input to the decision is cheaper and more durable than overriding the decision.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.query-plan"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Cursor pagination that never repeats a row",
+      "conceptIds": [
+        "db.cursor-pagination"
+      ],
+      "prerequisiteIds": [
+        "sql.pagination",
+        "sql.ordering"
+      ],
+      "bodyMarkdown": "`LIMIT 20 OFFSET 40` asks the database for the third page by counting rows and throwing the first forty away. That works perfectly on a table nobody is writing to, and the dispatch board is not one of those.\n\nConsider a dispatcher on page 3 while a colleague files a new job that sorts to the top. Every row shifts down one position. The row that was at offset 40 is now at 41, so page 4 begins with a row the dispatcher has already seen. Delete a row instead and the shift goes the other way: a row moves from offset 60 to 59 and is skipped entirely, never appearing on any page. Nothing errors. The dispatcher simply does not see a job.\n\nThere is a second cost. `OFFSET 10000` requires the database to produce and discard ten thousand rows before returning anything, so deep pages get linearly slower.\n\n**Keyset pagination** — often called cursor pagination — fixes both by remembering *where you were* instead of *how many you skipped*. The client sends back the sort values of the last row it saw, and the next page is everything strictly after them:\n\n```sql\nSELECT id, scheduled_for FROM jobs\n WHERE (scheduled_for, id) > ($1, $2)\n ORDER BY scheduled_for, id\n LIMIT 20;\n```\n\nInsertions and deletions elsewhere no longer move the boundary, because the boundary is a row, not a count. And with an index on `(scheduled_for, id)` the database seeks straight to it, so page 500 costs the same as page 1.\n\nTwo details make or break it.\n\n**The sort must be total.** `ORDER BY scheduled_for` alone is not, because many jobs share a timestamp. Rows tied on `scheduled_for` may come back in any order, and in a different order on the next query — so a tied row can be repeated or skipped even with a correct cursor. Appending a unique column, usually the primary key, makes the order total. That is why the comparison is on the **tuple** `(scheduled_for, id)` and not on `scheduled_for` with `id` bolted on as a second condition.\n\n**A cursor can go stale.** If the row it names is deleted, `(scheduled_for, id) > (...)` still works, because the comparison is on values rather than on the row's continued existence. But if you implement the cursor by *finding* the row first, deletion leaves you with nothing to compare against, and you must decide deliberately: an empty page is honest, while silently restarting from the beginning makes a client loop forever.",
+      "chapterId": "v2-ch13",
+      "sortOrder": 1,
+      "objectives": [
+        "Explain how OFFSET pagination repeats and skips rows when the table changes underneath it.",
+        "Build a keyset cursor whose sort order is total, so ties cannot reorder between pages.",
+        "Decide what a page should return when the cursor names a row that no longer exists."
+      ],
+      "estimatedMinutes": 17,
+      "workedExampleMarkdown": "The same six jobs, paged two ways, while one row is inserted between requests.\n\nStarting data, ordered by `scheduled_for, id`:\n\n```\nid=11  09:00      id=12  09:00      id=13  10:00\nid=14  11:00      id=15  12:00      id=16  13:00\n```\n\n**Offset pagination.** Page 1 is `LIMIT 2 OFFSET 0` and returns `11, 12`. Before page 2, a job is filed at 08:00 with `id=17`. The ordering is now `17, 11, 12, 13, 14, 15, 16`. Page 2 is `LIMIT 2 OFFSET 2`, which counts past `17, 11` and returns:\n\n```\nid=12  09:00      id=13  10:00\n```\n\n`12` appears on both pages, and `17` — which sorts before everything — is never shown at all. Two defects from one insert, and no error anywhere.\n\n**Keyset pagination.** Page 1 returns `11, 12` and a cursor of `('09:00', 12)`. The same insert happens. Page 2 asks for `(scheduled_for, id) > ('09:00', 12)`:\n\n```\nid=13  10:00      id=14  11:00\n```\n\nNo repeat, no skip. `17` is missed only in the sense that it sorts *behind* where the dispatcher has already read — which is the correct behaviour for a forward scan, and is exactly what a refresh is for.\n\n**Why the tuple matters.** Suppose the cursor were only `scheduled_for = '09:00'` with a condition `scheduled_for > '09:00'`. Job `12` would be excluded correctly, but so would any *other* job at 09:00 that had not yet been shown. Conversely a `>=` would repeat `11` and `12`. Only comparing the pair gets both edges right:\n\n```\n(scheduled_for, id) > ('09:00', 12)\n  → ('09:00', 13) qualifies   (same time, later id)\n  → ('09:00', 11) does not     (same time, earlier id)\n  → ('10:00',  1) qualifies    (later time, id irrelevant)\n```",
+      "commonMistakes": [
+        "Ordering by a non-unique column and assuming the database will break ties consistently between two queries.",
+        "Comparing the tie-break column with a separate AND clause instead of comparing the tuple, which drops rows sharing the sort value.",
+        "Sending the row's array position as the cursor, which is an offset wearing a cursor's clothes and shifts for the same reasons.",
+        "Restarting from the first page when the cursor is unknown, so a client whose row was deleted loops through the list forever.",
+        "Paginating on a column the index does not order by, which forces a full sort before the LIMIT can apply.",
+        "Exposing the raw primary key as the only cursor when the sort is by date, so the boundary and the ordering disagree."
+      ],
+      "summaryMarkdown": "OFFSET counts rows, so any insert or delete before your position repeats or skips a row, and deep pages get slower. A keyset cursor remembers the last row's sort values and asks for everything strictly after them, which is stable under concurrent writes and equally fast at any depth. The sort must be total — compare the tuple, including a unique tie-break — and a cursor naming a deleted row needs a deliberate answer rather than a silent restart.",
+      "exerciseIds": [
+        "v2-e004",
+        "v2-e005",
+        "v2-e006"
+      ],
+      "reviewCardIds": [
+        "v2-c003",
+        "v2-c004"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: LIMIT and OFFSET",
+          "url": "https://www.postgresql.org/docs/current/queries-limit.html"
+        },
+        {
+          "label": "PostgreSQL: Row constructor comparison",
+          "url": "https://www.postgresql.org/docs/current/functions-comparisons.html#ROW-WISE-COMPARISON"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e004",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Page with a total-order cursor",
+      "conceptIds": [
+        "db.cursor-pagination"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The database applies the cursor; your code decides what the cursor *is*. That decision is pure logic, and it is what you write here.",
+      "lessonId": "v2-l02",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `pageAfter(rows, cursor, size)`.\n\n`rows` is an array of `{ id, scheduledFor }`, already sorted by `scheduledFor` then `id`, exactly as `ORDER BY scheduled_for, id` would return them.\n\n`cursor` is either `null` (start at the beginning) or `{ scheduledFor, id }` naming the last row the client saw.\n\nReturn `{ ids, nextCursor }` where:\n\n- `ids` holds the ids of the next `size` rows **strictly after** the cursor, comparing the pair `(scheduledFor, id)` — a row qualifies if its `scheduledFor` is greater, **or** if `scheduledFor` is equal and its `id` is greater. Compare `scheduledFor` as a string.\n- `nextCursor` is `{ scheduledFor, id }` of the last row in `ids`, or `null` when `ids` is empty.\n\nRules:\n\n- `size` of `0` or less returns `{ ids: [], nextCursor: null }`.\n- Return fewer than `size` ids when fewer remain; never pad.\n- A cursor whose row is no longer present must still work: compare values, do not look the row up.\n- Do not modify `rows` or `cursor`.",
+      "hints": [
+        "Two decisions again: which rows qualify, and how many of them you take. Only the first one involves the cursor.",
+        "'Strictly after' on a pair is not one comparison but two: a later `scheduledFor` always qualifies; an equal `scheduledFor` qualifies only when the id is greater. Getting the equal case wrong is what repeats or drops tied rows.",
+        "Walk `rows`; skip while the row is not strictly after the cursor; collect ids until you have `size`. Build `nextCursor` from the last row you collected, not from the last row of `rows`."
+      ],
+      "solution": {
+        "code": "function pageAfter(rows, cursor, size) {\n  if (size <= 0) return { ids: [], nextCursor: null };\n  const ids = [];\n  let last = null;\n  for (let i = 0; i < rows.length && ids.length < size; i += 1) {\n    const row = rows[i];\n    let after = true;\n    if (cursor !== null && cursor !== undefined) {\n      if (row.scheduledFor < cursor.scheduledFor) {\n        after = false;\n      } else if (row.scheduledFor === cursor.scheduledFor && row.id <= cursor.id) {\n        after = false;\n      }\n    }\n    if (after) {\n      ids.push(row.id);\n      last = row;\n    }\n  }\n  const nextCursor = last === null\n    ? null\n    : { scheduledFor: last.scheduledFor, id: last.id };\n  return { ids, nextCursor };\n}",
+        "explanationMarkdown": "The cursor names a **row's values**, not its position, which is why an insert earlier in the order cannot move the page boundary and why a deleted cursor row still works — nothing here looks the row up.\n\nThe tuple comparison is the whole correctness argument. `row.scheduledFor > cursor.scheduledFor` qualifies regardless of id. Equal timestamps fall back to `row.id > cursor.id`, which is written here as its negation. Using `<` on the id instead of `<=` would return the cursor row itself at the top of every page; ignoring the id entirely would drop every other job sharing that timestamp.\n\n`nextCursor` is built from the last **collected** row rather than the last row scanned, so a partial final page hands back a cursor the client can still use, and an empty page hands back `null` to signal the end rather than a cursor that would loop."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "pageAfter",
+        "starterCode": "function pageAfter(rows, cursor, size) {\n  // Compares only the timestamp, so rows tied on scheduledFor are lost.\n  const ids = [];\n  for (let i = 0; i < rows.length && ids.length < size; i += 1) {\n    if (cursor === null || rows[i].scheduledFor > cursor.scheduledFor) {\n      ids.push(rows[i].id);\n    }\n  }\n  return { ids: ids, nextCursor: null };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "first-page",
+            "args": [
+              [
+                {
+                  "id": 11,
+                  "scheduledFor": "09:00"
+                },
+                {
+                  "id": 12,
+                  "scheduledFor": "09:00"
+                },
+                {
+                  "id": 13,
+                  "scheduledFor": "10:00"
+                }
+              ],
+              null,
+              2
+            ],
+            "expected": {
+              "ids": [
+                11,
+                12
+              ],
+              "nextCursor": {
+                "scheduledFor": "09:00",
+                "id": 12
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "tie-on-timestamp-is-not-skipped",
+            "args": [
+              [
+                {
+                  "id": 11,
+                  "scheduledFor": "09:00"
+                },
+                {
+                  "id": 12,
+                  "scheduledFor": "09:00"
+                },
+                {
+                  "id": 13,
+                  "scheduledFor": "10:00"
+                }
+              ],
+              {
+                "scheduledFor": "09:00",
+                "id": 11
+              },
+              2
+            ],
+            "expected": {
+              "ids": [
+                12,
+                13
+              ],
+              "nextCursor": {
+                "scheduledFor": "10:00",
+                "id": 13
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "cursor-row-deleted-still-pages",
+            "args": [
+              [
+                {
+                  "id": 11,
+                  "scheduledFor": "09:00"
+                },
+                {
+                  "id": 13,
+                  "scheduledFor": "10:00"
+                }
+              ],
+              {
+                "scheduledFor": "09:00",
+                "id": 12
+              },
+              5
+            ],
+            "expected": {
+              "ids": [
+                13
+              ],
+              "nextCursor": {
+                "scheduledFor": "10:00",
+                "id": 13
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "end-of-list",
+            "args": [
+              [
+                {
+                  "id": 11,
+                  "scheduledFor": "09:00"
+                }
+              ],
+              {
+                "scheduledFor": "09:00",
+                "id": 11
+              },
+              5
+            ],
+            "expected": {
+              "ids": [],
+              "nextCursor": null
+            },
+            "hidden": false
+          },
+          {
+            "id": "zero-size",
+            "args": [
+              [
+                {
+                  "id": 11,
+                  "scheduledFor": "09:00"
+                }
+              ],
+              null,
+              0
+            ],
+            "expected": {
+              "ids": [],
+              "nextCursor": null
+            },
+            "hidden": false
+          },
+          {
+            "id": "partial-final-page",
+            "args": [
+              [
+                {
+                  "id": 11,
+                  "scheduledFor": "09:00"
+                },
+                {
+                  "id": 12,
+                  "scheduledFor": "09:00"
+                },
+                {
+                  "id": 13,
+                  "scheduledFor": "10:00"
+                }
+              ],
+              {
+                "scheduledFor": "09:00",
+                "id": 12
+              },
+              10
+            ],
+            "expected": {
+              "ids": [
+                13
+              ],
+              "nextCursor": {
+                "scheduledFor": "10:00",
+                "id": 13
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "empty-table",
+            "args": [
+              [],
+              null,
+              3
+            ],
+            "expected": {
+              "ids": [],
+              "nextCursor": null
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "db.cursor-pagination",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e005",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the duplicated row across pages",
+      "conceptIds": [
+        "db.cursor-pagination"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A support ticket says a job appeared twice. Read the trace and say why.",
+      "lessonId": "v2-l02",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "The board pages with `ORDER BY scheduled_for DESC LIMIT 20 OFFSET $n`. A dispatcher reports seeing job `4471` on both page 2 and page 3. The server log for their session:\n\n```\n10:04:02  GET /jobs?page=2   OFFSET 20  -> ids [..., 4471]      (20 rows)\n10:04:09  POST /jobs         created id 4520 scheduled_for 15:30\n10:04:11  GET /jobs?page=3   OFFSET 40  -> ids [4471, ...]      (20 rows)\n```\n\nAt 10:04:02 the table held 300 jobs; `4520` sorts newest-first, so it lands at the top of the ordering.\n\nWhy did `4471` appear twice?",
+      "hints": [
+        "Nothing about job 4471 changed between the two requests. Something about its *position* did.",
+        "OFFSET is a count of rows to discard, evaluated fresh on each request against the table as it is at that moment.",
+        "The insert at 10:04:09 pushed every existing row one position later in the ordering. The row previously at offset 39 is now at offset 40 — and offset 40 is where page 3 starts."
+      ],
+      "solution": {
+        "modelAnswer": "insert-shifted-offsets",
+        "explanationMarkdown": "Inserting `4520` at the top shifted every existing row down one position. Job `4471` was the last row of page 2 at offset 39; after the insert it sits at offset 40, which is the first row page 3 asks for. The query is correct on both occasions — it is the *table* that moved between them.\n\nThe mirror-image defect is worse because nobody reports it: delete a row above the reader's position and everything shifts up one, so a row moves from offset 40 to 39 and is never returned by any page. A job silently missing from a dispatch board is a far more expensive bug than a job shown twice.\n\nBoth disappear under a keyset cursor, because the boundary becomes 'after this row's sort values' rather than 'past this many rows'. Note also that `ORDER BY scheduled_for DESC` alone is not a total order: two jobs sharing a timestamp can swap between requests and cause the same symptom with no writes at all."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "insert-shifted-offsets",
+            "textMarkdown": "The insert at 10:04:09 sorted above the reader's position, shifting every later row one place, so the row at offset 39 became the row at offset 40.",
+            "correct": true,
+            "explanationMarkdown": "Correct. OFFSET counts rows in the table as it exists at query time, so any insert before the reader's position repeats a row — and any delete skips one."
+          },
+          {
+            "id": "cache",
+            "textMarkdown": "Page 2 was served from a stale cache that still contained the old ordering.",
+            "correct": false,
+            "explanationMarkdown": "The log shows both pages hitting the database seven seconds apart with different OFFSET values. A cache would repeat an identical page, not shift a single row across a boundary."
+          },
+          {
+            "id": "transaction",
+            "textMarkdown": "The two requests ran in different transactions, so they saw different snapshots of the table.",
+            "correct": false,
+            "explanationMarkdown": "True but not the cause. Even in one snapshot the same shift would occur if the insert were visible; and conversely a repeatable-read snapshot for a whole paging session is impractical for a long-lived UI. The instability is in the offset, not the isolation level."
+          },
+          {
+            "id": "duplicate-row",
+            "textMarkdown": "Job 4471 was inserted twice and the two copies share an id.",
+            "correct": false,
+            "explanationMarkdown": "Ids come from the primary key, so two rows cannot share one. The log also shows a single insert, of 4520 — reaching for data corruption before reading the mechanism sends the investigation somewhere expensive."
+          }
+        ]
+      },
+      "primaryConceptId": "db.cursor-pagination",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e006",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain the unstable sort to a colleague",
+      "conceptIds": [
+        "db.cursor-pagination",
+        "db.query-plan"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Write the explanation you would leave on the pull request, in your own words.",
+      "lessonId": "v2-l02",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "A colleague has converted the board to keyset pagination. Their cursor is the last row's `scheduled_for`, and the query is:\n\n```sql\nSELECT id, scheduled_for FROM jobs\n WHERE scheduled_for > $1\n ORDER BY scheduled_for\n LIMIT 20;\n```\n\nThey have tested it against a seed database where every job has a distinct timestamp, and it works.\n\nIn four to eight sentences, explain what will go wrong in production, what the fix is, and why their test did not catch it.",
+      "hints": [
+        "Their seed data has a property production does not. Name it precisely.",
+        "Ask what happens to the jobs that share the boundary timestamp with the last row of a page — are they before the cursor, or after it?",
+        "The order is not total, so rows tied on `scheduled_for` have no defined sequence. The fix is a unique tie-break in both the ORDER BY and the cursor comparison, compared as a tuple."
+      ],
+      "solution": {
+        "modelAnswer": "In production many jobs share a `scheduled_for` — bulk-imported work often lands on the same minute — so the ORDER BY is not a total order and tied rows may come back in any sequence, differing between queries. That breaks the cursor in both directions. If a page ends partway through a group of tied rows, `scheduled_for > $1` excludes the whole group, so the remaining tied jobs are never shown. Changing it to `>=` swings the other way and repeats every tied row already displayed. The fix is to make the order total by adding a unique column and comparing the pair: `ORDER BY scheduled_for, id` with `WHERE (scheduled_for, id) > ($1, $2)`, which is exact at the boundary because it falls back to the id only when timestamps are equal. Their test passed because distinct timestamps make the sort accidentally total, so the seed data never produced the tie that the bug requires — a seed generator that assigns every row a different timestamp cannot reproduce it.",
+        "explanationMarkdown": "A strong answer names the property that is missing (a total order), traces both failure modes at the boundary (`>` drops tied rows, `>=` repeats them), gives the tuple comparison as the fix, and identifies the test-data assumption. A weaker answer says only 'add id to the ORDER BY' — correct as far as it goes, but it does not explain why the cursor comparison must also change, and a colleague who adds `id` to the sort while leaving `scheduled_for > $1` in the WHERE clause still has the bug."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Identifies that `scheduled_for` is not unique in production, so the ordering is not total and tied rows have no defined sequence.",
+          "Explains the failure at the page boundary: `>` skips the remaining tied rows, and `>=` would repeat the ones already shown.",
+          "Gives the fix as a unique tie-break applied to BOTH the ORDER BY and the cursor comparison, compared as a tuple rather than as a second AND condition.",
+          "Explains that the seed data gave every job a distinct timestamp, which makes the sort accidentally total, so the test could not produce a tie."
+        ],
+        "modelAnswerMarkdown": "See the model answer. The four things being assessed are: naming the missing total order; tracing *both* boundary failures rather than one; specifying that the cursor comparison changes too, as a tuple; and explaining why the test data hid it."
+      },
+      "primaryConceptId": "db.cursor-pagination",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c003",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does a keyset cursor actually store?",
+      "conceptIds": [
+        "db.cursor-pagination"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the difference between a cursor and an offset.",
+      "lessonId": "v2-l02",
+      "type": "recall",
+      "promptMarkdown": "What does a keyset cursor hold, and why does that make it stable when another user inserts a row?",
+      "answerMarkdown": "It holds the sort values of the last row seen — for example `(scheduled_for, id)` — not a position. The next page asks for rows strictly after those values, and inserting a row elsewhere does not change the values of the row the cursor names, so the boundary does not move.",
+      "explanationMarkdown": "An offset is a count, so it is defined relative to every other row and moves whenever any of them are added or removed. A keyset cursor is defined by the data of one row, so it is unaffected by rows appearing or disappearing around it. This is also why it stays fast: the database seeks to the boundary through an index instead of producing and discarding everything before it.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.cursor-pagination"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c004",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Spot the tie-break bug",
+      "conceptIds": [
+        "db.cursor-pagination"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Debug a cursor comparison written the plausible-but-wrong way.",
+      "lessonId": "v2-l02",
+      "type": "debugging",
+      "promptMarkdown": "A colleague writes `WHERE scheduled_for >= $1 AND id > $2 ORDER BY scheduled_for, id`. It looks like a tuple comparison. What does it get wrong?",
+      "answerMarkdown": "It drops every row whose `scheduled_for` is later than the cursor but whose `id` happens to be smaller. `AND` requires both conditions at once, whereas the tuple rule needs `id` to matter *only* when the timestamps are equal. The correct form is `WHERE (scheduled_for, id) > ($1, $2)`.",
+      "explanationMarkdown": "Ids are not correlated with timestamps — a job created earlier can be scheduled later — so `id > $2` silently filters out unrelated rows on subsequent pages. The bug is easy to miss because it never repeats a row and never errors; it only makes jobs quietly absent, and only for some data. Writing the row-constructor comparison keeps the two columns in their proper relationship: compare the second only to break a tie in the first.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.cursor-pagination"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Optimistic concurrency on edited records",
+      "conceptIds": [
+        "db.optimistic-concurrency"
+      ],
+      "prerequisiteIds": [
+        "sql.transactions"
+      ],
+      "bodyMarkdown": "Two dispatchers open job 4471. One changes the crew; the other changes the scheduled time. Both press Save. The second save wins completely, and the first dispatcher's change is gone — with no error, no warning, and nothing in the log to say it ever existed.\n\nThis is the **lost update**, and it is not a database bug. Each write was individually valid. The problem is that the second writer's form was built from a version of the row that no longer existed by the time they submitted it.\n\nWrapping the save in a transaction does not help. A transaction makes a set of writes atomic; it says nothing about whether the data you *read* earlier is still current. The read happened when the page loaded, minutes ago, in a different transaction that has long since ended.\n\n**Optimistic concurrency** solves it by carrying a token. Every row has a `revision`. The client receives it when it loads the record and sends it back on save. The update then asserts what the client believed:\n\n```sql\nUPDATE jobs\n   SET crew_id = $1, revision = revision + 1\n WHERE id = $2\n   AND revision = $3;\n```\n\nIf another save landed first, the stored revision has moved on, **no row matches**, and the update reports zero rows affected. That zero is the entire mechanism: it converts a silent overwrite into a detectable event you can respond to.\n\nIt is called optimistic because it assumes conflicts are rare and pays nothing until one happens — no locks are held while the user is thinking. **Pessimistic** concurrency takes the opposite bet, locking the row with `SELECT ... FOR UPDATE` so a second reader waits. That is right for a short, contended, machine-driven critical section, and wrong for a human editing a form, because the lock would be held for however long they take — including forever, if they wander off.\n\nDetecting the conflict is the easy half. What to *do* about it is a product decision, and it differs per field: two dispatchers editing different fields could be merged safely, while two editing the same field cannot be resolved by a computer at all. The one option that is almost never right is the one you get by default — discarding a change without telling anyone.\n\nThe check must be in the `WHERE` clause. Reading the revision, comparing it in JavaScript, and then updating leaves a window between the comparison and the write in which another save can land. Putting the assertion in the statement makes the check and the write one atomic operation.",
+      "chapterId": "v2-ch13",
+      "sortOrder": 2,
+      "objectives": [
+        "Detect a conflicting edit with a revision token instead of silently overwriting it.",
+        "Explain why a transaction alone does not prevent a lost update.",
+        "Choose between rejecting, merging and overwriting for a given field, and justify it."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "The same two saves, with and without the revision check.\n\n**Without.** Both dispatchers loaded job 4471 at revision 7.\n\n```\n10:02  A loads 4471  { crewId: 12, scheduledFor: '14:00', revision: 7 }\n10:03  B loads 4471  { crewId: 12, scheduledFor: '14:00', revision: 7 }\n10:05  A saves       UPDATE jobs SET crew_id = 19 WHERE id = 4471\n                     -> 1 row.  Stored: { crewId: 19, scheduledFor: '14:00' }\n10:06  B saves       UPDATE jobs SET scheduled_for = '16:30' WHERE id = 4471\n                     -> 1 row.  Stored: { crewId: 12, scheduledFor: '16:30' }\n```\n\nB's form still carried `crew_id = 12`, the value from 10:03, so saving it wrote that stale value back over A's change. Crew 19 is no longer assigned and nobody knows.\n\n**With.** Same timeline, revision asserted in the WHERE clause.\n\n```\n10:05  A saves  UPDATE ... SET crew_id = 19, revision = 8\n                WHERE id = 4471 AND revision = 7\n                -> 1 row.   Stored revision is now 8.\n10:06  B saves  UPDATE ... SET scheduled_for = '16:30', revision = 8\n                WHERE id = 4471 AND revision = 7\n                -> 0 rows.  Rejected.\n```\n\nZero rows is not an error condition to log and move past — it is the signal. The API returns `409` with the current record, and B's screen can now say: *the crew changed to 19 while you were editing; keep your time change?*\n\n**Why not compare in code.** This looks equivalent and is not:\n\n```js\nconst job = await tx.job.findUnique({ where: { id } });   // revision 7\nif (job.revision !== expectedRevision) throw conflict();  // passes\n                                                          // <- A's save lands here\nawait tx.job.update({ where: { id }, data });              // overwrites it\n```\n\nThe gap between the check and the write is small, but it is not zero, and the failure it produces is exactly the one the revision was added to prevent. `WHERE revision = $3` closes it because the database evaluates the condition and performs the write as a single operation.",
+      "commonMistakes": [
+        "Assuming a transaction prevents lost updates; it makes writes atomic but does not revalidate data read in an earlier transaction.",
+        "Comparing the revision in application code before the UPDATE, leaving a window in which another writer can land between the check and the write.",
+        "Returning 200 on a zero-row update because no exception was raised, which converts the detected conflict straight back into a silent overwrite.",
+        "Bumping the revision in a separate statement from the update, so a crash between them leaves the token out of step with the data.",
+        "Using a timestamp as the token at a resolution two saves can share, so a genuine conflict compares equal.",
+        "Sending the conflict back to the user with no server values, leaving them to guess what changed and re-enter their work blind."
+      ],
+      "summaryMarkdown": "A lost update happens when a writer saves a form built from a row that has since changed; transactions do not prevent it, because the stale read happened earlier. Optimistic concurrency carries a revision token and asserts it in the UPDATE's WHERE clause, so a conflicting save matches zero rows and is detected rather than applied. Zero rows is the signal, not an error to swallow. The check belongs in the statement, and what to do next — reject, merge or overwrite — is a product decision made per field.",
+      "exerciseIds": [
+        "v2-e007",
+        "v2-e008",
+        "v2-e009"
+      ],
+      "reviewCardIds": [
+        "v2-c005",
+        "v2-c006"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: Transaction isolation",
+          "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
+        },
+        {
+          "label": "PostgreSQL: UPDATE",
+          "url": "https://www.postgresql.org/docs/current/sql-update.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e007",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Apply an edit or report the conflict",
+      "conceptIds": [
+        "db.optimistic-concurrency"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The decision the UPDATE's WHERE clause makes, written as a pure function so you can test every branch.",
+      "lessonId": "v2-l03",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "Implement `applyEdit(record, edit)`.\n\n`record` is the stored row: `{ id, crewId, scheduledFor, revision }`.\n\n`edit` is `{ expectedRevision, changes }`, where `changes` is an object holding any of `crewId` and `scheduledFor`.\n\nReturn:\n\n- When `edit.expectedRevision` equals `record.revision`:\n  `{ status: 'applied', record: <the updated row with revision incremented by one> }`\n- Otherwise:\n  `{ status: 'conflict', serverRevision: <record.revision>, server: <the stored row, unchanged> }`\n\nRules:\n\n- An empty `changes` object still applies and still increments the revision.\n- Only `crewId` and `scheduledFor` may be changed; ignore any other key in `changes`, and never let `changes` overwrite `id` or `revision`.\n- **Do not modify `record`.** Return a new object.\n- Never apply a partial edit on conflict.",
+      "hints": [
+        "There are exactly two outcomes and they share no work. Decide which one you are in before building anything.",
+        "The revision belongs to the server, not the client: it is `record.revision + 1` on success, and the incoming `changes` must never be able to set it.",
+        "Copy the record into a fresh object, assign `crewId` and `scheduledFor` only when present in `changes`, set `revision` to `record.revision + 1` last so nothing can override it, and return it under `status: 'applied'`."
+      ],
+      "solution": {
+        "code": "function applyEdit(record, edit) {\n  if (edit.expectedRevision !== record.revision) {\n    return {\n      status: 'conflict',\n      serverRevision: record.revision,\n      server: {\n        id: record.id,\n        crewId: record.crewId,\n        scheduledFor: record.scheduledFor,\n        revision: record.revision,\n      },\n    };\n  }\n  const changes = edit.changes || {};\n  const updated = {\n    id: record.id,\n    crewId: record.crewId,\n    scheduledFor: record.scheduledFor,\n    revision: record.revision + 1,\n  };\n  if (Object.prototype.hasOwnProperty.call(changes, 'crewId')) {\n    updated.crewId = changes.crewId;\n  }\n  if (Object.prototype.hasOwnProperty.call(changes, 'scheduledFor')) {\n    updated.scheduledFor = changes.scheduledFor;\n  }\n  return { status: 'applied', record: updated };\n}",
+        "explanationMarkdown": "The revision comparison is the first thing that happens and the conflict branch returns immediately, which is what 'never apply a partial edit' means in practice — there is no path where some fields are written and then a conflict is discovered.\n\nNaming the two permitted fields explicitly, rather than spreading `changes` over the record, is the security-relevant part. A spread would let a client send `revision: 999` or `id: 1` and have it applied; here those keys are simply never read. This is the same reasoning as the allow-list you use when binding an HTTP body to a model.\n\nReturning the server's current row alongside the conflict is what makes the response useful: the client can show what changed instead of asking the user to reload and retype. That mirrors a `409` carrying the current representation."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "applyEdit",
+        "starterCode": "function applyEdit(record, edit) {\n  // Applies the edit unconditionally and trusts whatever the client sent.\n  const updated = Object.assign({}, record, edit.changes);\n  updated.revision = record.revision + 1;\n  return { status: 'applied', record: updated };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "applies-on-matching-revision",
+            "args": [
+              {
+                "id": 4471,
+                "crewId": 12,
+                "scheduledFor": "14:00",
+                "revision": 7
+              },
+              {
+                "expectedRevision": 7,
+                "changes": {
+                  "crewId": 19
+                }
+              }
+            ],
+            "expected": {
+              "status": "applied",
+              "record": {
+                "id": 4471,
+                "crewId": 19,
+                "scheduledFor": "14:00",
+                "revision": 8
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "conflict-on-stale-revision",
+            "args": [
+              {
+                "id": 4471,
+                "crewId": 19,
+                "scheduledFor": "14:00",
+                "revision": 8
+              },
+              {
+                "expectedRevision": 7,
+                "changes": {
+                  "scheduledFor": "16:30"
+                }
+              }
+            ],
+            "expected": {
+              "status": "conflict",
+              "serverRevision": 8,
+              "server": {
+                "id": 4471,
+                "crewId": 19,
+                "scheduledFor": "14:00",
+                "revision": 8
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "empty-changes-still-increments",
+            "args": [
+              {
+                "id": 9,
+                "crewId": 3,
+                "scheduledFor": "08:00",
+                "revision": 1
+              },
+              {
+                "expectedRevision": 1,
+                "changes": {}
+              }
+            ],
+            "expected": {
+              "status": "applied",
+              "record": {
+                "id": 9,
+                "crewId": 3,
+                "scheduledFor": "08:00",
+                "revision": 2
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "ignores-unknown-and-protected-keys",
+            "args": [
+              {
+                "id": 9,
+                "crewId": 3,
+                "scheduledFor": "08:00",
+                "revision": 1
+              },
+              {
+                "expectedRevision": 1,
+                "changes": {
+                  "scheduledFor": "09:15",
+                  "revision": 999,
+                  "id": 1,
+                  "depotId": 7
+                }
+              }
+            ],
+            "expected": {
+              "status": "applied",
+              "record": {
+                "id": 9,
+                "crewId": 3,
+                "scheduledFor": "09:15",
+                "revision": 2
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "both-fields-change",
+            "args": [
+              {
+                "id": 12,
+                "crewId": 1,
+                "scheduledFor": "07:00",
+                "revision": 4
+              },
+              {
+                "expectedRevision": 4,
+                "changes": {
+                  "crewId": 8,
+                  "scheduledFor": "11:45"
+                }
+              }
+            ],
+            "expected": {
+              "status": "applied",
+              "record": {
+                "id": 12,
+                "crewId": 8,
+                "scheduledFor": "11:45",
+                "revision": 5
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "future-revision-is-also-a-conflict",
+            "args": [
+              {
+                "id": 3,
+                "crewId": 2,
+                "scheduledFor": "12:00",
+                "revision": 2
+              },
+              {
+                "expectedRevision": 5,
+                "changes": {
+                  "crewId": 6
+                }
+              }
+            ],
+            "expected": {
+              "status": "conflict",
+              "serverRevision": 2,
+              "server": {
+                "id": 3,
+                "crewId": 2,
+                "scheduledFor": "12:00",
+                "revision": 2
+              }
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "db.optimistic-concurrency",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e008",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Find the lost update in the handler",
+      "conceptIds": [
+        "db.optimistic-concurrency"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A handler that checks the revision and still loses writes. Say precisely where.",
+      "lessonId": "v2-l03",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "This handler was written to fix a lost-update report. Under load, the report came back.\n\n```js\napp.patch('/jobs/:id', async (req, reply) => {\n  const { expectedRevision, changes } = req.body;\n\n  return db.$transaction(async (tx) => {\n    const job = await tx.job.findUnique({ where: { id: req.params.id } });\n    if (!job) return reply.status(404).send();\n\n    if (job.revision !== expectedRevision) {\n      return reply.status(409).send({ server: job });\n    }\n\n    const saved = await tx.job.update({\n      where: { id: req.params.id },\n      data: { ...changes, revision: job.revision + 1 },\n    });\n    return reply.send(saved);\n  });\n});\n```\n\nThe revision is compared, the work is in a transaction, and a 409 is returned. Which statement identifies the remaining defect?",
+      "hints": [
+        "Everything here is correct in isolation. Think about two copies of this handler running at the same moment.",
+        "Trace two requests that both pass the `if` before either reaches the `update`. What does the transaction guarantee about that interleaving, and what does it not?",
+        "The comparison and the write are two separate statements. The assertion needs to be part of the write itself — in the WHERE clause — so no interleaving can occur between them."
+      ],
+      "solution": {
+        "modelAnswer": "check-then-write-race",
+        "explanationMarkdown": "Two concurrent requests can both read revision 7, both pass the `if`, and both call `update`. The second one overwrites the first, and both clients receive 200. The revision check is real but it is not *atomic with the write*.\n\nThe transaction does not close this. Under PostgreSQL's default Read Committed isolation the `findUnique` in each transaction sees the state at the time of that statement, and neither takes a lock that would make the other wait. Wrapping read-check-write in `BEGIN`/`COMMIT` groups the statements; it does not make the value read in the first statement stay true through the third.\n\nThe fix is to move the assertion into the write, so the database evaluates it and performs the update as one operation:\n\n```js\nconst result = await tx.job.updateMany({\n  where: { id: req.params.id, revision: expectedRevision },\n  data: { crewId: changes.crewId, revision: { increment: 1 } },\n});\nif (result.count === 0) { /* 404 or 409 - re-read to tell which */ }\n```\n\nNote the second change: spreading `...changes` into `data` lets a client set any column, including `revision` itself. Naming the permitted fields is not a style preference here — it is what stops a client from choosing its own token."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "check-then-write-race",
+            "textMarkdown": "The revision is compared in a separate statement from the update, so two requests can both pass the check before either writes; the assertion must live in the UPDATE's WHERE clause.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Read-check-write is only safe if the check and the write are one atomic operation. `updateMany({ where: { id, revision: expectedRevision } })` and a zero-count response is the fix."
+          },
+          {
+            "id": "missing-transaction",
+            "textMarkdown": "The update needs its own transaction so the read and write commit together.",
+            "correct": false,
+            "explanationMarkdown": "They are already in one — `db.$transaction` wraps both. That is precisely what makes this a good example: the transaction is present and the bug survives it, because atomicity of writes is a different guarantee from stability of a value that was read."
+          },
+          {
+            "id": "no-index",
+            "textMarkdown": "There is no index on `revision`, so the comparison is slow under load.",
+            "correct": false,
+            "explanationMarkdown": "The row is fetched by primary key and the comparison is in memory. Performance is not the issue, and an index would not change the interleaving that causes the lost write."
+          },
+          {
+            "id": "wrong-status",
+            "textMarkdown": "A conflicting edit should return 412 Precondition Failed rather than 409 Conflict.",
+            "correct": false,
+            "explanationMarkdown": "A defensible API-design argument — 412 pairs naturally with `If-Match` — but it is a question of which status best describes a conflict, not of whether the conflict is detected. This handler still loses writes under either status code."
+          }
+        ]
+      },
+      "primaryConceptId": "db.optimistic-concurrency",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e009",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose a conflict policy per field",
+      "conceptIds": [
+        "db.optimistic-concurrency"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Detection is mechanical; resolution is a product decision. Make it and defend it.",
+      "lessonId": "v2-l03",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "The job record now returns `409` with the server's current row when revisions disagree. Product asks what the screen should do for each of these three fields:\n\n1. `notes` — a free-text field two dispatchers may both append to.\n2. `crewId` — which crew is assigned.\n3. `lastViewedAt` — a timestamp the UI updates whenever the record is opened.\n\nFor each field, say whether the right policy is **reject** (make the user resolve it), **merge** (combine both changes automatically), or **overwrite** (last write wins), and justify it in a sentence. Then state, in one sentence, the rule you used to decide.",
+      "hints": [
+        "Ask what is lost if you pick wrong. For one of these fields the answer is 'nothing anybody cares about'.",
+        "A merge is only safe when combining both changes produces something both authors would accept. Does that hold for an assignment with exactly one valid value?",
+        "The dividing question is whether the field has a single correct value that a human must choose, whether both edits can coexist, or whether the field is disposable metadata nobody is authoring."
+      ],
+      "solution": {
+        "modelAnswer": "`notes` should merge: two appends can coexist, and keeping both loses nothing, though the merge should be an append of both contributions rather than a character-level diff, and the result should be shown to the user. `crewId` should reject: there is exactly one crew on a job, a computer cannot know which dispatcher is right, and picking silently would send the wrong crew to a site — so the screen must show that the crew changed to 19 and ask the user to choose. `lastViewedAt` should overwrite: it is derived UI metadata nobody is authoring, a conflict on it carries no information, and it should not have been part of the revision-guarded record at all — ideally it lives outside the edited row so it never triggers a conflict. The rule: reject when the field has one correct value only a human can choose, merge when both edits can coexist without either author objecting, and overwrite only when the field is machine-maintained and losing an edit costs nothing.",
+        "explanationMarkdown": "The strong answer treats the three fields as genuinely different rather than applying one policy uniformly, and states a rule that would generalise to a fourth field. The best answers also notice that `lastViewedAt` is really a modelling problem: a field that provokes conflicts while carrying no user intent should be moved out of the guarded record, which removes the question instead of answering it.\n\nA weak answer picks 'reject everything, it is safest'. It is not safest — it is safest for the *data* and worst for the user, who is asked to adjudicate a conflict over a viewed-at timestamp. Uniform rejection trains people to click through conflict dialogs without reading them, which is how a real `crewId` conflict eventually gets dismissed too."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Chooses merge for `notes` and explains that two appends can coexist without either author losing work.",
+          "Chooses reject for `crewId` and explains that a single-valued assignment cannot be resolved automatically, with a real consequence if it is guessed wrong.",
+          "Chooses overwrite for `lastViewedAt` and explains that it is machine-maintained metadata carrying no user intent.",
+          "States a general rule that distinguishes the three cases and would extend to a new field, rather than justifying each in isolation."
+        ],
+        "modelAnswerMarkdown": "See the model answer. Credit differentiating the three fields and articulating a transferable rule. Also credit — though it is not required — noticing that `lastViewedAt` should be moved out of the revision-guarded record entirely, which dissolves the conflict rather than resolving it."
+      },
+      "primaryConceptId": "db.optimistic-concurrency",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c005",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does zero rows affected mean?",
+      "conceptIds": [
+        "db.optimistic-concurrency"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the signal at the centre of optimistic concurrency.",
+      "lessonId": "v2-l03",
+      "type": "recall",
+      "promptMarkdown": "`UPDATE jobs SET ... WHERE id = $1 AND revision = $2` reports zero rows affected. What are the two possible causes, and how should the handler respond?",
+      "answerMarkdown": "Either the row does not exist, or it exists with a different revision — someone saved first. The handler must not treat zero rows as success: re-read the row to tell the cases apart, then return 404 if it is gone or 409 with the current record if the revision moved.",
+      "explanationMarkdown": "No exception is raised, so a handler that ignores the affected count returns 200 and the user believes their change was saved — which reintroduces the exact silent data loss the revision was added to prevent. Distinguishing the two causes matters because they need different responses: 404 tells the client to stop, while 409 with the server's current values lets the user decide what to keep.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.optimistic-concurrency"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c006",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Optimistic or pessimistic?",
+      "conceptIds": [
+        "db.optimistic-concurrency",
+        "db.locking"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the choice to a different kind of contention.",
+      "lessonId": "v2-l03",
+      "type": "transfer",
+      "promptMarkdown": "A nightly job decrements stock for 5,000 order lines, with heavy contention on a few popular parts and no human involved. Is optimistic concurrency the right choice here? Why or why not?",
+      "answerMarkdown": "No — this is a case for pessimistic locking (`SELECT ... FOR UPDATE`) or an atomic conditional update. Optimistic concurrency assumes conflicts are rare; here they are the norm, so most attempts would fail and retry, and hot rows could starve. There is also no human to resolve anything, which removes the main advantage of detecting rather than waiting.",
+      "explanationMarkdown": "The two strategies bet on opposite conditions. Optimistic wins when conflicts are rare and the alternative is holding a lock across human thinking time, which could be minutes. Pessimistic wins when conflicts are common and the critical section is short and machine-driven, because waiting a few milliseconds is far cheaper than a retry storm. The deciding questions are how often two writers collide and whether anyone is available to adjudicate when they do.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.optimistic-concurrency"
+    },
+    {
+      "kind": "assessment",
+      "id": "v2-a13",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Persistence depth placement",
+      "conceptIds": [
+        "db.index-selection",
+        "db.query-plan",
+        "db.cursor-pagination",
+        "db.optimistic-concurrency"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five questions covering index selection, plan reading, cursor pagination and optimistic concurrency. Pass four, including both critical items, to place out of this chapter.",
+      "chapterId": "v2-ch13",
+      "items": [
+        {
+          "id": "v2-a13-i1",
+          "objectiveIds": [
+            "db.index-selection"
+          ],
+          "critical": true,
+          "promptMarkdown": "A table has an index on `(warehouse_id, picked_at, sku)`. A query filters `warehouse_id = 4 AND picked_at BETWEEN $1 AND $2 AND sku = 'AX-90'`.\n\nWhich columns can the index use to *search*, as opposed to filter?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "two",
+                "textMarkdown": "`warehouse_id` and `picked_at`",
+                "correct": true,
+                "explanationMarkdown": "Correct. The equality on `warehouse_id` positions the scan and the BETWEEN bounds it; the prefix ends at the range, so `sku` is applied as a filter to the rows the index returns."
+              },
+              {
+                "id": "three",
+                "textMarkdown": "All three, because every column appears in the WHERE clause",
+                "correct": false,
+                "explanationMarkdown": "Appearing in the WHERE clause is not enough. Beyond a range predicate the remaining columns are not sorted within the span being scanned, so they cannot narrow the search."
+              },
+              {
+                "id": "one",
+                "textMarkdown": "Only `warehouse_id`, because a BETWEEN cannot use an index",
+                "correct": false,
+                "explanationMarkdown": "A range predicate uses the index perfectly well — it seeks to the start of the span and scans forward. What it cannot do is let *later* columns keep narrowing."
+              },
+              {
+                "id": "sku-only",
+                "textMarkdown": "Only `sku`, because it is the most selective column",
+                "correct": false,
+                "explanationMarkdown": "Selectivity decides whether an index is worth using, not which columns are reachable. Reachability is positional: a B-tree is usable only from its leading column rightwards."
+              }
+            ]
+          },
+          "explanationMarkdown": "The leading-column rule with a range in the middle is the single most useful index fact to hold in your head, because it explains most 'I added an index and nothing changed' reports."
+        },
+        {
+          "id": "v2-a13-i2",
+          "objectiveIds": [
+            "db.query-plan"
+          ],
+          "critical": false,
+          "promptMarkdown": "A plan node reads:\n\n```\nHash Join  (cost=812.4..9930.2 rows=64 width=48)\n           (actual time=48.2..51.0 rows=58 loops=1)\n```\n\nWhat does this node tell you about the planner's estimate?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "accurate",
+                "textMarkdown": "The estimate was close to reality, so this node is not where a performance problem lies.",
+                "correct": true,
+                "explanationMarkdown": "Correct. 64 estimated against 58 actual is a good estimate, and 51 ms is the accumulated time. Look elsewhere for the cost."
+              },
+              {
+                "id": "bad",
+                "textMarkdown": "The estimate was badly wrong, because cost 9930 is much larger than 64 rows.",
+                "correct": false,
+                "explanationMarkdown": "Cost and rows are different units. Cost is an abstract measure of work in arbitrary units; comparing it to a row count says nothing about estimate quality. Compare `rows` with `actual rows`."
+              },
+              {
+                "id": "slow",
+                "textMarkdown": "The node is slow, because actual time reaches 51 ms.",
+                "correct": false,
+                "explanationMarkdown": "`actual time` is cumulative from the query's start, not the time this node alone spent, and 51 ms may be entirely reasonable. Its own contribution is the difference from its children."
+              },
+              {
+                "id": "wrong-join",
+                "textMarkdown": "A Hash Join is the wrong strategy for 58 rows; a Nested Loop would be faster.",
+                "correct": false,
+                "explanationMarkdown": "58 is the *output* count; the inputs may be large, and hashing a large input once is often better than looping it. The plan gives no reason to override the planner here."
+              }
+            ]
+          },
+          "explanationMarkdown": "Reading a plan starts with the estimate-versus-actual comparison on each node, because that is what tells you whether the planner's decisions were made on good information."
+        },
+        {
+          "id": "v2-a13-i3",
+          "objectiveIds": [
+            "db.cursor-pagination"
+          ],
+          "critical": true,
+          "promptMarkdown": "An audit feed pages with `WHERE created_at > $cursor ORDER BY created_at LIMIT 100`, where `$cursor` is the `created_at` of the last row of the previous page. Rows are imported in bulk, so hundreds can share a `created_at` to the second.\n\nWhat goes wrong, and what is the minimal correct fix?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "tuple",
+                "textMarkdown": "Rows sharing the boundary second are skipped; order by `(created_at, id)` and compare the tuple `(created_at, id) > ($1, $2)`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A page ending inside a group of tied rows excludes the rest of that group, because `>` on the timestamp alone jumps past all of them. A unique tie-break in both the ORDER BY and the comparison fixes it exactly."
+              },
+              {
+                "id": "gte",
+                "textMarkdown": "Rows are skipped; change `>` to `>=` so no row at the boundary is lost.",
+                "correct": false,
+                "explanationMarkdown": "That trades one bug for another: every row sharing the boundary second that was already shown is returned again, and with enough ties the feed can fail to advance at all."
+              },
+              {
+                "id": "offset",
+                "textMarkdown": "Nothing is wrong with the cursor; switch to OFFSET so positions are exact.",
+                "correct": false,
+                "explanationMarkdown": "OFFSET is less stable, not more: it repeats and skips rows whenever anything is inserted or deleted before the reader's position, and it gets slower with depth."
+              },
+              {
+                "id": "microseconds",
+                "textMarkdown": "Store the cursor with microsecond precision so two rows never share a value.",
+                "correct": false,
+                "explanationMarkdown": "This makes collisions rarer without making them impossible, and bulk imports frequently write identical timestamps regardless of precision. A correctness property should not rest on values happening to differ."
+              }
+            ]
+          },
+          "explanationMarkdown": "This is the failure that survives review most often, because it is invisible on test data where every timestamp is distinct."
+        },
+        {
+          "id": "v2-a13-i4",
+          "objectiveIds": [
+            "db.optimistic-concurrency"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which statements about optimistic concurrency are true? Select all that apply.",
+          "grading": {
+            "kind": "choice",
+            "mode": "multiple",
+            "options": [
+              {
+                "id": "where-clause",
+                "textMarkdown": "The revision assertion must be in the UPDATE's WHERE clause rather than compared beforehand in application code.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Comparing first leaves a window between the check and the write in which another save can land."
+              },
+              {
+                "id": "zero-rows",
+                "textMarkdown": "A zero-row result is the conflict signal and must not be reported as success.",
+                "correct": true,
+                "explanationMarkdown": "Correct. No exception is raised, so a handler that ignores the affected count silently loses the write."
+              },
+              {
+                "id": "transaction-enough",
+                "textMarkdown": "Wrapping the read and the write in one transaction is sufficient to prevent lost updates.",
+                "correct": false,
+                "explanationMarkdown": "It is not. A transaction makes the writes atomic; under Read Committed it does not stop two transactions from both reading revision 7 and both proceeding."
+              },
+              {
+                "id": "locks-held",
+                "textMarkdown": "It holds a lock on the row while the user is editing the form.",
+                "correct": false,
+                "explanationMarkdown": "That describes pessimistic locking. Holding no lock across human thinking time is the entire reason to prefer the optimistic approach for user-facing edits."
+              }
+            ]
+          },
+          "explanationMarkdown": "The two true statements are the mechanism; the two false ones are the most common misconceptions about it."
+        },
+        {
+          "id": "v2-a13-i5",
+          "objectiveIds": [
+            "db.index-selection",
+            "db.query-plan"
+          ],
+          "critical": false,
+          "promptMarkdown": "A report query is slow. You add exactly the index it appears to need, and the runtime does not change. `EXPLAIN ANALYZE` shows the new index is not used and the node reads `Seq Scan ... rows=380000 actual rows=379442`.\n\nWhat is the most likely explanation?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "selectivity",
+                "textMarkdown": "The query matches most of the table, so a sequential scan is genuinely cheaper than an index scan.",
+                "correct": true,
+                "explanationMarkdown": "Correct, and the estimate is accurate here, which rules out stale statistics. When a predicate matches 380,000 of the rows, walking the index and fetching each row in random order costs more than reading the table in order."
+              },
+              {
+                "id": "stale-stats",
+                "textMarkdown": "The statistics are stale, so the planner does not know the index would help.",
+                "correct": false,
+                "explanationMarkdown": "The estimate of 380,000 matches the actual 379,442 almost exactly, so the planner's information is good. It is choosing the scan deliberately."
+              },
+              {
+                "id": "wrong-type",
+                "textMarkdown": "The index is a B-tree and the query needs a different index type.",
+                "correct": false,
+                "explanationMarkdown": "Possible for full-text or containment queries, but nothing here suggests that, and it would not change the fundamental problem that most rows match."
+              },
+              {
+                "id": "needs-vacuum",
+                "textMarkdown": "The table needs vacuuming before the index becomes usable.",
+                "correct": false,
+                "explanationMarkdown": "Vacuum affects bloat and visibility information, and can enable index-only scans, but it does not make an unselective predicate selective."
+              }
+            ]
+          },
+          "explanationMarkdown": "Recognising that the planner declined an index *correctly* is what stops an afternoon of adding more indexes to a query that needs a different shape entirely."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

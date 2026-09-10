@@ -1,0 +1,1491 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v2-ch14",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transaction correctness",
+      "conceptIds": [
+        "db.multi-table-invariants",
+        "db.isolation-levels",
+        "db.locking",
+        "db.idempotent-submission"
+      ],
+      "prerequisiteIds": [
+        "sql.transactions",
+        "sql.partial-writes",
+        "db.optimistic-concurrency"
+      ],
+      "bodyMarkdown": "Fernwood's parts arm ships stock against orders. The rule everyone agrees on is that stock on hand must never go negative. It is written down, it is checked in the handler, and roughly once a fortnight a part goes to minus three.\n\nA rule checked by reading a value and then acting on it is only as good as the gap between the two. On a quiet system the gap never matters. Under concurrency it is where the invariant lives or dies, and no amount of care in the handler closes it — because the handler is not where the race is.\n\nThis chapter is about the guarantees a database actually offers and the ones people assume it offers. You will learn to express an invariant that spans tables so the database enforces it rather than the application hoping for it; to name what each isolation level does and does not prevent, and what a lock buys in exchange for the waiting it causes; and to make a submission idempotent so a retried request is accepted exactly once even when the network gave the client no way to know the first attempt worked.\n\nThe theme is that correctness under concurrency is designed in, not tested in. A bug that appears once a fortnight will not be found by running the happy path again.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v2-l04",
+        "v2-l05",
+        "v2-l06"
+      ],
+      "assessmentId": "v2-a14",
+      "objectiveIds": [
+        "db.multi-table-invariants",
+        "db.isolation-levels",
+        "db.locking",
+        "db.idempotent-submission"
+      ],
+      "missionIds": [],
+      "sortOrder": 13
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Invariants that span tables",
+      "conceptIds": [
+        "db.multi-table-invariants"
+      ],
+      "prerequisiteIds": [
+        "sql.uniqueness",
+        "sql.transactions"
+      ],
+      "bodyMarkdown": "A single-table invariant is easy: `CHECK (quantity >= 0)` and the database refuses anything else, forever, from every code path including the console someone opens at 11pm.\n\nThe hard ones span tables. 'Stock on hand equals received minus shipped.' 'An order's total equals the sum of its lines.' 'A crew has at most one active assignment.' None fits in a CHECK constraint, so they get enforced in application code, which means they are enforced *if every path remembers* — and a rule that depends on memory is a rule that will eventually be forgotten.\n\nThere are three durable strategies, and choosing between them is the skill.\n\n**Make the invariant a single-row fact.** If stock on hand is a column, `CHECK (on_hand >= 0)` covers it, and a conditional update does the work atomically:\n\n```sql\nUPDATE parts SET on_hand = on_hand - $1\n WHERE sku = $2 AND on_hand >= $1;\n```\n\nZero rows affected means insufficient stock. There is no window: the read and the decision happen inside one statement. This is the same shape as the revision check from the previous chapter, and it is the single most useful trick in this chapter.\n\n**Use a unique constraint to make the bad state unrepresentable.** 'At most one active assignment per crew' is a partial unique index:\n\n```sql\nCREATE UNIQUE INDEX one_active_per_crew\n    ON assignments (crew_id) WHERE status = 'active';\n```\n\nNow a second active assignment cannot be inserted, whatever the application believes. The handler still checks first for a friendly message, but the constraint is what makes it *true*, and the handler must be ready to catch the violation rather than assume its check was sufficient.\n\n**Serialise the participants explicitly** when neither of the above fits — take the rows in a defined order with `SELECT ... FOR UPDATE`, do the arithmetic, write. This is the fallback, and it costs contention.\n\nWhat does *not* work is the read-check-write in application code, however carefully written and however tightly wrapped in a transaction. A transaction gives you atomicity (all the writes or none) and isolation from *seeing* others' uncommitted work. It does not freeze a value you read at the start so that it is still true at the end — unless you asked for that explicitly, by locking or by raising the isolation level.",
+      "chapterId": "v2-ch14",
+      "sortOrder": 0,
+      "objectives": [
+        "Express a cross-table invariant so the database enforces it rather than the application.",
+        "Replace a read-check-write with a conditional statement that has no window.",
+        "Recognise when a partial unique index makes an invalid state unrepresentable."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "Shipping a line against stock, three ways.\n\n**The version that fails once a fortnight:**\n\n```js\nawait db.$transaction(async (tx) => {\n  const part = await tx.part.findUnique({ where: { sku } });\n  if (part.onHand < qty) throw new Error('insufficient stock');\n  await tx.part.update({ where: { sku }, data: { onHand: part.onHand - qty } });\n  await tx.shipment.create({ data: { sku, qty } });\n});\n```\n\nTwo requests for the last 3 units both read `onHand = 3`, both pass the check, and both write `3 - 3 = 0`. Stock ends at 0 with six units shipped. Note the second bug hiding behind the first: `data: { onHand: part.onHand - qty }` writes a value *computed from a stale read*, so even the arithmetic is lost-update-prone.\n\n**The conditional update:**\n\n```js\nawait db.$transaction(async (tx) => {\n  const { count } = await tx.part.updateMany({\n    where: { sku, onHand: { gte: qty } },\n    data:  { onHand: { decrement: qty } },\n  });\n  if (count === 0) throw new InsufficientStock(sku, qty);\n  await tx.shipment.create({ data: { sku, qty } });\n});\n```\n\nThe predicate is evaluated by the database as part of the write. Two concurrent requests for the last 3 units: one updates a row, the other matches none and gets a clean domain error. `decrement` also means the new value is computed from the *current* row rather than from what we read a moment ago.\n\n**The belt-and-braces constraint:**\n\n```sql\nALTER TABLE parts ADD CONSTRAINT parts_on_hand_non_negative CHECK (on_hand >= 0);\n```\n\nNow even a hand-written UPDATE at the console cannot break the rule. The constraint is not redundant with the conditional update — it is what guarantees the rule holds for code that has not been written yet.",
+      "commonMistakes": [
+        "Wrapping read-check-write in a transaction and believing that closes the race; atomicity is not the same guarantee as a stable read.",
+        "Computing the new value in application code from a stale read instead of letting the database decrement the current value.",
+        "Enforcing 'at most one active X' with a SELECT before the INSERT, which two concurrent requests both pass.",
+        "Adding a CHECK constraint and removing the handler's check, so users get a raw constraint-violation error instead of a useful message.",
+        "Adding the handler's check and skipping the constraint, so the rule holds only for the paths that remember it.",
+        "Locking rows in a different order in two code paths, turning a correctness fix into a deadlock."
+      ],
+      "summaryMarkdown": "Cross-table invariants enforced by application logic hold only where every path remembers them. Prefer making the invariant a single-row fact and asserting it inside the write (`WHERE on_hand >= $1`, zero rows means refused), or making the bad state unrepresentable with a partial unique index. Keep the friendly check in the handler for the message, and the constraint in the database for the truth.",
+      "exerciseIds": [
+        "v2-e010",
+        "v2-e011",
+        "v2-e012"
+      ],
+      "reviewCardIds": [
+        "v2-c007",
+        "v2-c008"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: Constraints",
+          "url": "https://www.postgresql.org/docs/current/ddl-constraints.html"
+        },
+        {
+          "label": "PostgreSQL: Partial indexes",
+          "url": "https://www.postgresql.org/docs/current/indexes-partial.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e010",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Pick the enforcement that closes the window",
+      "conceptIds": [
+        "db.multi-table-invariants"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Four proposals for one invariant. Only one removes the race rather than narrowing it.",
+      "lessonId": "v2-l04",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "A crew may have at most one **active** assignment. Assignments live in their own table and are created by three different code paths.\n\nWhich proposal actually makes the rule true?",
+      "hints": [
+        "Ask of each option: can two requests arriving at the same instant both get past it?",
+        "A check performed before a write is separated from that write by a window, no matter how small. Enforcement that cannot be raced happens *during* the write.",
+        "A unique index is evaluated by the database at insert time, so a second conflicting row is impossible rather than merely unlikely."
+      ],
+      "solution": {
+        "modelAnswer": "partial-unique",
+        "explanationMarkdown": "A partial unique index on `(crew_id) WHERE status = 'active'` makes a second active assignment impossible to insert, from any code path, including ones written next year. The handler should still check first so the user gets a sensible message, and must catch the violation for the case where it lost the race."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "partial-unique",
+            "textMarkdown": "`CREATE UNIQUE INDEX ON assignments (crew_id) WHERE status = 'active'`",
+            "correct": true,
+            "explanationMarkdown": "Correct. The database refuses the second row at insert time, so the invalid state cannot exist regardless of which path is writing."
+          },
+          {
+            "id": "select-first",
+            "textMarkdown": "In each path, `SELECT` for an existing active assignment and refuse if one is found.",
+            "correct": false,
+            "explanationMarkdown": "Two concurrent requests both run the SELECT before either inserts, so both find nothing and both proceed. It also has to be repeated correctly in all three paths."
+          },
+          {
+            "id": "transaction",
+            "textMarkdown": "Wrap the existing check and insert in a transaction.",
+            "correct": false,
+            "explanationMarkdown": "The most common wrong answer. A transaction makes the writes atomic; under Read Committed it does not stop two transactions from both observing 'no active assignment' and both inserting."
+          },
+          {
+            "id": "app-service",
+            "textMarkdown": "Route all three paths through one service method that performs the check.",
+            "correct": false,
+            "explanationMarkdown": "Genuinely worth doing for maintainability, and it fixes the duplication problem — but one shared read-check-write is still a read-check-write, and two concurrent calls to it still race."
+          }
+        ]
+      },
+      "primaryConceptId": "db.multi-table-invariants",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e011",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Decide a stock move atomically",
+      "conceptIds": [
+        "db.multi-table-invariants"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Model the conditional update as a pure decision so every branch is testable.",
+      "lessonId": "v2-l04",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "Implement `applyMove(part, move)`, the decision a conditional UPDATE makes.\n\n`part` is `{ sku, onHand, reserved }`. `move` is `{ kind, quantity }` where `kind` is `'ship'`, `'receive'` or `'reserve'`.\n\nReturn `{ status, part }` on success, or `{ status: 'refused', reason }` when the move would break an invariant.\n\nRules:\n\n- `'receive'` adds to `onHand`. Always allowed.\n- `'ship'` subtracts from `onHand`, but only from stock that is not reserved: it is refused with reason `'insufficient-available'` unless `onHand - reserved >= quantity`.\n- `'reserve'` adds to `reserved`, refused with reason `'insufficient-available'` unless `onHand - reserved >= quantity`.\n- A `quantity` of zero or less is refused with reason `'invalid-quantity'`, whatever the kind.\n- An unknown `kind` is refused with reason `'unknown-kind'`.\n- On success `status` is `'applied'` and `part` is the updated record; the untouched field keeps its value.\n- **Do not modify `part`.**",
+      "hints": [
+        "Two checks apply to every kind regardless of what it does. Do them once, before you branch.",
+        "'Available' is not `onHand` — it is `onHand - reserved`. Both `ship` and `reserve` consume availability, which is why they share a refusal reason.",
+        "Validate the quantity, then switch on kind: receive increases onHand; ship and reserve first test `onHand - reserved >= quantity` and refuse if it fails; anything else is unknown-kind."
+      ],
+      "solution": {
+        "code": "function applyMove(part, move) {\n  if (!(move.quantity > 0)) {\n    return { status: 'refused', reason: 'invalid-quantity' };\n  }\n  const available = part.onHand - part.reserved;\n  if (move.kind === 'receive') {\n    return {\n      status: 'applied',\n      part: { sku: part.sku, onHand: part.onHand + move.quantity, reserved: part.reserved },\n    };\n  }\n  if (move.kind === 'ship') {\n    if (available < move.quantity) {\n      return { status: 'refused', reason: 'insufficient-available' };\n    }\n    return {\n      status: 'applied',\n      part: { sku: part.sku, onHand: part.onHand - move.quantity, reserved: part.reserved },\n    };\n  }\n  if (move.kind === 'reserve') {\n    if (available < move.quantity) {\n      return { status: 'refused', reason: 'insufficient-available' };\n    }\n    return {\n      status: 'applied',\n      part: { sku: part.sku, onHand: part.onHand, reserved: part.reserved + move.quantity },\n    };\n  }\n  return { status: 'refused', reason: 'unknown-kind' };\n}",
+        "explanationMarkdown": "Every refusal returns before anything is built, so there is no path that partially applies a move and then discovers a problem — the same property the conditional UPDATE gives you for free, because the database evaluates the predicate as part of the write.\n\n`available = onHand - reserved` is the invariant that actually matters. Checking `onHand` alone is the bug this exercise exists to catch: it lets you ship stock that someone has already promised to a customer, and the shortfall surfaces later as a picking failure rather than as a refused request.\n\n`!(move.quantity > 0)` rather than `move.quantity <= 0` also refuses `NaN` and `undefined`, which is what you want at a boundary that may receive a parsed request body."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "applyMove",
+        "starterCode": "function applyMove(part, move) {\n  // Checks onHand, forgetting that reserved stock is already promised.\n  if (move.kind === 'receive') {\n    return { status: 'applied', part: { sku: part.sku, onHand: part.onHand + move.quantity, reserved: part.reserved } };\n  }\n  if (part.onHand < move.quantity) {\n    return { status: 'refused', reason: 'insufficient-available' };\n  }\n  return { status: 'applied', part: { sku: part.sku, onHand: part.onHand - move.quantity, reserved: part.reserved } };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "receive-always-allowed",
+            "args": [
+              {
+                "sku": "AX-90",
+                "onHand": 4,
+                "reserved": 0
+              },
+              {
+                "kind": "receive",
+                "quantity": 6
+              }
+            ],
+            "expected": {
+              "status": "applied",
+              "part": {
+                "sku": "AX-90",
+                "onHand": 10,
+                "reserved": 0
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "ship-within-available",
+            "args": [
+              {
+                "sku": "AX-90",
+                "onHand": 10,
+                "reserved": 2
+              },
+              {
+                "kind": "ship",
+                "quantity": 8
+              }
+            ],
+            "expected": {
+              "status": "applied",
+              "part": {
+                "sku": "AX-90",
+                "onHand": 2,
+                "reserved": 2
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "ship-refused-by-reserved-stock",
+            "args": [
+              {
+                "sku": "AX-90",
+                "onHand": 10,
+                "reserved": 4
+              },
+              {
+                "kind": "ship",
+                "quantity": 8
+              }
+            ],
+            "expected": {
+              "status": "refused",
+              "reason": "insufficient-available"
+            },
+            "hidden": false
+          },
+          {
+            "id": "reserve-adds-to-reserved",
+            "args": [
+              {
+                "sku": "BX-12",
+                "onHand": 5,
+                "reserved": 1
+              },
+              {
+                "kind": "reserve",
+                "quantity": 4
+              }
+            ],
+            "expected": {
+              "status": "applied",
+              "part": {
+                "sku": "BX-12",
+                "onHand": 5,
+                "reserved": 5
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "reserve-refused",
+            "args": [
+              {
+                "sku": "BX-12",
+                "onHand": 5,
+                "reserved": 3
+              },
+              {
+                "kind": "reserve",
+                "quantity": 4
+              }
+            ],
+            "expected": {
+              "status": "refused",
+              "reason": "insufficient-available"
+            },
+            "hidden": false
+          },
+          {
+            "id": "zero-quantity",
+            "args": [
+              {
+                "sku": "BX-12",
+                "onHand": 5,
+                "reserved": 0
+              },
+              {
+                "kind": "ship",
+                "quantity": 0
+              }
+            ],
+            "expected": {
+              "status": "refused",
+              "reason": "invalid-quantity"
+            },
+            "hidden": false
+          },
+          {
+            "id": "unknown-kind",
+            "args": [
+              {
+                "sku": "BX-12",
+                "onHand": 5,
+                "reserved": 0
+              },
+              {
+                "kind": "scrap",
+                "quantity": 1
+              }
+            ],
+            "expected": {
+              "status": "refused",
+              "reason": "unknown-kind"
+            },
+            "hidden": false
+          },
+          {
+            "id": "negative-quantity-on-receive",
+            "args": [
+              {
+                "sku": "BX-12",
+                "onHand": 5,
+                "reserved": 0
+              },
+              {
+                "kind": "receive",
+                "quantity": -3
+              }
+            ],
+            "expected": {
+              "status": "refused",
+              "reason": "invalid-quantity"
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "db.multi-table-invariants",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e012",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the fortnightly negative stock",
+      "conceptIds": [
+        "db.multi-table-invariants"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An interleaving, written out. Say which line is the defect.",
+      "lessonId": "v2-l04",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "```js\n// line 1\nawait db.$transaction(async (tx) => {\n  // line 2\n  const part = await tx.part.findUnique({ where: { sku } });\n  // line 3\n  if (part.onHand < qty) throw new InsufficientStock(sku);\n  // line 4\n  await tx.part.update({ where: { sku }, data: { onHand: part.onHand - qty } });\n  // line 5\n  await tx.shipment.create({ data: { sku, qty, orderId } });\n});\n```\n\nTwo requests each ship 3 units of a part with `onHand = 3`. Both succeed; stock ends at `0` and six units are shipped.\n\nWhich change fixes this?",
+      "hints": [
+        "Both requests executed line 2 before either executed line 4. Which line's guarantee is being assumed and not held?",
+        "Line 4 writes a number calculated in the application from the value line 2 read. Ask whether that number is still correct when the write lands.",
+        "Fold the condition from line 3 into the write on line 4, so the database evaluates it and decrements the current value in one statement."
+      ],
+      "solution": {
+        "modelAnswer": "conditional-update",
+        "explanationMarkdown": "Lines 3 and 4 are separate statements, so two transactions can both pass line 3 before either runs line 4. Worse, line 4 writes `part.onHand - qty` — a value computed from the stale read — so the second write does not decrement, it *overwrites* with `0`.\n\n```js\nconst { count } = await tx.part.updateMany({\n  where: { sku, onHand: { gte: qty } },\n  data:  { onHand: { decrement: qty } },\n});\nif (count === 0) throw new InsufficientStock(sku);\n```\n\nBoth the condition and the arithmetic now happen inside the database, in one statement, so there is no window and no stale value. `count === 0` is the refusal.\n\nAdding `CHECK (on_hand >= 0)` on top is still worth doing: it converts any future code path that gets this wrong from silent corruption into a loud failure."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "conditional-update",
+            "textMarkdown": "Replace lines 3 and 4 with one conditional update — `updateMany({ where: { sku, onHand: { gte: qty } }, data: { onHand: { decrement: qty } } })` — and treat a zero count as the refusal.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The check and the write become a single statement, and `decrement` computes from the current row rather than from a stale read."
+          },
+          {
+            "id": "reorder",
+            "textMarkdown": "Create the shipment before updating the part, so the shipment row exists if the update fails.",
+            "correct": false,
+            "explanationMarkdown": "Reordering changes nothing about the race, and creating the shipment first is worse: it would leave a shipment recorded for stock that was never decremented."
+          },
+          {
+            "id": "retry",
+            "textMarkdown": "Catch the failure and retry the transaction a few times with a short delay.",
+            "correct": false,
+            "explanationMarkdown": "There is nothing to catch — both transactions succeed. Retry logic helps with serialisation failures and deadlocks, not with a race that produces two confident successes."
+          },
+          {
+            "id": "check-after",
+            "textMarkdown": "After line 4, re-read the part and throw if `onHand` is now negative.",
+            "correct": false,
+            "explanationMarkdown": "It would sometimes notice, but the re-read is yet another statement with its own window, and by then the shipment may already exist. Detecting corruption after writing it is weaker than making it impossible to write."
+          }
+        ]
+      },
+      "primaryConceptId": "db.multi-table-invariants",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c007",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does a transaction not give you?",
+      "conceptIds": [
+        "db.multi-table-invariants"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the boundary of the transactional guarantee.",
+      "lessonId": "v2-l04",
+      "type": "recall",
+      "promptMarkdown": "You wrap a read, a check and a write in one transaction. Which concurrency problem does that solve, and which does it leave open?",
+      "answerMarkdown": "It solves partial writes — either all the writes land or none do — and it prevents you from seeing another transaction's uncommitted work. It does not stop another transaction from changing the value you read after you read it, so two transactions can both pass the same check and both write.",
+      "explanationMarkdown": "Atomicity and isolation are often heard as one guarantee, and they are not. Under the default Read Committed level each statement sees the state at the time that statement runs, so a value read early can be stale by the time you act on it. Closing that requires putting the condition into the write, locking the row, or raising the isolation level — a choice you must make deliberately.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.multi-table-invariants"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c008",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Where should this rule live?",
+      "conceptIds": [
+        "db.multi-table-invariants"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the enforcement choice to a new rule.",
+      "lessonId": "v2-l04",
+      "type": "transfer",
+      "promptMarkdown": "Rule: a purchase order may have at most one draft revision at a time. Where do you enforce it, and what does the handler still do?",
+      "answerMarkdown": "In the database, with a partial unique index such as `UNIQUE (purchase_order_id) WHERE status = 'draft'`. The handler still checks first so the user gets a clear message rather than a constraint error, and must catch the violation for the case where it loses the race.",
+      "explanationMarkdown": "The two checks do different jobs and neither replaces the other. The constraint is what makes the rule true for every code path, now and in future. The handler's check is a user-experience affordance, and treating it as the enforcement is the mistake — as is dropping it and letting a raw database error reach the user.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.multi-table-invariants"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Isolation levels and what a lock buys",
+      "conceptIds": [
+        "db.isolation-levels",
+        "db.locking"
+      ],
+      "prerequisiteIds": [
+        "sql.transactions"
+      ],
+      "bodyMarkdown": "Isolation levels are usually taught as a table of anomalies to memorise. That table is worth knowing, but the useful version is a single question: **what is allowed to change between my statements?**\n\nPostgreSQL offers three levels in practice.\n\n**Read Committed** (the default) — each *statement* sees a fresh snapshot taken when that statement begins. You never see uncommitted work, but two reads in one transaction can return different answers, because someone committed in between. This is the level almost all application code runs at, and almost every concurrency bug in this chapter is a consequence of it.\n\n**Repeatable Read** — the *transaction* takes one snapshot at its first statement and keeps it. Re-reading a row gives the same answer all the way through. In PostgreSQL this also prevents phantoms. The cost: if you try to update a row someone else has changed since your snapshot, you get a serialisation failure and must retry the whole transaction.\n\n**Serializable** — the database guarantees the outcome matches *some* serial order of the transactions. It detects dangerous read/write patterns and aborts one of them. This can make an otherwise-racy read-check-write correct, at the price of a real retry rate.\n\nThe classic anomalies map onto this cleanly. A **dirty read** is seeing uncommitted work — PostgreSQL never permits it at any level. A **non-repeatable read** is the same row giving two answers in one transaction; Read Committed permits it. A **phantom** is the same *query* returning a different set of rows; Read Committed permits that too. A **lost update** is not on the classic list at all, but it is the one that costs money.\n\nLocks are the other tool. `SELECT ... FOR UPDATE` takes a row lock: other transactions wanting that row wait until you commit. It converts a race into a queue, which is exactly what you want for a short machine-driven critical section and exactly what you do not want while a human stares at a form.\n\nThe cost of locking is **deadlock**. Transaction A locks part 1 then wants part 2; transaction B locks part 2 then wants part 1. Neither can proceed. PostgreSQL detects the cycle and kills one with a deadlock error. The fix is almost never 'lock less' — it is to **acquire locks in a consistent order** everywhere, usually by sorting the keys before you lock them. Any code path that locks multiple rows in a different order is a latent deadlock waiting for the right timing.\n\nA practical rule: raise the isolation level or take a lock when the invariant genuinely spans statements. When it can be expressed as one conditional statement, do that instead — it is cheaper than both.",
+      "chapterId": "v2-ch14",
+      "sortOrder": 1,
+      "objectives": [
+        "Name what Read Committed, Repeatable Read and Serializable each do and do not prevent.",
+        "Identify which anomaly a given interleaving demonstrates.",
+        "Explain why inconsistent lock ordering causes deadlock and how sorting keys prevents it."
+      ],
+      "estimatedMinutes": 19,
+      "workedExampleMarkdown": "One interleaving, read at two isolation levels.\n\n```\nT1: BEGIN\nT1: SELECT on_hand FROM parts WHERE sku='AX-90';   -> 3\nT2:                                     BEGIN\nT2:                                     UPDATE parts SET on_hand = 1 WHERE sku='AX-90';\nT2:                                     COMMIT\nT1: SELECT on_hand FROM parts WHERE sku='AX-90';   -> ?\nT1: COMMIT\n```\n\n**Read Committed:** the second SELECT returns `1`. Each statement takes its own snapshot, and T2 committed in between. Two identical reads, two different answers — a **non-repeatable read**. If T1 had decided anything based on the first read, that decision is now built on a value that no longer exists.\n\n**Repeatable Read:** the second SELECT returns `3`. T1's snapshot was taken at its first statement and does not move. T1 sees a consistent world — but note it is now a world that is out of date, and if T1 tries `UPDATE parts SET on_hand = on_hand - 3` it will fail with `could not serialize access due to concurrent update` rather than silently overwriting.\n\nThat error is a feature: it is the database refusing to let T1 act on a stale snapshot. Code running at Repeatable Read or Serializable **must** be prepared to retry the whole transaction, and the retry must be safe to run twice — which is the subject of the next lesson.\n\n**The deadlock, and the fix.** Two shipments each move two parts:\n\n```\nT1: UPDATE parts SET ... WHERE sku='AX-90';   -- locks AX-90\nT2: UPDATE parts SET ... WHERE sku='BX-12';   -- locks BX-12\nT1: UPDATE parts SET ... WHERE sku='BX-12';   -- waits for T2\nT2: UPDATE parts SET ... WHERE sku='AX-90';   -- waits for T1  -> deadlock\n```\n\nBoth transactions are correct in isolation. The defect is that they lock in the order the lines happened to arrive in the request. Sorting first removes it entirely:\n\n```js\nconst skus = [...new Set(lines.map((l) => l.sku))].sort();\nfor (const sku of skus) { /* update in this order, always */ }\n```\n\nNow every transaction takes AX-90 before BX-12, so one waits and then proceeds. A cycle cannot form when everyone walks the same direction.",
+      "commonMistakes": [
+        "Assuming the default level is Repeatable Read, so two reads in one transaction are expected to agree.",
+        "Raising the level to Serializable without adding retry handling, converting a rare wrong answer into a user-visible error.",
+        "Holding SELECT ... FOR UPDATE across a user's editing session, so one idle browser tab blocks a row indefinitely.",
+        "Locking rows in the order the request happened to list them, which deadlocks as soon as two requests list them differently.",
+        "Treating a deadlock error as a database fault to be retried forever, rather than as a symptom of inconsistent lock ordering.",
+        "Reaching for a higher isolation level when the invariant would fit in a single conditional statement."
+      ],
+      "summaryMarkdown": "Read Committed gives each statement a fresh snapshot, so values can change between your statements — the source of most concurrency bugs. Repeatable Read pins one snapshot per transaction and makes conflicting updates fail instead of silently winning; Serializable goes further and aborts dangerous patterns. Both require retry logic. Locks convert a race into a queue and are right for short machine-driven sections, and their price is deadlock — prevented by acquiring locks in a consistent, sorted order.",
+      "exerciseIds": [
+        "v2-e013",
+        "v2-e014",
+        "v2-e015"
+      ],
+      "reviewCardIds": [
+        "v2-c009",
+        "v2-c010"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: Transaction isolation",
+          "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
+        },
+        {
+          "label": "PostgreSQL: Explicit locking and deadlocks",
+          "url": "https://www.postgresql.org/docs/current/explicit-locking.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e013",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does Read Committed permit?",
+      "conceptIds": [
+        "db.isolation-levels"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Separate the guarantees the default level gives from the ones people assume it gives.",
+      "lessonId": "v2-l05",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "A transaction runs at PostgreSQL's default isolation level. Which of the following can it observe? Select all that apply.",
+      "hints": [
+        "One of these is impossible at every PostgreSQL isolation level. Which?",
+        "The default takes a new snapshot for each statement, not for each transaction. Everything follows from that.",
+        "Anything another transaction has committed becomes visible to your next statement — both a changed row and a newly matching row."
+      ],
+      "solution": {
+        "modelAnswer": "non-repeatable, phantom",
+        "explanationMarkdown": "Read Committed permits non-repeatable reads and phantoms, because each statement gets a fresh snapshot. It never permits dirty reads — PostgreSQL does not implement Read Uncommitted, so uncommitted work is invisible at every level."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "non-repeatable",
+            "textMarkdown": "The same row read twice in one transaction returns two different values.",
+            "correct": true,
+            "explanationMarkdown": "Yes — a non-repeatable read. The second statement takes a new snapshot, which includes anything committed in between."
+          },
+          {
+            "id": "phantom",
+            "textMarkdown": "The same query run twice returns a different number of rows.",
+            "correct": true,
+            "explanationMarkdown": "Yes — a phantom. A newly committed row that matches your predicate appears in the later statement."
+          },
+          {
+            "id": "dirty",
+            "textMarkdown": "A value written by another transaction that has not committed.",
+            "correct": false,
+            "explanationMarkdown": "No. PostgreSQL never permits dirty reads; requesting Read Uncommitted silently gives you Read Committed."
+          },
+          {
+            "id": "own-writes-invisible",
+            "textMarkdown": "Its own uncommitted writes are invisible to its later statements.",
+            "correct": false,
+            "explanationMarkdown": "The reverse is true: a transaction always sees its own writes. If it did not, multi-statement work would be impossible to reason about."
+          }
+        ]
+      },
+      "primaryConceptId": "db.isolation-levels",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e014",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Classify the anomaly in a trace",
+      "conceptIds": [
+        "db.isolation-levels"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Name what an interleaving demonstrates, from the events alone.",
+      "lessonId": "v2-l05",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `classifyAnomaly(trace)`.\n\n`trace` is an array of events for one observing transaction `T1` and one other transaction. Each event is one of:\n\n- `{ tx, op: 'read', key, rows }` — `rows` is the number of rows the query matched\n- `{ tx, op: 'write', key }`\n- `{ tx, op: 'commit' }`\n\nReturn the strongest anomaly `T1` observed, as one of:\n\n- `'dirty-read'` — `T1` read a `key` that another transaction wrote and had **not** yet committed at the time of the read.\n- `'phantom'` — `T1` read the same `key` twice and the two reads returned a **different `rows` count**.\n- `'non-repeatable-read'` — `T1` read the same `key` twice with the same `rows` count, but another transaction committed a write to that `key` between the two reads.\n- `'none'` — otherwise.\n\nCheck in that order and return the first that matches: a dirty read outranks a phantom, which outranks a non-repeatable read. Only events with `tx === 'T1'` count as `T1`'s reads. Do not modify `trace`.",
+      "hints": [
+        "Walk the trace once, keeping track of what has happened so far. What do you need to remember to answer each of the three questions?",
+        "For the dirty read you need to know, at the moment of a T1 read, whether another transaction has an uncommitted write to that key. For the other two you need T1's previous read of the same key.",
+        "Track uncommitted writes per transaction and clear them on commit; track committed writes per key since T1's last read of it; and track T1's last `rows` per key. Then test dirty, phantom, non-repeatable in that order."
+      ],
+      "solution": {
+        "code": "function classifyAnomaly(trace) {\n  const uncommitted = {};\n  const lastRead = {};\n  const committedSince = {};\n  let phantom = false;\n  let nonRepeatable = false;\n  for (let i = 0; i < trace.length; i += 1) {\n    const e = trace[i];\n    if (e.op === 'write') {\n      if (!uncommitted[e.tx]) uncommitted[e.tx] = [];\n      uncommitted[e.tx].push(e.key);\n    } else if (e.op === 'commit') {\n      const keys = uncommitted[e.tx] || [];\n      for (let j = 0; j < keys.length; j += 1) {\n        committedSince[keys[j]] = true;\n      }\n      uncommitted[e.tx] = [];\n    } else if (e.op === 'read' && e.tx === 'T1') {\n      let dirty = false;\n      const txs = Object.keys(uncommitted);\n      for (let j = 0; j < txs.length; j += 1) {\n        if (txs[j] === 'T1') continue;\n        const keys = uncommitted[txs[j]];\n        for (let k = 0; k < keys.length; k += 1) {\n          if (keys[k] === e.key) dirty = true;\n        }\n      }\n      if (dirty) return 'dirty-read';\n      if (Object.prototype.hasOwnProperty.call(lastRead, e.key)) {\n        if (lastRead[e.key] !== e.rows) {\n          phantom = true;\n        } else if (committedSince[e.key]) {\n          nonRepeatable = true;\n        }\n      }\n      lastRead[e.key] = e.rows;\n      committedSince[e.key] = false;\n    }\n  }\n  if (phantom) return 'phantom';\n  if (nonRepeatable) return 'non-repeatable-read';\n  return 'none';\n}",
+        "explanationMarkdown": "The three anomalies differ only in *what you have to remember*, which is why writing the classifier fixes them in your head better than a table does.\n\nA dirty read is decided at the instant of the read — it depends on whether a write is outstanding right then, so it is checked inline and returned immediately.\n\nA phantom and a non-repeatable read both require a *second* read of the same key, which is why `lastRead` exists. The distinction is only whether the row count moved: same key, different count means the set of matching rows changed; same count but someone committed in between means one row's value changed. Resetting `committedSince[key]` after each read is what makes 'between the two reads' mean between *these* two rather than at any earlier point.\n\nThe precedence is deliberate. A trace can exhibit more than one anomaly, so the function reports the strongest — and returning early on dirty-read encodes that."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "classifyAnomaly",
+        "starterCode": "function classifyAnomaly(trace) {\n  // Reports a non-repeatable read whenever T1 reads the same key twice.\n  const seen = {};\n  for (let i = 0; i < trace.length; i += 1) {\n    const e = trace[i];\n    if (e.op === 'read' && e.tx === 'T1') {\n      if (seen[e.key]) return 'non-repeatable-read';\n      seen[e.key] = true;\n    }\n  }\n  return 'none';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "clean-trace",
+            "args": [
+              [
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 1
+                },
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 1
+                },
+                {
+                  "tx": "T1",
+                  "op": "commit"
+                }
+              ]
+            ],
+            "expected": "none",
+            "hidden": false
+          },
+          {
+            "id": "non-repeatable",
+            "args": [
+              [
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 1
+                },
+                {
+                  "tx": "T2",
+                  "op": "write",
+                  "key": "p1"
+                },
+                {
+                  "tx": "T2",
+                  "op": "commit"
+                },
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 1
+                }
+              ]
+            ],
+            "expected": "non-repeatable-read",
+            "hidden": false
+          },
+          {
+            "id": "phantom-row-count-moved",
+            "args": [
+              [
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "open-jobs",
+                  "rows": 4
+                },
+                {
+                  "tx": "T2",
+                  "op": "write",
+                  "key": "open-jobs"
+                },
+                {
+                  "tx": "T2",
+                  "op": "commit"
+                },
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "open-jobs",
+                  "rows": 5
+                }
+              ]
+            ],
+            "expected": "phantom",
+            "hidden": false
+          },
+          {
+            "id": "dirty-read-outranks",
+            "args": [
+              [
+                {
+                  "tx": "T2",
+                  "op": "write",
+                  "key": "p1"
+                },
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 1
+                },
+                {
+                  "tx": "T2",
+                  "op": "commit"
+                },
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 9
+                }
+              ]
+            ],
+            "expected": "dirty-read",
+            "hidden": false
+          },
+          {
+            "id": "write-committed-before-read-is-clean",
+            "args": [
+              [
+                {
+                  "tx": "T2",
+                  "op": "write",
+                  "key": "p1"
+                },
+                {
+                  "tx": "T2",
+                  "op": "commit"
+                },
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 1
+                },
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 1
+                }
+              ]
+            ],
+            "expected": "none",
+            "hidden": false
+          },
+          {
+            "id": "other-key-does-not-count",
+            "args": [
+              [
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 1
+                },
+                {
+                  "tx": "T2",
+                  "op": "write",
+                  "key": "p2"
+                },
+                {
+                  "tx": "T2",
+                  "op": "commit"
+                },
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 1
+                }
+              ]
+            ],
+            "expected": "none",
+            "hidden": false
+          },
+          {
+            "id": "t1-own-write-is-not-dirty",
+            "args": [
+              [
+                {
+                  "tx": "T1",
+                  "op": "write",
+                  "key": "p1"
+                },
+                {
+                  "tx": "T1",
+                  "op": "read",
+                  "key": "p1",
+                  "rows": 1
+                }
+              ]
+            ],
+            "expected": "none",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "db.isolation-levels",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e015",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the intermittent deadlock",
+      "conceptIds": [
+        "db.locking"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Two correct-looking transactions that occasionally kill each other.",
+      "lessonId": "v2-l05",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Shipping a multi-line order updates each part in turn:\n\n```js\nawait db.$transaction(async (tx) => {\n  for (const line of order.lines) {\n    await tx.part.updateMany({\n      where: { sku: line.sku, onHand: { gte: line.qty } },\n      data:  { onHand: { decrement: line.qty } },\n    });\n  }\n});\n```\n\nUnder load, roughly one shipment in a few hundred fails with:\n\n```\ndeadlock detected\nDETAIL: Process 8821 waits for ShareLock on transaction 5512; blocked by process 8804.\n        Process 8804 waits for ShareLock on transaction 5519; blocked by process 8821.\n```\n\nWhat is the cause, and what is the fix?",
+      "hints": [
+        "The conditional update is correct. Look at the loop rather than the statement inside it.",
+        "Each UPDATE takes a row lock held until commit. Two orders containing the same two parts, listed in different sequences, will take those locks in different sequences.",
+        "Make every transaction acquire the same rows in the same order — sort the lines by sku before the loop — so a waiting cycle cannot form."
+      ],
+      "solution": {
+        "modelAnswer": "sort-lock-order",
+        "explanationMarkdown": "Each `updateMany` locks the row it changes until the transaction commits. Order A listing `[BX-12, AX-90]` locks BX-12 then wants AX-90; order B listing `[AX-90, BX-12]` locks AX-90 then wants BX-12. Each holds what the other needs, which is a cycle, and PostgreSQL breaks it by aborting one.\n\n```js\nconst lines = [...order.lines].sort((a, b) => (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0));\n```\n\nWith a consistent order, whichever transaction reaches AX-90 first holds it, and the other simply waits and then proceeds. Waiting is fine; cycles are not.\n\nTwo things this is *not*. It is not a reason to widen the transaction or lock the whole table — that trades a rare abort for permanent serialisation of all shipping. And retrying is a reasonable belt-and-braces addition, but on its own it leaves the cycle in place and simply pays for it repeatedly; deduplicating repeated skus in the same order is worth doing at the same time, since a line listed twice locks the same row twice for no reason."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "sort-lock-order",
+            "textMarkdown": "Different orders lock the same parts in different sequences, forming a cycle; sort the lines by sku so every transaction acquires rows in the same order.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Consistent acquisition order makes a waiting cycle impossible, so contending transactions queue instead of deadlocking."
+          },
+          {
+            "id": "retry",
+            "textMarkdown": "Deadlocks are unavoidable under load; catch the error and retry the transaction.",
+            "correct": false,
+            "explanationMarkdown": "Retrying is a sensible safety net and is genuinely required at higher isolation levels, but here the deadlock is caused by a fixable ordering defect. Retrying alone pays the cost forever."
+          },
+          {
+            "id": "lock-table",
+            "textMarkdown": "Take a table-level lock on `parts` at the start of the transaction.",
+            "correct": false,
+            "explanationMarkdown": "It would remove the deadlock by serialising every shipment in the system. That is a very large throughput price for a problem solved by a sort."
+          },
+          {
+            "id": "isolation",
+            "textMarkdown": "Raise the isolation level to Serializable so the database orders the transactions safely.",
+            "correct": false,
+            "explanationMarkdown": "Serializable changes which anomalies are prevented, not lock acquisition order — you would still deadlock, and would additionally face serialisation failures."
+          }
+        ]
+      },
+      "primaryConceptId": "db.locking",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c009",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Phantom or non-repeatable read?",
+      "conceptIds": [
+        "db.isolation-levels"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the distinction between the two Read Committed anomalies.",
+      "lessonId": "v2-l05",
+      "type": "recall",
+      "promptMarkdown": "What distinguishes a phantom from a non-repeatable read?",
+      "answerMarkdown": "A non-repeatable read is the same row returning a different value on a second read. A phantom is the same query returning a different set of rows — rows have appeared or disappeared from the result. One is about a value changing, the other about membership changing.",
+      "explanationMarkdown": "The practical difference is what each breaks. A non-repeatable read invalidates a decision made about one record. A phantom invalidates a decision made about an aggregate or a check for absence — which is why 'no active assignment exists, so I may insert one' is a phantom problem, and why locking the rows you read cannot fix it: you cannot lock rows that do not exist yet.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.isolation-levels"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c010",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why sorting keys prevents deadlock",
+      "conceptIds": [
+        "db.locking"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the ordering rule to a new multi-row transaction.",
+      "lessonId": "v2-l05",
+      "type": "transfer",
+      "promptMarkdown": "A transfer debits one account and credits another. Two concurrent transfers between the same pair of accounts, in opposite directions, occasionally deadlock. Why, and what is the minimal fix?",
+      "answerMarkdown": "Each transfer locks the debited account first, so the two transfers lock the pair in opposite orders and each ends up holding what the other needs. The fix is to lock both accounts in a fixed order — sorted by account id — before applying the debit and credit, rather than in business order.",
+      "explanationMarkdown": "Deadlock needs a cycle in the waits-for graph, and a cycle needs at least two participants disagreeing about order. Imposing one global order on lock acquisition makes a cycle structurally impossible, so transactions queue instead. The order does not have to be meaningful — sorting by id is fine — it only has to be the same everywhere, which is why this must be applied in every path that locks these rows.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.locking"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Idempotent order submission",
+      "conceptIds": [
+        "db.idempotent-submission"
+      ],
+      "prerequisiteIds": [
+        "http.retryable-failure",
+        "db.optimistic-concurrency"
+      ],
+      "bodyMarkdown": "A customer submits an order. The request reaches the server, the order is created, and the response is lost on the way back. The customer's browser shows a spinner, then an error. They press Submit again.\n\nFrom the client's side these two situations are **indistinguishable**: a request that never arrived, and a request that arrived and succeeded but whose response was lost. That is not a flaw in the client — it is a property of networks. Any client that retries will eventually retry something that already succeeded, and a server that treats every arrival as new will duplicate it.\n\nThe fix is to let the **client name the attempt**. It generates a unique key — a UUID — before the first try and sends the same key on every retry of that attempt. The server records the key with the work it did:\n\n```sql\nCREATE TABLE submissions (\n  user_id       bigint NOT NULL,\n  idempotency_key text NOT NULL,\n  request_hash  text   NOT NULL,\n  response      jsonb  NOT NULL,\n  created_at    timestamptz NOT NULL DEFAULT now(),\n  PRIMARY KEY (user_id, idempotency_key)\n);\n```\n\nOn arrival there are three cases, and getting all three right is the lesson:\n\n1. **No record** — new work. Do it, and store the receipt.\n2. **A record whose `request_hash` matches** — a genuine retry. Return the **stored response**, byte for byte. Do not redo the work; do not recompute the response, because a second computation may differ.\n3. **A record whose `request_hash` differs** — the same key reused for different content. This is a client bug, and it must be an error (`409`), never a silent overwrite. Otherwise a key collision would let one submission's response be returned for another's request.\n\nTwo implementation details decide whether this actually works.\n\n**The receipt and the work must be in one transaction.** If the order is created and the receipt write fails, the retry sees no record and creates a second order — the exact outcome the mechanism exists to prevent.\n\n**The key must be scoped to the user.** `PRIMARY KEY (user_id, idempotency_key)` means one customer's key cannot collide with another's, and — more importantly — one customer cannot guess another's key and be handed their stored response.\n\nThis gives **at-most-once** application of the work, with the retry making it **effectively exactly-once** from the client's point of view. It is worth being precise about that: nothing here makes the *network* deliver exactly once. What it does is make duplicate delivery harmless, which is the achievable goal.",
+      "chapterId": "v2-ch14",
+      "sortOrder": 2,
+      "objectives": [
+        "Explain why a client cannot distinguish a lost response from a lost request.",
+        "Resolve a submission into new work, a replay, or a key-reuse conflict.",
+        "Explain why the receipt must be written in the same transaction as the work."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "The same order, submitted three times.\n\n```\n1.  POST /orders   Idempotency-Key: 7f3a…   { lines: [AX-90 x2] }\n    -> no record. Create order 5501, store receipt, return 201 { id: 5501 }\n    -> response lost in transit.\n\n2.  POST /orders   Idempotency-Key: 7f3a…   { lines: [AX-90 x2] }   (client retry)\n    -> record found, request_hash matches.\n    -> return the STORED 201 { id: 5501 }. No second order.\n\n3.  POST /orders   Idempotency-Key: 7f3a…   { lines: [AX-90 x3] }   (client bug)\n    -> record found, request_hash differs.\n    -> 409 IDEMPOTENCY_CONFLICT. Nothing is created, nothing is overwritten.\n```\n\n**Why return the stored response rather than recompute it.** Recomputing looks harmless and is not. Suppose the response embeds a `queuePosition` or an `estimatedDispatch`; those values have moved on since the original call. The client would receive two different answers for one submission and could not tell which is authoritative. Storing the response makes a retry genuinely a *replay*.\n\n**Why the transaction matters.** Written naively:\n\n```js\nconst order = await db.order.create({ data });          // committed\nawait db.submission.create({ data: { key, response } }); // fails here\n```\n\nThe order exists and the receipt does not, so retry number 2 creates a second order. One transaction removes the window:\n\n```js\nawait db.$transaction(async (tx) => {\n  const order = await tx.order.create({ data });\n  await tx.submission.create({ data: { userId, key, requestHash, response: { id: order.id } } });\n  return order;\n});\n```\n\nA concurrent duplicate is handled by the primary key itself: the second transaction's insert violates `(user_id, idempotency_key)` and rolls back, so exactly one order survives. Catch that violation and treat it as case 2 — re-read the receipt and return the stored response.",
+      "commonMistakes": [
+        "Deduplicating on the request body instead of a client-supplied key, so two genuinely separate identical orders collapse into one.",
+        "Writing the receipt in a separate transaction from the work, leaving a window where a retry duplicates it.",
+        "Recomputing the response on a replay rather than returning the stored one, so a retry can answer differently from the original.",
+        "Treating a key reused with different content as a replay and returning the old response, which hides a client bug and answers the wrong question.",
+        "Scoping the key globally instead of per user, so one client's key can collide with — or expose — another's stored response.",
+        "Keeping receipts forever with no pruning, or pruning them faster than clients retry, which quietly restores the duplicate."
+      ],
+      "summaryMarkdown": "A client cannot tell a lost request from a lost response, so retries are inevitable and duplicates must be made harmless rather than prevented. A client-supplied idempotency key, stored with a hash of the request and the response it produced, resolves every arrival into new work, a replay, or a conflict. The receipt must be written in the same transaction as the work, the stored response must be replayed rather than recomputed, and the key must be scoped to the user.",
+      "exerciseIds": [
+        "v2-e016",
+        "v2-e017",
+        "v2-e018"
+      ],
+      "reviewCardIds": [
+        "v2-c011",
+        "v2-c012"
+      ],
+      "references": [
+        {
+          "label": "MDN: HTTP idempotent methods",
+          "url": "https://developer.mozilla.org/en-US/docs/Glossary/Idempotent"
+        },
+        {
+          "label": "PostgreSQL: INSERT ... ON CONFLICT",
+          "url": "https://www.postgresql.org/docs/current/sql-insert.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e016",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the duplicate order",
+      "conceptIds": [
+        "db.idempotent-submission"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Idempotency keys are in place and a duplicate still got through. Read the log.",
+      "lessonId": "v2-l06",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "The endpoint stores an idempotency receipt. A customer still got two identical orders.\n\n```js\nconst existing = await db.submission.findUnique({ where: { userId_key: { userId, key } } });\nif (existing) return reply.send(existing.response);\n\nconst order = await db.order.create({ data });\nawait db.submission.create({ data: { userId, key, response: { id: order.id } } });\nreturn reply.status(201).send({ id: order.id });\n```\n\n```\n12:31:04.310  POST /orders key=7f3a  -> no receipt found\n12:31:04.318  POST /orders key=7f3a  -> no receipt found      (client retry, first was slow)\n12:31:04.402  order 5501 created\n12:31:04.415  order 5502 created\n12:31:04.418  receipt 7f3a stored -> 5501\n12:31:04.441  receipt 7f3a stored -> FAILED unique violation\n```\n\nWhat is the defect?",
+      "hints": [
+        "The receipt lookup and the order creation are separate statements. What happened between them at 12:31:04.310 and .318?",
+        "Both requests read 'no receipt' before either wrote one — the same read-check-write shape as the stock bug, with the same consequence.",
+        "The lookup, the work and the receipt must be one atomic unit, with the unique constraint on (userId, key) as the arbiter of which request wins."
+      ],
+      "solution": {
+        "modelAnswer": "check-then-create-race",
+        "explanationMarkdown": "Both requests ran `findUnique` before either ran `submission.create`, so both saw no receipt and both created an order. The unique constraint then caught the *second receipt* — but far too late, after order 5502 already existed and had been returned to the client.\n\nThe constraint is doing its job; the code is asking it the question at the wrong moment. Put the work and the receipt in one transaction so the insert either wins or rolls back everything with it:\n\n```js\ntry {\n  return await db.$transaction(async (tx) => {\n    const order = await tx.order.create({ data });\n    await tx.submission.create({ data: { userId, key, requestHash, response: { id: order.id } } });\n    return { status: 201, body: { id: order.id } };\n  });\n} catch (e) {\n  if (isUniqueViolation(e)) {\n    const receipt = await db.submission.findUnique({ where: { userId_key: { userId, key } } });\n    return { status: 200, body: receipt.response };   // the loser replays the winner\n  }\n  throw e;\n}\n```\n\nThe loser of the race rolls back its order and then returns the winner's stored response, so the client sees one order either way. Note the log also reveals a second problem: no `requestHash` is stored, so this endpoint cannot detect case 3 — the same key reused with different content."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "check-then-create-race",
+            "textMarkdown": "The receipt lookup and the order creation are separate statements, so both requests saw no receipt before either wrote one; the work and the receipt must be one transaction, with the unique violation deciding the winner.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The unique constraint fires only on the second receipt, by which time the duplicate order already exists and has been returned."
+          },
+          {
+            "id": "no-constraint",
+            "textMarkdown": "There is no unique constraint on (userId, key), so duplicate receipts are permitted.",
+            "correct": false,
+            "explanationMarkdown": "The log shows the second receipt failing with a unique violation, so the constraint exists. The problem is when it is consulted, not whether it is there."
+          },
+          {
+            "id": "client-retry",
+            "textMarkdown": "The client retried too quickly; it should back off before retrying.",
+            "correct": false,
+            "explanationMarkdown": "Backoff makes the race rarer without removing it, and a server whose correctness depends on client timing is not correct. Retries are a given — the server must make them harmless."
+          },
+          {
+            "id": "key-generation",
+            "textMarkdown": "The client generated a new key for the retry instead of reusing the original.",
+            "correct": false,
+            "explanationMarkdown": "The log shows `key=7f3a` on both requests, so the client did the right thing. Blaming the client here would send the fix to the wrong side of the wire."
+          }
+        ]
+      },
+      "primaryConceptId": "db.idempotent-submission",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e017",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Resolve a submission into new, replay or conflict",
+      "conceptIds": [
+        "db.idempotent-submission"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The three-way decision at the heart of an idempotent endpoint, as a pure function.",
+      "lessonId": "v2-l06",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "Implement `resolveSubmission(receipts, request)`.\n\n`receipts` is an array of stored receipts: `{ userId, key, requestHash, response }`.\n\n`request` is `{ userId, key, requestHash }`.\n\nReturn one of:\n\n- `{ outcome: 'new' }` — no receipt exists for this `userId` **and** `key`.\n- `{ outcome: 'replay', response }` — a receipt exists whose `requestHash` matches; `response` is the **stored** response.\n- `{ outcome: 'conflict', storedHash }` — a receipt exists whose `requestHash` differs.\n\nRules:\n\n- A receipt belongs to a request only when **both** `userId` and `key` match. A receipt with the same key but a different `userId` is not a match and must never be replayed.\n- Do not modify `receipts` or `request`.",
+      "hints": [
+        "The match is on a pair, not on the key alone. Getting that wrong is a security bug, not just a logic one.",
+        "Once you have found the receipt (or not), there are exactly three outcomes and the hash decides between the last two.",
+        "Scan for a receipt where both userId and key match. If none, 'new'. If the hashes agree, replay the stored response. Otherwise conflict, reporting the stored hash."
+      ],
+      "solution": {
+        "code": "function resolveSubmission(receipts, request) {\n  let found = null;\n  for (let i = 0; i < receipts.length; i += 1) {\n    const r = receipts[i];\n    if (r.userId === request.userId && r.key === request.key) {\n      found = r;\n      break;\n    }\n  }\n  if (found === null) {\n    return { outcome: 'new' };\n  }\n  if (found.requestHash === request.requestHash) {\n    return { outcome: 'replay', response: found.response };\n  }\n  return { outcome: 'conflict', storedHash: found.requestHash };\n}",
+        "explanationMarkdown": "Matching on `userId` **and** `key` is the part with teeth. Matching on the key alone would let one customer present another customer's key and be handed their stored response — an order id, an address, whatever the response carried. Scoping by owner is the same discipline as scoping every query by owner elsewhere in the system.\n\nThe conflict branch is what stops a key collision from silently answering the wrong question. Returning the stored response for a *different* request would tell a client that an order it never placed was created. Reporting the stored hash gives the caller something to diagnose with.\n\nReturning `found.response` by reference rather than recomputing anything is the point of the whole mechanism: a replay must reproduce the original answer, not a fresh one that happens to look similar."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "resolveSubmission",
+        "starterCode": "function resolveSubmission(receipts, request) {\n  // Matches on the key alone and ignores the request hash.\n  for (let i = 0; i < receipts.length; i += 1) {\n    if (receipts[i].key === request.key) {\n      return { outcome: 'replay', response: receipts[i].response };\n    }\n  }\n  return { outcome: 'new' };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "no-receipt-is-new",
+            "args": [
+              [],
+              {
+                "userId": 1,
+                "key": "7f3a",
+                "requestHash": "h1"
+              }
+            ],
+            "expected": {
+              "outcome": "new"
+            },
+            "hidden": false
+          },
+          {
+            "id": "matching-hash-replays",
+            "args": [
+              [
+                {
+                  "userId": 1,
+                  "key": "7f3a",
+                  "requestHash": "h1",
+                  "response": {
+                    "id": 5501
+                  }
+                }
+              ],
+              {
+                "userId": 1,
+                "key": "7f3a",
+                "requestHash": "h1"
+              }
+            ],
+            "expected": {
+              "outcome": "replay",
+              "response": {
+                "id": 5501
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "different-hash-conflicts",
+            "args": [
+              [
+                {
+                  "userId": 1,
+                  "key": "7f3a",
+                  "requestHash": "h1",
+                  "response": {
+                    "id": 5501
+                  }
+                }
+              ],
+              {
+                "userId": 1,
+                "key": "7f3a",
+                "requestHash": "h2"
+              }
+            ],
+            "expected": {
+              "outcome": "conflict",
+              "storedHash": "h1"
+            },
+            "hidden": false
+          },
+          {
+            "id": "same-key-other-user-is-new",
+            "args": [
+              [
+                {
+                  "userId": 2,
+                  "key": "7f3a",
+                  "requestHash": "h1",
+                  "response": {
+                    "id": 9001
+                  }
+                }
+              ],
+              {
+                "userId": 1,
+                "key": "7f3a",
+                "requestHash": "h1"
+              }
+            ],
+            "expected": {
+              "outcome": "new"
+            },
+            "hidden": false
+          },
+          {
+            "id": "finds-the-right-receipt-among-many",
+            "args": [
+              [
+                {
+                  "userId": 1,
+                  "key": "aaaa",
+                  "requestHash": "hx",
+                  "response": {
+                    "id": 1
+                  }
+                },
+                {
+                  "userId": 2,
+                  "key": "7f3a",
+                  "requestHash": "hy",
+                  "response": {
+                    "id": 2
+                  }
+                },
+                {
+                  "userId": 1,
+                  "key": "7f3a",
+                  "requestHash": "h1",
+                  "response": {
+                    "id": 5501
+                  }
+                }
+              ],
+              {
+                "userId": 1,
+                "key": "7f3a",
+                "requestHash": "h1"
+              }
+            ],
+            "expected": {
+              "outcome": "replay",
+              "response": {
+                "id": 5501
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "different-key-same-user-is-new",
+            "args": [
+              [
+                {
+                  "userId": 1,
+                  "key": "7f3a",
+                  "requestHash": "h1",
+                  "response": {
+                    "id": 5501
+                  }
+                }
+              ],
+              {
+                "userId": 1,
+                "key": "bbbb",
+                "requestHash": "h1"
+              }
+            ],
+            "expected": {
+              "outcome": "new"
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "db.idempotent-submission",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e018",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain the delivery guarantee you actually have",
+      "conceptIds": [
+        "db.idempotent-submission"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Say precisely what the mechanism guarantees, and what it does not.",
+      "lessonId": "v2-l06",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "A colleague writes in the design doc: *\"With idempotency keys, order submission is now exactly-once.\"*\n\nIn four to eight sentences, say what is and is not true about that claim. Cover what the client cannot know, what the server actually guarantees, and one concrete way the guarantee could still be lost in this system.",
+      "hints": [
+        "Start from what the network can promise. Can any protocol tell a client whether a lost response means the work happened?",
+        "Distinguish the *delivery* guarantee from the *effect* guarantee. Which one does the receipt table change?",
+        "Then look for a way the receipt could go missing or be bypassed — pruning, a receipt written outside the transaction, or a key that is not scoped to the user."
+      ],
+      "solution": {
+        "modelAnswer": "Exactly-once delivery is not achievable: when a response is lost the client cannot distinguish a request that never arrived from one that succeeded, so it must retry, and duplicates will arrive. What the receipt table gives is at-most-once *application of the effect* — the order is created at most once — which combined with client retries is effectively exactly-once from the customer's point of view. The honest phrasing is 'at-least-once delivery with idempotent handling', because it names where the guarantee actually lives. It can still be lost concretely: if receipts are pruned after 24 hours and a client retries a two-day-old submission, the retry looks new and creates a second order. It would equally be lost if the receipt were written in a separate transaction from the order, since a crash between them leaves work with no receipt. The guarantee holds only while the receipt and the work commit together and the receipt outlives any retry the client might make.",
+        "explanationMarkdown": "The point of this exercise is precision about where a guarantee lives. 'Exactly-once' is a claim about delivery, and no protocol over an unreliable network provides it; what engineering can provide is duplicate-tolerant effects. A strong answer names that distinction, and then gives a *specific* failure — receipt pruning, or a receipt outside the transaction — rather than a general caution.\n\nThe reason it matters beyond pedantry: a design doc that says 'exactly-once' will be read by someone who then feels no need to make the *next* endpoint idempotent, because the system is already described as having the property globally."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that exactly-once delivery is not achievable, because a client cannot distinguish a lost request from a lost response and must therefore retry.",
+          "Names the real guarantee as at-most-once application of the effect (or at-least-once delivery with idempotent handling), rather than exactly-once.",
+          "Gives at least one concrete way the guarantee could still be lost in this system, such as receipt pruning before a client stops retrying, or a receipt written outside the work's transaction.",
+          "Distinguishes the delivery guarantee from the effect guarantee explicitly, rather than treating the two as one property."
+        ],
+        "modelAnswerMarkdown": "See the model answer. Credit the delivery-versus-effect distinction and a specific named failure mode. A response that simply says 'it is not really exactly-once' without saying what it *is*, or that lists no concrete way to lose it, has identified the objection without demonstrating the understanding behind it."
+      },
+      "primaryConceptId": "db.idempotent-submission",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c011",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The three cases on arrival",
+      "conceptIds": [
+        "db.idempotent-submission"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the complete decision an idempotent endpoint makes.",
+      "lessonId": "v2-l06",
+      "type": "recall",
+      "promptMarkdown": "A request arrives with an idempotency key. What are the three possible cases, and what does the server do in each?",
+      "answerMarkdown": "No receipt for this user and key: do the work and store the receipt in the same transaction. A receipt whose request hash matches: return the stored response without redoing anything. A receipt whose request hash differs: return a conflict error, creating and overwriting nothing.",
+      "explanationMarkdown": "The third case is the one usually missed, and skipping it turns a client bug into data corruption: reusing a key for different content would either be silently treated as a replay — answering a question the client did not ask — or silently overwrite the first submission's receipt. Storing a hash of the request is what makes the distinction possible at all, which is why a receipt table holding only key and response is incomplete.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.idempotent-submission"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c012",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why not deduplicate on the request body?",
+      "conceptIds": [
+        "db.idempotent-submission"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Debug a plausible alternative design.",
+      "lessonId": "v2-l06",
+      "type": "debugging",
+      "promptMarkdown": "Someone proposes skipping the client-supplied key and deduplicating on a hash of the request body instead. What breaks?",
+      "answerMarkdown": "Genuinely distinct submissions that happen to be identical get collapsed into one. A customer ordering two units of the same part twice in one afternoon — a real thing that happens — would have the second order silently rejected as a duplicate of the first, with no way for them to express that they meant it.",
+      "explanationMarkdown": "A body hash answers 'have I seen this content before?', while the actual question is 'is this the same attempt as before?'. Only the client knows the answer, because only the client knows whether it is retrying or submitting anew — which is exactly why the key is generated client-side, once per intent, and reused across retries of that intent. The body hash still has a job in this design, but it is to detect key *reuse*, not to identify the attempt.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "db.idempotent-submission"
+    },
+    {
+      "kind": "assessment",
+      "id": "v2-a14",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transaction correctness placement",
+      "conceptIds": [
+        "db.multi-table-invariants",
+        "db.isolation-levels",
+        "db.locking",
+        "db.idempotent-submission"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five questions on cross-table invariants, isolation, locking and idempotency. Pass four, including both critical items, to place out of this chapter.",
+      "chapterId": "v2-ch14",
+      "items": [
+        {
+          "id": "v2-a14-i1",
+          "objectiveIds": [
+            "db.multi-table-invariants"
+          ],
+          "critical": true,
+          "promptMarkdown": "A booking system must never double-book a room for an overlapping period. The handler queries for overlapping bookings and inserts if none are found, all inside a transaction. Under load, double bookings appear. What is the most robust fix?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "exclusion",
+                "textMarkdown": "Add a database constraint that makes an overlapping row impossible to insert, such as an exclusion constraint on the room and the time range.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The check must be enforced by the database at insert time; anything evaluated before the insert can be raced. An exclusion constraint is the direct expression of 'no overlapping row may exist'."
+              },
+              {
+                "id": "serializable-only",
+                "textMarkdown": "Nothing further is needed once the transaction is present.",
+                "correct": false,
+                "explanationMarkdown": "The transaction is already there and the bug survives it. Two transactions can both find no overlap and both insert, because a check on rows that do not exist yet is a phantom problem."
+              },
+              {
+                "id": "retry",
+                "textMarkdown": "Catch the double booking afterwards and cancel one of them.",
+                "correct": false,
+                "explanationMarkdown": "Compensating after the fact means a customer receives a confirmation and then a cancellation. Preventing the invalid state is available here and is far cheaper."
+              },
+              {
+                "id": "unique-room",
+                "textMarkdown": "Add a unique constraint on `room_id`.",
+                "correct": false,
+                "explanationMarkdown": "That would permit only one booking per room ever. The invariant is about overlap in time, so the constraint has to involve the period, not just the room."
+              }
+            ]
+          },
+          "explanationMarkdown": "Checking for absence before inserting is the phantom-shaped race, and it is the one that locking rows cannot fix — you cannot lock rows that do not exist."
+        },
+        {
+          "id": "v2-a14-i2",
+          "objectiveIds": [
+            "db.isolation-levels"
+          ],
+          "critical": false,
+          "promptMarkdown": "A transaction at Repeatable Read reads a row, then tries to update it. Another transaction committed a change to that row after the first one's snapshot was taken. What happens?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "serialization-failure",
+                "textMarkdown": "The update fails with a serialisation error, and the application must retry the whole transaction.",
+                "correct": true,
+                "explanationMarkdown": "Correct. PostgreSQL refuses to let a transaction write based on a snapshot that has been superseded. Code at this level must be prepared to retry."
+              },
+              {
+                "id": "silently-overwrites",
+                "textMarkdown": "The update succeeds and overwrites the other transaction's change.",
+                "correct": false,
+                "explanationMarkdown": "That is the Read Committed outcome. Preventing exactly this silent overwrite is much of the reason to raise the level."
+              },
+              {
+                "id": "waits",
+                "textMarkdown": "The update blocks until the other transaction commits, then proceeds.",
+                "correct": false,
+                "explanationMarkdown": "It may block briefly while the other transaction is still open, but once that transaction has committed the outcome is an error, not a delayed success."
+              },
+              {
+                "id": "sees-new-value",
+                "textMarkdown": "The transaction's next read returns the new value, so the update is based on current data.",
+                "correct": false,
+                "explanationMarkdown": "The snapshot does not move — that is the defining property of Repeatable Read. The transaction continues to see the old value right up until it fails."
+              }
+            ]
+          },
+          "explanationMarkdown": "Raising the isolation level converts silent wrong answers into loud retryable errors, which is only an improvement if the retry actually exists."
+        },
+        {
+          "id": "v2-a14-i3",
+          "objectiveIds": [
+            "db.idempotent-submission"
+          ],
+          "critical": true,
+          "promptMarkdown": "An endpoint stores an idempotency receipt containing the key and the response, but not a hash of the request. A client bug sends the same key with a different body. What does this endpoint do, and why is it wrong?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "wrong-replay",
+                "textMarkdown": "It replays the stored response, answering a question the client did not ask; without the request hash it cannot detect key reuse at all.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The client receives a confirmation for work that does not match what it just sent, and the discrepancy is invisible to both sides. Storing a request hash is what makes the conflict detectable."
+              },
+              {
+                "id": "creates-new",
+                "textMarkdown": "It creates a second record, because the bodies differ.",
+                "correct": false,
+                "explanationMarkdown": "It has no way to notice that the bodies differ — the body was never recorded. The lookup is on the key alone."
+              },
+              {
+                "id": "errors",
+                "textMarkdown": "It returns a conflict error, because the stored response does not match the new request.",
+                "correct": false,
+                "explanationMarkdown": "Comparing against the stored *response* cannot reveal a different *request*; the endpoint has nothing to compare the incoming body against."
+              },
+              {
+                "id": "harmless",
+                "textMarkdown": "Nothing harmful: replaying an old response is always safe.",
+                "correct": false,
+                "explanationMarkdown": "It is safe only when the request genuinely is a repeat. Here it confirms an order the client did not submit, which is a silent correctness failure the client will act on."
+              }
+            ]
+          },
+          "explanationMarkdown": "The request hash is the difference between a receipt that identifies an attempt and one that merely caches a response by key."
+        },
+        {
+          "id": "v2-a14-i4",
+          "objectiveIds": [
+            "db.locking"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which statements about `SELECT ... FOR UPDATE` are true? Select all that apply.",
+          "grading": {
+            "kind": "choice",
+            "mode": "multiple",
+            "options": [
+              {
+                "id": "queue",
+                "textMarkdown": "It converts a race into a queue: other transactions wanting the same row wait until this one commits.",
+                "correct": true,
+                "explanationMarkdown": "Correct, and that is precisely its value for a short machine-driven critical section."
+              },
+              {
+                "id": "deadlock",
+                "textMarkdown": "Taking several row locks in an inconsistent order across code paths can deadlock.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A cycle in the waits-for graph needs only two transactions disagreeing about order, which is why sorting keys before locking is the standard prevention."
+              },
+              {
+                "id": "user-edit",
+                "textMarkdown": "It is a good way to prevent conflicting edits while a user fills in a form.",
+                "correct": false,
+                "explanationMarkdown": "The lock would be held for the entire time the user is thinking, blocking everyone else and never released if they close the tab. Optimistic concurrency exists for this case."
+              },
+              {
+                "id": "phantom",
+                "textMarkdown": "It prevents another transaction from inserting a new row that matches the same query.",
+                "correct": false,
+                "explanationMarkdown": "It locks the rows returned, and cannot lock rows that do not exist yet. Preventing that insert needs a constraint or a higher isolation level."
+              }
+            ]
+          },
+          "explanationMarkdown": "The two true statements are what locking buys and what it costs; the two false ones are the situations where reaching for a lock is the wrong instinct."
+        },
+        {
+          "id": "v2-a14-i5",
+          "objectiveIds": [
+            "db.multi-table-invariants",
+            "db.isolation-levels"
+          ],
+          "critical": false,
+          "promptMarkdown": "Rewrite this so it cannot oversell, using a single statement:\n\n```js\nconst seat = await tx.seat.findUnique({ where: { id } });\nif (seat.status !== 'free') throw new AlreadyTaken();\nawait tx.seat.update({ where: { id }, data: { status: 'sold', buyerId } });\n```\n\nWhich replacement is correct?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "conditional",
+                "textMarkdown": "`updateMany({ where: { id, status: 'free' }, data: { status: 'sold', buyerId } })`, treating a zero count as AlreadyTaken.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The condition moves into the write, so the database evaluates it and performs the update atomically; a zero count is the refusal."
+              },
+              {
+                "id": "recheck",
+                "textMarkdown": "Keep the code and re-read the seat after the update to confirm the buyer is correct.",
+                "correct": false,
+                "explanationMarkdown": "The re-read is another statement with its own window, and by the time it disagrees the seat has already been sold twice. Detecting after writing is weaker than not writing."
+              },
+              {
+                "id": "sleep",
+                "textMarkdown": "Add a short random delay before the update to reduce collisions.",
+                "correct": false,
+                "explanationMarkdown": "This makes the failure rarer and harder to reproduce without making it impossible. Timing is not a correctness mechanism."
+              },
+              {
+                "id": "update-anyway",
+                "textMarkdown": "`update({ where: { id }, data: { status: 'sold', buyerId } })` and rely on the status column's CHECK constraint.",
+                "correct": false,
+                "explanationMarkdown": "A CHECK constraint validates the new value in isolation; it cannot express 'only if the previous value was free'. The condition has to be in the WHERE clause."
+              }
+            ]
+          },
+          "explanationMarkdown": "Folding the guard into the write is the single most transferable technique in this chapter — it applies to stock, seats, revisions and idempotency keys alike."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

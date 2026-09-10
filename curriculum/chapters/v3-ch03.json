@@ -1,0 +1,1320 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v3-ch03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "LINQ",
+      "conceptIds": [
+        "linq.filtering",
+        "linq.projection",
+        "linq.grouping",
+        "linq.aggregation",
+        "linq.deferred-execution"
+      ],
+      "prerequisiteIds": [
+        "dotnet.collections",
+        "dotnet.generics",
+        "js.array-filter"
+      ],
+      "bodyMarkdown": "LINQ is the part of C# that will feel most familiar and catch you out most often.\n\nThe familiarity is real: `Where` is `filter`, `Select` is `map`, `Any` is `some`, `OrderBy` is a stable `sort`. If you can write a chain of array methods you can already read most LINQ. Getting fluent is a matter of vocabulary, and the vocabulary is small.\n\nThe difference that matters is **when the work happens**. A JavaScript `filter` runs immediately and hands you a new array. A LINQ `Where` builds a description of an operation and runs nothing at all until something asks it to produce elements. That single change explains most LINQ surprises: predicates that run more times than you expected, a query whose results change between two enumerations, a captured variable that has moved on by the time the query executes, and — once EF Core is involved in chapter D06 — a database round trip triggered by a line that looks like it only declares something.\n\nThere are two dialects. **Method syntax** chains extension methods and is what you will read and write most. **Query syntax** (`from t in tickets where ... select ...`) compiles to exactly the same calls and is occasionally clearer for joins and groupings. They are interchangeable; use whichever reads better and expect to meet both.\n\nThis chapter treats LINQ over in-memory collections. Everything here is true of `List<T>` and arrays. Chapter D06 adds the twist that matters in production: when the source is a database query, the same expressions are translated to SQL rather than executed, and some of them cannot be translated at all.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v3-l07",
+        "v3-l08",
+        "v3-l09"
+      ],
+      "assessmentId": "v3-a03",
+      "objectiveIds": [
+        "linq.filtering",
+        "linq.projection",
+        "linq.grouping",
+        "linq.aggregation",
+        "linq.deferred-execution"
+      ],
+      "missionIds": [],
+      "sortOrder": 22
+    },
+    {
+      "kind": "lesson",
+      "id": "v3-l07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Filtering and projection",
+      "conceptIds": [
+        "linq.filtering",
+        "linq.projection"
+      ],
+      "prerequisiteIds": [
+        "js.array-filter"
+      ],
+      "bodyMarkdown": "`Where` selects elements; `Select` transforms them. Almost every query starts as some arrangement of those two, and the arrangement matters more than it looks.\n\nFilter before you project. `Where(...).Select(...)` transforms only the elements that survived; `Select(...).Where(...)` transforms everything and then discards most of it. Over a list of a hundred items nobody notices. Over a database query the difference becomes which rows the server sends you, so the habit is worth forming now.\n\nThe **element operators** are where most avoidable exceptions come from, and their names encode precise promises. `First` throws when nothing matches; `FirstOrDefault` returns the type's default — null for a reference type, `0` for an `int`, which is a trap of its own. `Single` throws when there is anything other than exactly one match, which makes it a genuine assertion: use it when two matches would mean your data is corrupt, and `First` when you simply want the earliest. Reaching for `FirstOrDefault` everywhere to avoid exceptions converts a loud failure into a null that travels somewhere else before causing trouble.\n\n`Select` also does more than one-to-one mapping. It has an overload that supplies the index, and `SelectMany` flattens a sequence of sequences — the equivalent of `flatMap`, and the usual answer when you find yourself with a list of lists.\n\nProjection is also how you stop carrying data you do not need. Projecting to a small record — `Select(t => new TicketSummary(t.Id, t.Subject))` — states exactly which fields the rest of the code depends on. That discipline is nearly free in memory and becomes a significant win in D06, where the projection decides which columns are read at all.",
+      "chapterId": "v3-ch03",
+      "sortOrder": 0,
+      "objectives": [
+        "Order `Where` and `Select` so that filtering happens before transformation.",
+        "Choose among `First`, `FirstOrDefault` and `Single` from what a missing or duplicate match should mean.",
+        "Use projection to narrow a result to the fields the caller actually needs."
+      ],
+      "estimatedMinutes": 9,
+      "workedExampleMarkdown": "One query, three versions.\n\n```csharp\npublic record TicketSummary(string Id, string Subject);\n\n// Transforms every ticket, then throws most of the work away.\nvar wasteful = tickets\n    .Select(t => new TicketSummary(t.Id, t.Subject.ToUpperInvariant()))\n    .Where(s => s.Subject.Contains(\"PRINTER\"));\n\n// Filters first, so only the survivors are transformed.\nvar better = tickets\n    .Where(t => t.Subject.Contains(\"printer\", StringComparison.OrdinalIgnoreCase))\n    .Select(t => new TicketSummary(t.Id, t.Subject));\n```\n\nAnd the element operators, chosen deliberately:\n\n```csharp\n// Two tickets with one id would mean corrupt data — say so.\nvar ticket = tickets.Single(t => t.Id == id);\n\n// Several may match; I want the earliest, and none is normal.\nvar oldestOpen = tickets\n    .Where(t => t.Status == TicketStatus.Open)\n    .OrderBy(t => t.OpenedAt)\n    .FirstOrDefault();\n\nif (oldestOpen is null)\n{\n    return NoBreaches();\n}\n```\n\nNote what `FirstOrDefault` buys here: the absence of an open ticket is an ordinary outcome, and the `is null` check handles it immediately rather than letting a default travel onward. Had the element type been a value type, the default would be `0` rather than null — and a `0` that means \"nothing matched\" is indistinguishable from a `0` that is real data.",
+      "commonMistakes": [
+        "Projecting before filtering, so every element is transformed and most of the work is discarded.",
+        "Using `FirstOrDefault` to avoid exceptions, then not checking the result — turning a loud failure into a null that surfaces elsewhere.",
+        "Using `First` where `Single` is meant. If two matches would indicate corrupt data, `Single` says so and `First` hides it.",
+        "Forgetting that `FirstOrDefault` on a value-type sequence returns `0`, which is indistinguishable from a legitimate zero."
+      ],
+      "summaryMarkdown": "`Where` then `Select`, so only survivors are transformed. `First` throws on none, `FirstOrDefault` returns the type default, `Single` asserts exactly one — pick from what a missing or duplicate match should mean. Project to a narrow record to state which fields matter; `SelectMany` flattens nested sequences.",
+      "exerciseIds": [
+        "v3-e019",
+        "v3-e020",
+        "v3-e021"
+      ],
+      "reviewCardIds": [
+        "v3-c013",
+        "v3-c014"
+      ],
+      "references": [
+        {
+          "label": "Filtering data (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/linq/standard-query-operators/filtering-data"
+        },
+        {
+          "label": "Projection operations (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/linq/standard-query-operators/projection-operations"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e019",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a FirstOrDefault that hides a missing row",
+      "conceptIds": [
+        "linq.filtering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An element operator chosen to avoid an exception, and the failure it creates instead.",
+      "lessonId": "v3-l07",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "A billing report shows some line totals as `0.00` for accounts that certainly have charges.\n\n```csharp\npublic decimal RateFor(string planCode)\n{\n    return _plans\n        .Where(p => p.Code == planCode)\n        .Select(p => p.RatePerHour)\n        .FirstOrDefault();\n}\n\n// caller\ndecimal total = hours * RateFor(account.PlanCode);\n```\n\nNo exception is thrown and the method never returns null. What is wrong, and what should it do instead?",
+      "hints": [
+        "Ask what `FirstOrDefault` returns when nothing matches, given that the projected element type is `decimal`.",
+        "The default for a value type is `0`, which is a perfectly plausible rate — so \"no such plan\" is silently indistinguishable from \"a free plan\".",
+        "Make the absent case explicit: return `decimal?` and check for null, use `Single` if a missing plan means corrupt data, or throw a domain error naming the plan code."
+      ],
+      "solution": {
+        "modelAnswer": "`FirstOrDefault` returns `default(decimal)` — that is, `0` — when no plan matches. Because the projection produced a value type, the absent case is represented by a value that is also a legitimate rate, so an unknown plan code silently bills as free rather than failing. The method should make absence representable: return `decimal?` (`FirstOrDefault` on a nullable projection, or `Cast<decimal?>()`) and force the caller to handle null, or use `Single` if a missing plan means the data is corrupt, or throw a domain-specific exception naming the plan code.",
+        "explanationMarkdown": "The trap here is that the usual advice — prefer `FirstOrDefault` over `First` so you do not throw — is good advice for reference types, where the default is null and null is at least conspicuous. For value types the default is a real, usable value, and the failure becomes silent and wrong rather than loud. This is the same class of defect as V1's `?? 0` on a possibly-absent quantity: a fallback that is indistinguishable from data. The question to ask before choosing an element operator is not \"will this throw\" but \"is the absent case representable in the type I am returning\"."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "default-is-a-valid-rate",
+            "textMarkdown": "For a value type the default is `0`, which is indistinguishable from a real rate, so an unknown plan silently bills as free; make absence representable with `decimal?`, `Single`, or a domain error.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The absent case has to be representable in the returned type, or it will be mistaken for data."
+          },
+          {
+            "id": "where-select-order",
+            "textMarkdown": "`Where` should come after `Select` so the projection is applied to every plan before filtering.",
+            "correct": false,
+            "explanationMarkdown": "That ordering is worse, not better — it transforms every plan and discards most of the work — and it would not change what happens when nothing matches."
+          },
+          {
+            "id": "decimal-precision",
+            "textMarkdown": "`decimal` loses precision on multiplication, so the total rounds down to zero.",
+            "correct": false,
+            "explanationMarkdown": "`decimal` is exact for currency within its range; that is why it is the recommended money type. The zero comes from the query, not from arithmetic."
+          },
+          {
+            "id": "needs-tolist",
+            "textMarkdown": "The query is lazy, so it must be materialised with `ToList()` before an element operator will return real data.",
+            "correct": false,
+            "explanationMarkdown": "`FirstOrDefault` is itself a terminal operator and executes the query. Laziness is not what produces the zero."
+          }
+        ]
+      },
+      "primaryConceptId": "linq.filtering",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e020",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Implement a narrowing projection",
+      "conceptIds": [
+        "linq.projection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Build the field-selection step a projection performs.",
+      "lessonId": "v3-l07",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "foundation",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "Projecting to a narrow shape states which fields the rest of the code depends on. Implement that selection.\n\nImplement `projectFields(row, fields)` returning a NEW object containing only the named fields.\n\n- Include a field only when the row actually has it, using `Object.prototype.hasOwnProperty`.\n- A field named twice appears once.\n- An empty `fields` array yields an empty object.\n- Never modify `row`.\n\nThe order of keys in the result does not matter.",
+      "hints": [
+        "Build a fresh object and copy into it, rather than deleting unwanted keys from a copy of the row.",
+        "Check membership explicitly — a field whose value is legitimately `undefined` should still be treated as absent by the has-own-property test, and a field the row lacks must not appear as `undefined` in the output.",
+        "Loop over `fields`, and for each one that the row has as its own property, assign it onto the result object."
+      ],
+      "solution": {
+        "code": "function projectFields(row, fields) {\n  const out = {};\n  for (const field of fields) {\n    if (Object.prototype.hasOwnProperty.call(row, field)) {\n      out[field] = row[field];\n    }\n  }\n  return out;\n}",
+        "explanationMarkdown": "Building a new object rather than pruning a copy is the point. A projection is defined by what it includes, so an unexpected field in the source can never leak through — which is exactly the property that makes projecting to a small record a security-relevant habit as well as a performance one. In C# the compiler enforces this for you, because `new TicketSummary(t.Id, t.Subject)` simply has nowhere to put an extra column. The `hasOwnProperty` check matters because a missing field and a field explicitly set to `undefined` are different situations, and quietly turning the first into the second would misrepresent the source row."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "projectFields",
+        "starterCode": "function projectFields(row, fields) {\n  // Copies the whole row, then tries to prune it.\n  const out = row;\n  return out;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "narrows-to-named-fields",
+            "args": [
+              {
+                "id": "t-1",
+                "subject": "Printer jam",
+                "internalNote": "escalated"
+              },
+              [
+                "id",
+                "subject"
+              ]
+            ],
+            "expected": {
+              "id": "t-1",
+              "subject": "Printer jam"
+            },
+            "hidden": false
+          },
+          {
+            "id": "missing-field-is-omitted",
+            "args": [
+              {
+                "id": "t-2"
+              },
+              [
+                "id",
+                "assignee"
+              ]
+            ],
+            "expected": {
+              "id": "t-2"
+            },
+            "hidden": false
+          },
+          {
+            "id": "empty-field-list",
+            "args": [
+              {
+                "id": "t-3",
+                "subject": "Scanner"
+              },
+              []
+            ],
+            "expected": {},
+            "hidden": false
+          },
+          {
+            "id": "duplicate-field-appears-once",
+            "args": [
+              {
+                "id": "t-4",
+                "subject": "Router"
+              },
+              [
+                "id",
+                "id"
+              ]
+            ],
+            "expected": {
+              "id": "t-4"
+            },
+            "hidden": false
+          },
+          {
+            "id": "falsy-values-are-kept",
+            "args": [
+              {
+                "id": "t-5",
+                "reopenCount": 0,
+                "isVip": false
+              },
+              [
+                "reopenCount",
+                "isVip"
+              ]
+            ],
+            "expected": {
+              "reopenCount": 0,
+              "isVip": false
+            },
+            "hidden": false
+          },
+          {
+            "id": "nested-value-is-carried-across",
+            "args": [
+              {
+                "id": "t-6",
+                "customer": {
+                  "name": "Rowan"
+                },
+                "secret": "x"
+              },
+              [
+                "id",
+                "customer"
+              ]
+            ],
+            "expected": {
+              "id": "t-6",
+              "customer": {
+                "name": "Rowan"
+              }
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "linq.projection",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e021",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Justify Single over First for a lookup",
+      "conceptIds": [
+        "linq.filtering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Defend an element operator that throws, against a reviewer who prefers one that cannot.",
+      "lessonId": "v3-l07",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "A reviewer objects to `var user = users.Single(u => u.Email == email);`, saying `First` would be safer because it cannot throw when two rows match.\n\nExplain when `Single` is the better choice and why \"cannot throw\" is not automatically an argument in its favour. Say what you would want to happen if two users really did share an email address.",
+      "hints": [
+        "Ask what a second matching row would actually mean about the system, not about this line of code.",
+        "If a duplicate email indicates a broken uniqueness guarantee, silently taking the first one continues with data you know to be wrong.",
+        "Frame it as where you want the failure to surface: loudly at the point of detection, or quietly later in whatever code consumes the wrong user."
+      ],
+      "solution": {
+        "modelAnswer": "`Single` is an assertion that exactly one row matches, and here that assertion reflects a real invariant: email addresses are supposed to be unique. If two rows match, the database has violated a constraint the rest of the system relies on, and continuing is worse than stopping. `First` would silently pick one of the two — arbitrarily, since order is unspecified without an `OrderBy` — and every downstream decision would then be made about possibly the wrong user, with no record that anything was wrong. \"Cannot throw\" is only an advantage when the condition it hides is acceptable; here it is not. What I would want on a genuine duplicate is exactly what `Single` gives: an immediate, loud failure naming the query, so the data problem is fixed rather than absorbed. If a duplicate were legitimate — several tickets from one customer, say — then the invariant does not exist, and `First` with an explicit `OrderBy` would be right.",
+        "explanationMarkdown": "This is the same judgement as choosing `Parse` over `TryParse` in D01: the question is whether a failure means \"unusual input\" or \"one of my invariants is broken\". Exception-avoidance as a blanket policy erases that distinction and tends to convert loud, local failures into quiet, distant ones. Note the secondary point about ordering — `First` without `OrderBy` does not promise which element you get, so even the \"safe\" version is non-deterministic in exactly the case the reviewer is worried about."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Identifies that `Single` encodes an invariant — exactly one match — rather than merely fetching an element.",
+          "Explains that a second match indicates broken data, so continuing silently is worse than failing.",
+          "Notes that `First` without an `OrderBy` does not promise which of the duplicates it returns.",
+          "Distinguishes the case where multiple matches are legitimate, in which case `First` with explicit ordering is correct.",
+          "Frames exception-avoidance as a trade about where the failure surfaces, not as an unqualified good."
+        ],
+        "modelAnswerMarkdown": "See the model answer: `Single` asserts a real uniqueness invariant; `First` would silently and non-deterministically pick one of two rows that should not both exist."
+      },
+      "primaryConceptId": "linq.filtering",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c013",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "First, FirstOrDefault and Single",
+      "conceptIds": [
+        "linq.filtering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the promise each element operator makes.",
+      "lessonId": "v3-l07",
+      "type": "recall",
+      "promptMarkdown": "What does each of `First`, `FirstOrDefault` and `Single` do when zero elements match, and when several do?",
+      "answerMarkdown": "`First`: throws on zero, returns the earliest when several match. `FirstOrDefault`: returns the type's default on zero — null for a reference type, `0` for an `int` — and the earliest when several match. `Single`: throws on zero **and** throws when more than one matches, which makes it an assertion that exactly one exists.",
+      "explanationMarkdown": "Choose from what the two failure cases should mean. `Single` is right when a duplicate would indicate corrupt data; `FirstOrDefault` is right when absence is ordinary — but only if the default is distinguishable from real data.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "linq.filtering"
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c014",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Filter before you project",
+      "conceptIds": [
+        "linq.projection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply operator ordering to a query's cost.",
+      "lessonId": "v3-l07",
+      "type": "transfer",
+      "promptMarkdown": "Why does `Where(...).Select(...)` beat `Select(...).Where(...)`, and where does the difference stop being a micro-optimisation?",
+      "answerMarkdown": "Filtering first means only the surviving elements are transformed; projecting first transforms everything and then discards most of it. Over a small in-memory list the difference is negligible. It stops being negligible once the source is a database query, because the ordering influences the SQL generated — and therefore which rows the server processes and sends back.",
+      "explanationMarkdown": "The habit is worth forming on in-memory collections precisely so it is already automatic by the time it affects a round trip.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "linq.projection"
+    },
+    {
+      "kind": "lesson",
+      "id": "v3-l08",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Grouping and aggregation",
+      "conceptIds": [
+        "linq.grouping",
+        "linq.aggregation"
+      ],
+      "prerequisiteIds": [
+        "linq.projection"
+      ],
+      "bodyMarkdown": "Grouping answers \"how many, per what\", and it is where LINQ starts doing something you would otherwise write by hand.\n\n`GroupBy` produces a sequence of groups. Each group is itself a sequence of the elements that share a key, and carries that key as a `Key` property. This is the shape that surprises people: a group is not a pair of key and count, it is a key plus every element, and you decide what to reduce it to. The idiomatic follow-up is a projection: `GroupBy(t => t.Queue).Select(g => new { Queue = g.Key, Count = g.Count() })`.\n\nThe **aggregation** operators reduce a sequence to one value: `Count`, `Sum`, `Min`, `Max`, `Average`, and the general-purpose `Aggregate` for anything else. Two details are worth knowing before they bite. `Average` and `Max` throw on an empty sequence for value types, because there is no sensible answer — the fix is `DefaultIfEmpty` or a nullable projection. And `Sum` over an empty sequence is `0`, which is usually what you want but is worth noticing when zero is also a meaningful total.\n\n`MinBy` and `MaxBy` deserve a mention because they replace a common inefficiency. To find the oldest ticket, `OrderBy(t => t.OpenedAt).First()` sorts the entire sequence to look at one element; `MinBy(t => t.OpenedAt)` does one pass. The sorted version is not wrong, merely wasteful, and the waste scales.\n\nOrdering is the other half of presenting grouped data. `OrderBy` is stable — elements comparing equal keep their original relative order — and `ThenBy` adds tie-breakers. Grouping itself makes no ordering promise about the groups, so if the report needs queues in a predictable order you must say so with an explicit `OrderBy` after the grouping. This is the same lesson as V1's unstable-pagination defect, arriving from a different direction: a query without an explicit total order does not promise a stable arrangement, and the day it changes will look like a bug in something else.",
+      "chapterId": "v3-ch03",
+      "sortOrder": 1,
+      "objectives": [
+        "Read a `GroupBy` result as a sequence of keyed groups and project it to a summary.",
+        "Choose an aggregation operator, allowing for what each does on an empty sequence.",
+        "Add explicit ordering where grouped output needs a predictable arrangement."
+      ],
+      "estimatedMinutes": 10,
+      "workedExampleMarkdown": "A queue summary, built up in the order you would actually write it.\n\n```csharp\n// A group carries its key AND every element that shares it.\nIEnumerable<IGrouping<string, Ticket>> groups = tickets.GroupBy(t => t.Queue);\n\n// Reduce each group to the numbers the report needs.\nvar summary = tickets\n    .GroupBy(t => t.Queue)\n    .Select(g => new QueueSummary(\n        Queue: g.Key,\n        Total: g.Count(),\n        Breached: g.Count(t => t.IsBreached),\n        Oldest: g.Min(t => t.OpenedAt)))\n    .OrderByDescending(s => s.Breached)\n    .ThenBy(s => s.Queue)          // deterministic tie-break\n    .ToList();\n```\n\nThe `ThenBy` is not decoration. Without it, two queues with the same breach count appear in whatever order the grouping happened to produce, which can differ between runs and between providers — so a report that looks stable in testing can reorder itself in production for no visible reason.\n\nAnd the empty-sequence traps:\n\n```csharp\nvar noTickets = new List<Ticket>();\n\nint count = noTickets.Count();                  // 0\ndecimal sum = noTickets.Sum(t => t.Cost);       // 0\ndouble avg  = noTickets.Average(t => t.Cost);   // throws InvalidOperationException\n\ndouble safeAvg = noTickets\n    .Select(t => (double?)t.Cost)\n    .Average() ?? 0;                            // null for empty, then defaulted\n```",
+      "commonMistakes": [
+        "Treating a `GroupBy` result as key-and-count pairs. A group is a key plus every element; you choose the reduction.",
+        "Calling `Average` or `Max` on a possibly-empty sequence of value types, which throws rather than returning a default.",
+        "Relying on the order groups happen to come out in. Grouping promises no ordering — add an explicit `OrderBy`.",
+        "Writing `OrderBy(...).First()` to find an extreme value, when `MinBy` or `MaxBy` does it in one pass without sorting."
+      ],
+      "summaryMarkdown": "`GroupBy` yields groups that carry a `Key` and all their elements; project each group to the summary you need. `Sum` of nothing is `0` but `Average` and `Max` of nothing throw. Grouping makes no ordering promise, so add explicit `OrderBy`/`ThenBy` wherever output order is part of the behaviour. Prefer `MinBy`/`MaxBy` to sorting for a single extreme.",
+      "exerciseIds": [
+        "v3-e022",
+        "v3-e023",
+        "v3-e024"
+      ],
+      "reviewCardIds": [
+        "v3-c015",
+        "v3-c016"
+      ],
+      "references": [
+        {
+          "label": "Grouping data (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/linq/standard-query-operators/grouping-data"
+        },
+        {
+          "label": "Aggregation operations (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/linq/standard-query-operators/aggregation-operations"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e022",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Predict an aggregation over an empty group",
+      "conceptIds": [
+        "linq.aggregation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Trace two aggregation operators over a sequence with no elements.",
+      "lessonId": "v3-l08",
+      "sortOrder": 0,
+      "type": "predict-output",
+      "difficulty": "core",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "```csharp\nvar costs = new List<decimal>();\n\nConsole.WriteLine(costs.Sum());\nConsole.WriteLine(costs.Count());\nConsole.WriteLine(costs.Average());\n```\n\nAssume the program is run exactly as written. What does it print before it stops? Type the lines it prints, then on the next line write `throws` if it terminates with an exception.",
+      "hints": [
+        "Take the three calls one at a time and ask what each can sensibly return with nothing to work on.",
+        "`Sum` and `Count` both have a defensible answer for an empty sequence; the mean of no values does not.",
+        "So the first two lines print, and the third raises `InvalidOperationException` before printing anything."
+      ],
+      "solution": {
+        "modelAnswer": "0\n0\nthrows",
+        "explanationMarkdown": "`Sum` returns `0` because the sum of no numbers is the additive identity, and `Count` returns `0` for the obvious reason. `Average` has no such fallback — the mean of an empty set is undefined, so rather than invent a value it throws `InvalidOperationException`. This asymmetry is deliberate and worth remembering, because empty sequences are common in real reports: a queue with no tickets today, a customer with no orders this month. The usual fixes are to project to a nullable (`Select(c => (decimal?)c).Average()`, which yields null) or to guard with `Any()` before aggregating. `Max` and `Min` behave like `Average` here, not like `Sum`."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": {
+          "trim": true,
+          "collapseWhitespace": true,
+          "caseSensitive": false
+        },
+        "expected": "0 0 throws",
+        "acceptedAlternatives": [
+          "0\n0\nthrows",
+          "0 0 exception"
+        ]
+      },
+      "primaryConceptId": "linq.aggregation",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e023",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Implement a grouped count summary",
+      "conceptIds": [
+        "linq.grouping",
+        "linq.aggregation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Build the group-then-reduce shape, including the ordering LINQ does not promise.",
+      "lessonId": "v3-l08",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Implement the `GroupBy` then `Select` then `OrderBy` shape over plain data.\n\nImplement `groupCounts(rows, keyField)` returning an array of `{ key, count }` objects.\n\n- Group `rows` by the value of `keyField`, converted to a string.\n- `count` is how many rows share that key.\n- Sort the result by `key` ascending, comparing as strings with `<` and `>`.\n- A row missing `keyField` is grouped under the key `\"unknown\"`.\n- An empty `rows` array yields an empty array.\n\nDo not modify the inputs.",
+      "hints": [
+        "Accumulate counts into a plain object keyed by the group key, then turn that object into the array of results.",
+        "Decide the key for each row before counting: read the field, and substitute `\"unknown\"` when the row does not have it.",
+        "Sort at the very end with a comparator that returns -1, 1 or 0 — grouping itself gives you no ordering, which is exactly the point of the exercise."
+      ],
+      "solution": {
+        "code": "function groupCounts(rows, keyField) {\n  const counts = {};\n  for (const row of rows) {\n    let key = 'unknown';\n    if (Object.prototype.hasOwnProperty.call(row, keyField) && row[keyField] !== undefined && row[keyField] !== null) {\n      key = String(row[keyField]);\n    }\n    if (Object.prototype.hasOwnProperty.call(counts, key)) {\n      counts[key] = counts[key] + 1;\n    } else {\n      counts[key] = 1;\n    }\n  }\n  const out = [];\n  for (const key of Object.keys(counts)) {\n    out.push({ key: key, count: counts[key] });\n  }\n  out.sort(function (a, b) {\n    if (a.key < b.key) {\n      return -1;\n    }\n    if (a.key > b.key) {\n      return 1;\n    }\n    return 0;\n  });\n  return out;\n}",
+        "explanationMarkdown": "The explicit sort at the end is the lesson. Nothing in the grouping step produces an order — the accumulation object's key order is an implementation detail, exactly as `GroupBy`'s group order is — so a report that needs a predictable arrangement must say so. Leaving it out gives you output that is stable enough in testing to look correct and can rearrange itself in production. The `unknown` bucket is the second half: real data has missing fields, and silently dropping those rows would make the totals disagree with a plain count of the input, which is a very hard discrepancy to track down later."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "groupCounts",
+        "starterCode": "function groupCounts(rows, keyField) {\n  // Counts into an object and returns it without ordering or the unknown bucket.\n  const counts = {};\n  for (const row of rows) {\n    const key = row[keyField];\n    counts[key] = (counts[key] || 0) + 1;\n  }\n  return Object.keys(counts).map(function (k) {\n    return { key: k, count: counts[k] };\n  });\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "groups-and-counts",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "queue": "billing"
+                },
+                {
+                  "id": "t-2",
+                  "queue": "support"
+                },
+                {
+                  "id": "t-3",
+                  "queue": "billing"
+                }
+              ],
+              "queue"
+            ],
+            "expected": [
+              {
+                "key": "billing",
+                "count": 2
+              },
+              {
+                "key": "support",
+                "count": 1
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "sorted-ascending-not-insertion-order",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "queue": "support"
+                },
+                {
+                  "id": "t-2",
+                  "queue": "billing"
+                }
+              ],
+              "queue"
+            ],
+            "expected": [
+              {
+                "key": "billing",
+                "count": 1
+              },
+              {
+                "key": "support",
+                "count": 1
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "missing-field-becomes-unknown",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "queue": "billing"
+                },
+                {
+                  "id": "t-2"
+                }
+              ],
+              "queue"
+            ],
+            "expected": [
+              {
+                "key": "billing",
+                "count": 1
+              },
+              {
+                "key": "unknown",
+                "count": 1
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "empty-input",
+            "args": [
+              [],
+              "queue"
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "numeric-keys-become-strings",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "priority": 2
+                },
+                {
+                  "id": "t-2",
+                  "priority": 1
+                },
+                {
+                  "id": "t-3",
+                  "priority": 2
+                }
+              ],
+              "priority"
+            ],
+            "expected": [
+              {
+                "key": "1",
+                "count": 1
+              },
+              {
+                "key": "2",
+                "count": 2
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "single-group",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "queue": "billing"
+                }
+              ],
+              "queue"
+            ],
+            "expected": [
+              {
+                "key": "billing",
+                "count": 1
+              }
+            ],
+            "hidden": true
+          },
+          {
+            "id": "all-rows-missing-the-field",
+            "args": [
+              [
+                {
+                  "id": "t-1"
+                },
+                {
+                  "id": "t-2"
+                }
+              ],
+              "queue"
+            ],
+            "expected": [
+              {
+                "key": "unknown",
+                "count": 2
+              }
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "linq.grouping",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e024",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a report with an unstable arrangement",
+      "conceptIds": [
+        "linq.grouping"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Judge a grouped query whose output order is left to chance.",
+      "lessonId": "v3-l08",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "Support say the daily queue report \"shuffles itself\" some mornings, though the numbers are always right.\n\n```csharp\nvar rows = tickets\n    .GroupBy(t => t.Queue)\n    .Select(g => new QueueRow(g.Key, g.Count()))\n    .OrderByDescending(r => r.Count)\n    .ToList();\n```\n\nSeveral queues routinely have identical counts. What is the defect?",
+      "hints": [
+        "The numbers are right, so look at what decides the arrangement rather than the values.",
+        "`OrderByDescending` fixes the order of rows with different counts, but says nothing about rows whose counts are equal.",
+        "Ties fall back to the order the groups arrived in, which grouping does not promise; add a deterministic tie-break such as `.ThenBy(r => r.Queue)`."
+      ],
+      "solution": {
+        "modelAnswer": "The sort key is the count alone, so rows with equal counts have no defined relative order. `OrderByDescending` is stable, which means tied rows keep the order they arrived in — but that incoming order comes from `GroupBy`, which makes no ordering promise at all. So on days when several queues tie, the arrangement can differ between runs. The fix is a deterministic tie-break: `.OrderByDescending(r => r.Count).ThenBy(r => r.Queue)`, which makes the total ordering a property of the data rather than of the execution.",
+        "explanationMarkdown": "This is V1's unstable-pagination defect wearing different clothes. There, a listing ordered only by `createdAt` could repeat or skip rows across pages because ties had no defined order; here a report reshuffles for the same underlying reason. The general rule is worth stating plainly: if the order of output is part of the behaviour, the sort must be a total order over the data. Stability of the sort algorithm does not rescue you, because it only preserves an input order that was itself arbitrary."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "no-tiebreak-on-unordered-groups",
+            "textMarkdown": "Rows with equal counts have no defined order, because the sort key is the count alone and the incoming group order is not promised by `GroupBy`; add a tie-break such as `ThenBy(r => r.Queue)`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. When output order is part of the behaviour, the sort must be a total order over the data."
+          },
+          {
+            "id": "orderby-is-unstable",
+            "textMarkdown": "`OrderByDescending` is an unstable sort, so equal elements are shuffled arbitrarily on each run.",
+            "correct": false,
+            "explanationMarkdown": "LINQ's `OrderBy` is documented as stable. The instability comes from the arbitrary order it is asked to preserve, not from the sort itself."
+          },
+          {
+            "id": "tolist-too-early",
+            "textMarkdown": "`ToList()` materialises before the sort completes, so the ordering is lost.",
+            "correct": false,
+            "explanationMarkdown": "`ToList` enumerates the already-ordered sequence and preserves its order exactly. It is the last step and changes nothing about arrangement."
+          },
+          {
+            "id": "count-recomputed",
+            "textMarkdown": "`g.Count()` is recomputed during sorting, so counts change midway and rows move.",
+            "correct": false,
+            "explanationMarkdown": "The counts are computed once during the projection and stored in each `QueueRow`. Support also confirm the numbers are always right."
+          }
+        ]
+      },
+      "primaryConceptId": "linq.grouping",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c015",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What a group actually contains",
+      "conceptIds": [
+        "linq.grouping"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the shape `GroupBy` produces.",
+      "lessonId": "v3-l08",
+      "type": "recall",
+      "promptMarkdown": "What does `GroupBy` return — and what does it promise about the order of the groups?",
+      "answerMarkdown": "It returns a sequence of groups. Each group is itself a sequence of the elements sharing a key, and exposes that key as `Key` — so a group is a key plus all its elements, not a key-and-count pair. You reduce it yourself, usually with a `Select`. It promises nothing about the order of the groups, so add an explicit `OrderBy` whenever output order matters.",
+      "explanationMarkdown": "Expecting counts to fall out of the grouping is the usual first mistake; assuming the groups arrive in a sensible order is the one that survives into production.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "linq.grouping"
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c016",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Empty sequences and aggregation",
+      "conceptIds": [
+        "linq.aggregation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply aggregation behaviour to a report over a quiet day.",
+      "lessonId": "v3-l08",
+      "type": "debugging",
+      "promptMarkdown": "A nightly report crashes only on days when one queue received no tickets. The query aggregates costs per queue. What is the likely operator, and what are two fixes?",
+      "answerMarkdown": "`Average` (or `Max`/`Min`) over an empty sequence of a value type throws `InvalidOperationException` — unlike `Sum` and `Count`, which return `0`. Two fixes: project to a nullable first, `Select(c => (decimal?)c).Average()`, which yields null for an empty sequence and can then be defaulted; or guard with `Any()` and supply the empty-day value explicitly.",
+      "explanationMarkdown": "The failure is data-dependent, so it passes every test written against a busy fixture and appears the first genuinely quiet night. Worth checking any aggregation that runs over a group that might legitimately be empty.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "linq.aggregation"
+    },
+    {
+      "kind": "lesson",
+      "id": "v3-l09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Deferred execution and its pitfalls",
+      "conceptIds": [
+        "linq.deferred-execution"
+      ],
+      "prerequisiteIds": [
+        "linq.filtering"
+      ],
+      "bodyMarkdown": "This is the lesson that explains the rest of LINQ, and the one most worth slowing down for.\n\nMost LINQ operators are **deferred**: calling `Where` or `Select` builds a description and executes nothing. The work happens when something enumerates the sequence — a `foreach`, or a **terminal** operator such as `ToList`, `ToArray`, `Count`, `First`, `Any`, `Sum`. Until then you are holding a recipe, not a result.\n\nThree consequences follow, and each one is a real defect you will meet.\n\n**The query re-runs on every enumeration.** Two `foreach` loops over the same query variable execute it twice. Over a list that is wasted CPU; over a database query it is two round trips. This is the same defect as the double-enumeration problem from chapter D02, now with a mechanism attached.\n\n**Results reflect the source at execution time, not at declaration time.** If you build a query, then add an element to the underlying list, then enumerate — the new element appears. The query was never a snapshot. Worse, modifying a collection *while* enumerating it throws `InvalidOperationException`, which is how a perfectly reasonable-looking \"filter then remove\" loop fails.\n\n**Captured variables are read late.** A lambda captures the variable, not its value at the moment of capture. Build queries in a loop that captures the loop variable, execute them afterwards, and every one of them may see the final value. C# fixed the most notorious version of this — `foreach` variables have been per-iteration since C# 5 — but a plain `for` loop variable still bites.\n\nThe practical discipline is short. Materialise once with `ToList()` at the point where you are done composing and want a result. Do not hand a deferred query to code that will enumerate it more than once. And when a query's meaning depends on the state of something mutable, execute it while you still know what that state is.",
+      "chapterId": "v3-ch03",
+      "sortOrder": 2,
+      "objectives": [
+        "Identify which operators defer and which force execution.",
+        "Predict how many times a predicate runs for a given chain and terminal operator.",
+        "Recognise the three deferral defects: re-execution, late source reads and late variable capture."
+      ],
+      "estimatedMinutes": 11,
+      "workedExampleMarkdown": "Deferral, demonstrated three ways.\n\n```csharp\n// 1. Nothing has executed yet — this line only builds a description.\nvar open = tickets.Where(t => { Console.WriteLine($\"testing {t.Id}\"); return t.IsOpen; });\n\nConsole.WriteLine(\"query built\");   // prints FIRST, before any \"testing\" line\nvar list = open.ToList();           // now the predicate runs, once per ticket\nvar again = open.ToList();          // and runs again, from the start\n\n// 2. The source is read at execution time.\nvar names = new List<string> { \"rowan\" };\nvar query = names.Select(n => n.ToUpperInvariant());\nnames.Add(\"ash\");\nforeach (var n in query) { Console.WriteLine(n); }   // ROWAN, ASH — both\n\n// 3. Short-circuiting means the predicate may not run at all.\nvar firstOpen = tickets.Where(IsOpen).Take(2).ToList();\n// stops as soon as two matches are found; later tickets are never tested\n```\n\nThe third case is the one that makes counting predicate calls a genuinely useful skill: a chain ending in `Take` or `First` walks only as far as it must. That is what makes deferral a performance feature rather than merely a hazard — it lets a filter over a million elements stop after finding three.\n\nThe fix for the first case is a single, deliberate materialisation:\n\n```csharp\nvar openTickets = tickets.Where(t => t.IsOpen).ToList();  // executed once, here\n```",
+      "commonMistakes": [
+        "Assuming a query variable holds results. It holds a description; each enumeration re-executes it.",
+        "Passing a deferred query to a method that enumerates more than once, so the work — or the round trip — happens repeatedly.",
+        "Modifying the source collection while enumerating a query over it, which throws `InvalidOperationException`.",
+        "Building queries inside a `for` loop that captures the loop variable, then executing them later when the variable has moved on."
+      ],
+      "summaryMarkdown": "`Where`, `Select`, `OrderBy` and friends defer; `ToList`, `Count`, `First`, `Any` and `foreach` execute. A deferred query re-runs on every enumeration, reads its source at execution time, and reads captured variables late. Chains ending in `Take` or `First` stop early, which is what makes deferral useful. Materialise once with `ToList()` when you want a result.",
+      "exerciseIds": [
+        "v3-e025",
+        "v3-e026",
+        "v3-e027"
+      ],
+      "reviewCardIds": [
+        "v3-c017",
+        "v3-c018"
+      ],
+      "references": [
+        {
+          "label": "Deferred execution (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/linq/get-started/write-linq-queries"
+        },
+        {
+          "label": "Classification of standard query operators by execution (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/linq/standard-query-operators/"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e025",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a query that sees a later change",
+      "conceptIds": [
+        "linq.deferred-execution"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A validation snapshot that is not a snapshot.",
+      "lessonId": "v3-l09",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "This method is supposed to record which tickets were already breaching when the sweep began, then process everything.\n\n```csharp\npublic void Sweep(List<Ticket> tickets)\n{\n    var breachedAtStart = tickets.Where(t => t.IsBreached);\n\n    foreach (var t in tickets.ToList())\n    {\n        Process(t);          // may set IsBreached on a ticket\n    }\n\n    Report(breachedAtStart.Count());   // reports far more than expected\n}\n```\n\nWhy does the report include tickets that were not breaching at the start?",
+      "hints": [
+        "Ask when the `Where` predicate actually runs relative to the loop.",
+        "`Where` is deferred — the assignment builds a description, and nothing is evaluated until `Count()` asks for elements.",
+        "By the time `Count()` executes, `Process` has already changed `IsBreached` on some tickets, so the predicate sees the updated state. Materialise at the point of the intended snapshot with `ToList()`."
+      ],
+      "solution": {
+        "modelAnswer": "`breachedAtStart` is a deferred query, not a snapshot. Nothing is evaluated when it is assigned; the predicate first runs when `Count()` enumerates it, which happens after the loop. By then `Process` has set `IsBreached` on additional tickets, and the query faithfully reports the state at execution time. The fix is to materialise where the snapshot is intended: `var breachedAtStart = tickets.Where(t => t.IsBreached).ToList();` — or, if only the number is needed, `var breachedAtStart = tickets.Count(t => t.IsBreached);`, since `Count` is a terminal operator and executes immediately.",
+        "explanationMarkdown": "The variable name is doing the damage: it says `breachedAtStart`, so every reader assumes a snapshot, and the code reads correctly right up until you ask when the predicate runs. This is the most insidious form of the deferral defect because there is no exception, no obvious inefficiency, and the numbers are merely wrong. Note the author already wrote `tickets.ToList()` in the `foreach` — presumably after hitting the collection-modified exception — which shows deferral was partly understood and applied in only one of the two places it mattered."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "deferred-executes-after-loop",
+            "textMarkdown": "`Where` is deferred, so the predicate first runs when `Count()` enumerates it — after `Process` has changed `IsBreached`. Materialise with `ToList()` where the snapshot is intended.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A query variable is a description, not a result, and it reads its source at execution time."
+          },
+          {
+            "id": "tolist-copies-tickets",
+            "textMarkdown": "`tickets.ToList()` creates copies of each ticket, so `Process` modifies different objects than the query later inspects.",
+            "correct": false,
+            "explanationMarkdown": "`ToList` copies the list, not the elements. `Ticket` is a reference type, so both sequences reference the same ticket objects — which is why the mutations are visible."
+          },
+          {
+            "id": "count-is-cached",
+            "textMarkdown": "`Count()` caches its result from an earlier enumeration, returning a stale value.",
+            "correct": false,
+            "explanationMarkdown": "`Count()` performs a fresh enumeration every time it is called; nothing is cached. The value is current, which is precisely the problem."
+          },
+          {
+            "id": "needs-as-no-tracking",
+            "textMarkdown": "The query needs `AsNoTracking()` so it does not observe changes made through the tracker.",
+            "correct": false,
+            "explanationMarkdown": "That is an EF Core concept and does not apply to a plain `List<Ticket>`. The behaviour here is ordinary in-memory deferral."
+          }
+        ]
+      },
+      "primaryConceptId": "linq.deferred-execution",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e026",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Count how far a lazy chain walks",
+      "conceptIds": [
+        "linq.deferred-execution",
+        "linq.filtering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Model the short-circuiting that makes deferral a performance feature.",
+      "lessonId": "v3-l09",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "stretch",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "A chain of `Where(...).Take(n)` stops as soon as it has produced `n` elements — later elements are never examined. Implement a counter for exactly how much work it does.\n\nImplement `predicateCalls(statuses, wanted, take)` returning how many elements the predicate is invoked on.\n\n- `statuses` is an array of strings; the predicate matches when an element equals `wanted`.\n- `take` is the number of matches required before the chain stops, or `null` for no limit.\n- Walk from the start. Every element you reach counts as one predicate call.\n- Stop as soon as `take` matches have been found.\n- If `take` is `0`, the chain produces nothing and the predicate is never called at all — return `0`.\n- If `take` is `null`, or there are fewer than `take` matches, every element is examined.\n\nDo not modify the inputs.",
+      "hints": [
+        "Handle the `take === 0` case before you start walking — asking for nothing means no work happens.",
+        "Count every element you reach, not only the matches; the predicate runs on non-matches too.",
+        "Track matches found as you go, and break out of the loop the moment that total reaches `take` — the elements after that point are never touched."
+      ],
+      "solution": {
+        "code": "function predicateCalls(statuses, wanted, take) {\n  if (take === 0) {\n    return 0;\n  }\n  let calls = 0;\n  let matches = 0;\n  for (const status of statuses) {\n    calls = calls + 1;\n    if (status === wanted) {\n      matches = matches + 1;\n      if (take !== null && matches >= take) {\n        return calls;\n      }\n    }\n  }\n  return calls;\n}",
+        "explanationMarkdown": "Counting the calls makes the benefit of deferral concrete rather than abstract. An eager `filter` over a million elements does a million units of work regardless of how many results you wanted; the lazy chain does exactly as much as it must and stops. That is why `Where(...).First()` over a huge sequence is cheap while `Where(...).ToList().First()` is not — the terminal operator determines how far the walk goes. The `take === 0` case is the extreme demonstration: asking for no elements means the predicate never runs even once, which surprises people who assume the filter is applied and then truncated."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "predicateCalls",
+        "starterCode": "function predicateCalls(statuses, wanted, take) {\n  // Eager: filters the whole array first, then truncates.\n  return statuses.length;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "stops-once-take-is-satisfied",
+            "args": [
+              [
+                "open",
+                "closed",
+                "open",
+                "open"
+              ],
+              "open",
+              2
+            ],
+            "expected": 3,
+            "hidden": false
+          },
+          {
+            "id": "no-limit-walks-everything",
+            "args": [
+              [
+                "open",
+                "closed",
+                "open",
+                "open"
+              ],
+              "open",
+              null
+            ],
+            "expected": 4,
+            "hidden": false
+          },
+          {
+            "id": "not-enough-matches-walks-everything",
+            "args": [
+              [
+                "closed",
+                "closed",
+                "open"
+              ],
+              "open",
+              2
+            ],
+            "expected": 3,
+            "hidden": false
+          },
+          {
+            "id": "take-zero-does-no-work",
+            "args": [
+              [
+                "open",
+                "open"
+              ],
+              "open",
+              0
+            ],
+            "expected": 0,
+            "hidden": false
+          },
+          {
+            "id": "first-element-satisfies-take-one",
+            "args": [
+              [
+                "open",
+                "open",
+                "open"
+              ],
+              "open",
+              1
+            ],
+            "expected": 1,
+            "hidden": false
+          },
+          {
+            "id": "no-matches-at-all",
+            "args": [
+              [
+                "closed",
+                "closed"
+              ],
+              "open",
+              1
+            ],
+            "expected": 2,
+            "hidden": true
+          },
+          {
+            "id": "empty-source",
+            "args": [
+              [],
+              "open",
+              3
+            ],
+            "expected": 0,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "linq.deferred-execution",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e027",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Decide where to materialise a query",
+      "conceptIds": [
+        "linq.deferred-execution"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Choose the point at which composing should stop and execution should happen.",
+      "lessonId": "v3-l09",
+      "sortOrder": 2,
+      "type": "choice",
+      "difficulty": "core",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "A repository method builds a query in steps, applying optional filters, and returns it to a handler. The handler checks whether anything matched, logs the number of results, and then renders them.\n\nWhere should `ToList()` be called?",
+      "hints": [
+        "Count how many times the handler enumerates what it receives before deciding where execution belongs.",
+        "Composing filters conditionally is exactly what deferral is good for, so materialising too early throws that away.",
+        "The handler enumerates three times — a check, a count and a render — so it should receive a materialised collection, not a query."
+      ],
+      "solution": {
+        "modelAnswer": "At the end of the repository method, once all optional filters have been applied — returning `IReadOnlyList<T>` rather than a deferred query.",
+        "explanationMarkdown": "The two halves pull in opposite directions and the boundary is where they meet. Inside the repository, deferral is exactly what you want: each optional filter composes onto the query without executing anything, so one query is built and run once. Once the result crosses out to a handler that will inspect it more than once, deferral becomes a liability — three enumerations mean three executions, and for a database-backed source three round trips. So the repository composes lazily and materialises at its own boundary, and its signature says so by returning a read-only collection. Materialising after the first filter would defeat the composition; leaving it to the handler pushes a decision the handler cannot see the cost of onto the wrong layer."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "end-of-repository",
+            "textMarkdown": "At the end of the repository method, after the optional filters are applied, returning `IReadOnlyList<T>`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Compose lazily while building, execute once at the boundary, and let the signature promise a collection the handler can walk repeatedly."
+          },
+          {
+            "id": "in-the-handler",
+            "textMarkdown": "In the handler, immediately before rendering, so the repository stays maximally flexible.",
+            "correct": false,
+            "explanationMarkdown": "The handler enumerates three times — check, count, render — so the first two would each execute the query before the materialisation ever happened."
+          },
+          {
+            "id": "after-first-filter",
+            "textMarkdown": "After the first filter, so later filters operate on a concrete collection.",
+            "correct": false,
+            "explanationMarkdown": "That executes the query before the remaining filters can be applied, so the source is fetched in full and narrowed in memory — the opposite of what composition is for."
+          },
+          {
+            "id": "never",
+            "textMarkdown": "Nowhere — returning the deferred query is strictly more flexible, and callers can materialise if they need to.",
+            "correct": false,
+            "explanationMarkdown": "It shifts a cost the caller cannot see onto the caller. This is precisely how the triple round trip in the D02 summary defect arose."
+          }
+        ]
+      },
+      "primaryConceptId": "linq.deferred-execution",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c017",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Deferred against terminal operators",
+      "conceptIds": [
+        "linq.deferred-execution"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall which operators run immediately.",
+      "lessonId": "v3-l09",
+      "type": "recall",
+      "promptMarkdown": "Which common LINQ operators defer execution, and which force it? What does a query variable actually hold?",
+      "answerMarkdown": "Deferred: `Where`, `Select`, `OrderBy`, `Take`, `Skip`, `GroupBy` — they build a description. Terminal: `ToList`, `ToArray`, `Count`, `Sum`, `First`, `FirstOrDefault`, `Single`, `Any`, and any `foreach` — they enumerate and therefore execute. A query variable holds a description, not results, so each enumeration re-runs the whole chain.",
+      "explanationMarkdown": "\"Does this line execute anything?\" is the question to ask of every LINQ statement. The answer decides whether you are holding a recipe or a result, and nearly every deferral defect comes from assuming the latter.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "linq.deferred-execution"
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c018",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The snapshot that is not one",
+      "conceptIds": [
+        "linq.deferred-execution"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply deferral to a variable whose name promises a snapshot.",
+      "lessonId": "v3-l09",
+      "type": "debugging",
+      "promptMarkdown": "`var openAtStart = tickets.Where(t => t.IsOpen);` is declared, then a loop closes several tickets, then `openAtStart.Count()` is logged. What is logged, and what is the fix?",
+      "answerMarkdown": "The count reflects the state **after** the loop, not before it: the predicate first runs when `Count()` enumerates the query. Tickets closed by the loop are no longer open, so the number is lower than intended. Fix it by materialising at the intended snapshot point — `.ToList()` — or by using a terminal operator immediately, such as `tickets.Count(t => t.IsOpen)`.",
+      "explanationMarkdown": "The variable name asserts a snapshot the code never took. No exception is raised and nothing looks slow; the number is simply wrong, which makes this the hardest deferral defect to spot in review.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "linq.deferred-execution"
+    },
+    {
+      "kind": "assessment",
+      "id": "v3-a03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "LINQ placement check",
+      "conceptIds": [
+        "linq.filtering",
+        "linq.projection",
+        "linq.grouping",
+        "linq.aggregation",
+        "linq.deferred-execution"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items on element operators, projection order, grouping shape, empty-sequence aggregation and deferral. Explanations appear after you submit.",
+      "chapterId": "v3-ch03",
+      "items": [
+        {
+          "id": "v3-a03-i1",
+          "objectiveIds": [
+            "linq.deferred-execution"
+          ],
+          "critical": true,
+          "promptMarkdown": "`var q = orders.Where(o => o.IsPaid);` then `orders.Add(newPaidOrder);` then `q.Count()`. Is the new order counted?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "yes-executes-late",
+                "textMarkdown": "Yes — the query executes when `Count()` enumerates it, so it sees the source as it is at that moment.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A query variable is a description; it reads its source at execution time, not at declaration time."
+              },
+              {
+                "id": "no-snapshot",
+                "textMarkdown": "No — `Where` captures a snapshot of the collection when the query is declared.",
+                "correct": false,
+                "explanationMarkdown": "No snapshot is taken. That behaviour would require an explicit `ToList()` at declaration."
+              },
+              {
+                "id": "throws",
+                "textMarkdown": "No — modifying the source invalidates the query and `Count()` throws.",
+                "correct": false,
+                "explanationMarkdown": "An exception occurs only when the collection is modified *during* an enumeration. Modifying it between enumerations is fine."
+              },
+              {
+                "id": "depends-on-capacity",
+                "textMarkdown": "Only if the list did not have to reallocate when the item was added.",
+                "correct": false,
+                "explanationMarkdown": "Enumeration goes through the list's current state regardless of any internal reallocation."
+              }
+            ]
+          },
+          "explanationMarkdown": "Late source reads are one of the three deferral consequences, and the only one that produces silently wrong numbers rather than an exception or a slowdown."
+        },
+        {
+          "id": "v3-a03-i2",
+          "objectiveIds": [
+            "linq.aggregation"
+          ],
+          "critical": true,
+          "promptMarkdown": "`var costs = new List<decimal>();` Which call throws?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "average-throws",
+                "textMarkdown": "`costs.Average()`",
+                "correct": true,
+                "explanationMarkdown": "Correct. The mean of no values is undefined, so it throws `InvalidOperationException` rather than inventing a result."
+              },
+              {
+                "id": "sum-throws",
+                "textMarkdown": "`costs.Sum()`",
+                "correct": false,
+                "explanationMarkdown": "`Sum` returns `0` for an empty sequence — the additive identity is a defensible answer."
+              },
+              {
+                "id": "count-throws",
+                "textMarkdown": "`costs.Count()`",
+                "correct": false,
+                "explanationMarkdown": "`Count` returns `0`, which is exactly right for an empty sequence."
+              },
+              {
+                "id": "any-throws",
+                "textMarkdown": "`costs.Any()`",
+                "correct": false,
+                "explanationMarkdown": "`Any` returns `false` and never throws on an empty sequence."
+              }
+            ]
+          },
+          "explanationMarkdown": "`Max` and `Min` behave like `Average` here. Project to a nullable or guard with `Any()` when a group may legitimately be empty."
+        },
+        {
+          "id": "v3-a03-i3",
+          "objectiveIds": [
+            "linq.grouping"
+          ],
+          "critical": false,
+          "promptMarkdown": "What does each element of a `GroupBy(t => t.Queue)` result contain?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "key-plus-elements",
+                "textMarkdown": "A `Key` plus the full sequence of elements sharing that key.",
+                "correct": true,
+                "explanationMarkdown": "Correct. You choose the reduction yourself, usually with a following `Select`."
+              },
+              {
+                "id": "key-and-count",
+                "textMarkdown": "A key and the count of matching elements.",
+                "correct": false,
+                "explanationMarkdown": "The count is available via `g.Count()`, but the group carries every element, not a precomputed count."
+              },
+              {
+                "id": "dictionary",
+                "textMarkdown": "A `Dictionary<string, Ticket>` mapping each key to one representative ticket.",
+                "correct": false,
+                "explanationMarkdown": "That is roughly what `ToDictionary` produces, and it keeps only one element per key. `GroupBy` keeps them all."
+              },
+              {
+                "id": "sorted-groups",
+                "textMarkdown": "Groups sorted ascending by key.",
+                "correct": false,
+                "explanationMarkdown": "Grouping makes no ordering promise at all — add an explicit `OrderBy` when order matters."
+              }
+            ]
+          },
+          "explanationMarkdown": "A group is a keyed sub-sequence. Treating it as a summary is the usual first misreading."
+        },
+        {
+          "id": "v3-a03-i4",
+          "objectiveIds": [
+            "linq.filtering",
+            "linq.projection"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which ordering is preferable, and why?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "where-then-select",
+                "textMarkdown": "`Where(...).Select(...)` — only surviving elements are transformed, and against a database it influences which rows are processed.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The habit costs nothing in memory and matters once the source is a query."
+              },
+              {
+                "id": "select-then-where",
+                "textMarkdown": "`Select(...).Where(...)` — projecting first produces smaller objects, so filtering is cheaper.",
+                "correct": false,
+                "explanationMarkdown": "Every element is transformed before most are discarded. The objects being smaller does not recover the wasted transformations."
+              },
+              {
+                "id": "identical",
+                "textMarkdown": "They are identical; the compiler reorders them.",
+                "correct": false,
+                "explanationMarkdown": "No such reordering happens for in-memory LINQ. A query provider may optimise, but you should not rely on it."
+              },
+              {
+                "id": "depends-on-tolist",
+                "textMarkdown": "It only matters if you call `ToList()` between them.",
+                "correct": false,
+                "explanationMarkdown": "The ordering affects how many transformations run regardless of where materialisation happens."
+              }
+            ]
+          },
+          "explanationMarkdown": "Filter first is the default habit; the exception is a projection that makes the filter possible at all."
+        },
+        {
+          "id": "v3-a03-i5",
+          "objectiveIds": [
+            "linq.filtering"
+          ],
+          "critical": true,
+          "promptMarkdown": "`plans.Where(p => p.Code == code).Select(p => p.RatePerHour).FirstOrDefault()` returns `0` for an unknown code, where `RatePerHour` is `decimal`. What is the underlying problem?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "default-indistinguishable",
+                "textMarkdown": "The default for a value type is `0`, which is also a legitimate rate, so \"no such plan\" is indistinguishable from real data.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Make absence representable — return `decimal?`, use `Single`, or throw a domain error."
+              },
+              {
+                "id": "query-not-executed",
+                "textMarkdown": "The query was never executed, so the variable holds an uninitialised value.",
+                "correct": false,
+                "explanationMarkdown": "`FirstOrDefault` is terminal and executes the query. The zero is a real, computed result."
+              },
+              {
+                "id": "select-before-where",
+                "textMarkdown": "The projection runs before the filter, discarding the code needed to match.",
+                "correct": false,
+                "explanationMarkdown": "The filter is applied first as written, and the projection has access to whatever survives it."
+              },
+              {
+                "id": "string-comparison",
+                "textMarkdown": "`==` on strings compares references, so the code never matches.",
+                "correct": false,
+                "explanationMarkdown": "`string` overloads `==` to compare contents, so matching codes do match. The defect only appears when nothing matches."
+              }
+            ]
+          },
+          "explanationMarkdown": "Before choosing an element operator, ask whether the absent case is representable in the type you are returning."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

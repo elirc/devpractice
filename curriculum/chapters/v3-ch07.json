@@ -1,0 +1,984 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v3-ch07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Data correctness under concurrency",
+      "conceptIds": [
+        "efcore.transactions",
+        "efcore.concurrency-tokens",
+        "efcore.indexes",
+        "efcore.query-performance"
+      ],
+      "prerequisiteIds": ["efcore.entities", "sql.transactions", "db.optimistic-concurrency"],
+      "objectiveIds": [
+        "efcore.transactions",
+        "efcore.concurrency-tokens",
+        "efcore.indexes",
+        "efcore.query-performance"
+      ],
+      "trackId": "v1-track",
+      "sortOrder": 26,
+      "lessonIds": ["v3-l19", "v3-l20", "v3-l21"],
+      "assessmentId": "v3-a07",
+      "missionIds": [],
+      "bodyMarkdown": "One user at a time, almost any data code works. Larkspur has six agents sharing a ticket queue, a nightly import, and a dashboard that polls. That is where correctness starts to mean something specific.\n\nThree failures make up this chapter, and they are genuinely different from one another.\n\nThe first is the **partial write**: two changes that had to happen together, and only one did. In chapter 10 you drew transaction boundaries by hand. EF Core draws one for you, around each `SaveChanges` — which is either exactly what you wanted or a trap, depending on whether you noticed how many times you called it.\n\nThe second is the **lost update**: two people load the same ticket, both edit it, both save, and the second silently erases the first. Nothing errors. Nothing is logged. The database is perfectly consistent and the business outcome is wrong. Concurrency tokens are how you turn that silence into a detectable conflict — the same optimistic-concurrency idea the platform itself uses for notes and drafts, expressed in EF Core.\n\nThe third is **cost**: a query that was fine with a thousand rows and is not fine with a million. Indexes decide whether a filter can skip rows or must read them all, and the way a query is written decides whether an index can be used at all.\n\nWhat ties them together is that none of the three announces itself in development. A partial write needs a failure at the wrong moment; a lost update needs two people; a missing index needs data. You find them by reasoning about what concurrent callers can interleave, and by looking at the plan rather than the elapsed time on your laptop."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l19",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transactions and the SaveChanges boundary",
+      "conceptIds": ["efcore.transactions"],
+      "prerequisiteIds": ["sql.transactions", "sql.partial-writes"],
+      "chapterId": "v3-ch07",
+      "sortOrder": 0,
+      "objectives": [
+        "State what SaveChanges wraps in a transaction and what it does not.",
+        "Identify code whose two SaveChanges calls allow a partial write.",
+        "Choose an explicit transaction when work must span more than one save."
+      ],
+      "estimatedMinutes": 17,
+      "bodyMarkdown": "EF Core gives you one transaction for free, and it is drawn in a specific place: around a **single call to `SaveChanges`**.\n\nEverything tracked as added, modified or deleted at the moment you call it is written inside one transaction. Twenty entities, five tables, does not matter — either every statement commits or none does. That is a genuinely useful default, and it means the common case (build up a change, save it once) is atomic without you asking.\n\nThe trap is the plural. Two calls to `SaveChanges` are two transactions, with a gap between them in which anything can happen: an exception, a timeout, a deployment, the machine dying. If the second call is what makes the first one *correct*, that gap is a partial write waiting to be observed.\n\n```csharp\norder.Status = \"submitted\";\nawait db.SaveChangesAsync();                 // transaction 1 — committed\n\ndb.StockMovements.Add(new StockMovement(...));\nawait db.SaveChangesAsync();                 // transaction 2 — may never run\n```\n\nThe order is submitted and the stock never moved. Nothing here throws; the code is simply describing two independent facts to the database when it meant to describe one.\n\nThe fix is usually to save once. Add everything to the context, then call `SaveChanges` a single time — EF Core works out the statement order from the relationships, and the whole thing is atomic.\n\nWhen one save genuinely will not do — because you need to read something *back* mid-way, or call a stored procedure, or the work spans two contexts — take the transaction explicitly:\n\n```csharp\nawait using var tx = await db.Database.BeginTransactionAsync();\ntry\n{\n    // ... work, possibly several SaveChanges calls ...\n    await tx.CommitAsync();\n}\ncatch\n{\n    await tx.RollbackAsync();   // or rely on dispose, which rolls back\n    throw;\n}\n```\n\nNow the boundary is where you drew it rather than where the framework happened to put it.\n\nTwo cautions that matter more in .NET than they might seem.\n\n**A transaction is not a lock you can hold casually.** Everything inside it holds its locks until commit, so a transaction that spans an HTTP call to a payment provider can block other writers for as long as that provider is slow. Keep external calls outside the boundary.\n\n**Rolling back the database does not roll back your objects.** After a failed save the context still holds the modified entities, in their modified state, still tracked. Reusing that context afterwards will try to save them again. The safe pattern is a fresh context per unit of work — which is what the default scoped lifetime in ASP.NET Core gives you, one per request."
+      ,
+      "workedExampleMarkdown": "Larkspur closes a ticket and writes an audit row. Two versions.\n\n**Version A — two saves:**\n\n```csharp\nvar ticket = await db.Tickets.FindAsync(id);\nticket!.Status = \"closed\";\nticket.ClosedAt = clock.UtcNow;\nawait db.SaveChangesAsync();                     // commit 1\n\ndb.AuditEntries.Add(new AuditEntry(id, \"closed\", actorId));\nawait db.SaveChangesAsync();                     // commit 2\n```\n\nIf the second save fails — a constraint, a dropped connection, a redeploy — the ticket is closed and there is no record of who closed it. The audit table's whole purpose is to be complete, and this code makes completeness best-effort.\n\n**Version B — one save:**\n\n```csharp\nvar ticket = await db.Tickets.FindAsync(id);\nticket!.Status = \"closed\";\nticket.ClosedAt = clock.UtcNow;\ndb.AuditEntries.Add(new AuditEntry(id, \"closed\", actorId));\n\nawait db.SaveChangesAsync();                     // one transaction, both rows\n```\n\nOne transaction. The UPDATE and the INSERT commit together or not at all, and the audit table cannot disagree with the ticket table.\n\nNow a case where one save is not enough — the order number must be read back from a sequence and then used:\n\n```csharp\nawait using var tx = await db.Database.BeginTransactionAsync();\n\nvar order = new Order { CustomerId = customerId, Status = \"draft\" };\ndb.Orders.Add(order);\nawait db.SaveChangesAsync();                     // order.Id is now populated\n\norder.Reference = $\"ORD-{order.Id:D6}\";\ndb.OrderEvents.Add(new OrderEvent(order.Id, \"created\"));\nawait db.SaveChangesAsync();\n\nawait tx.CommitAsync();                          // both saves commit together\n```\n\nTwo `SaveChanges` calls, one transaction. Neither save is visible to anyone else until `CommitAsync`, so a failure anywhere leaves no order at all — which is the correct outcome, because an order with no reference is not an order.",
+      "commonMistakes": [
+        "Calling `SaveChanges` after each entity 'to be safe', turning one atomic change into several independently-failing ones.",
+        "Assuming a `foreach` that modifies twenty entities needs twenty saves. One save writes them all, in one transaction.",
+        "Putting an HTTP call to a third party inside `BeginTransaction`, so a slow provider holds database locks for the duration.",
+        "Reusing the context after a failed `SaveChanges`. The database rolled back; the change tracker did not, and the next save retries the same broken write.",
+        "Wrapping a single `SaveChanges` in an explicit transaction and believing that made it atomic. It already was — the explicit transaction only matters when the boundary must be wider.",
+        "Catching the exception from `SaveChanges`, logging it, and continuing as though the write happened."
+      ],
+      "summaryMarkdown": "`SaveChanges` is one transaction; two calls are two transactions with a gap between them, and that gap is where partial writes live. Prefer one save for one unit of work, take an explicit transaction when the unit genuinely spans several, keep slow external calls outside the boundary, and do not reuse a context after a failed save.",
+      "exerciseIds": ["v3-e701", "v3-e702", "v3-e703"],
+      "reviewCardIds": ["v3-c701", "v3-c702"],
+      "references": [
+        { "label": "EF Core — Transactions", "url": "https://learn.microsoft.com/en-us/ef/core/saving/transactions" },
+        { "label": "EF Core — Saving data", "url": "https://learn.microsoft.com/en-us/ef/core/saving/" },
+        { "label": "EF Core — DbContext lifetime", "url": "https://learn.microsoft.com/en-us/ef/core/dbcontext-configuration/" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e701",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does one SaveChanges wrap?",
+      "conceptIds": ["efcore.transactions"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Establishing the default boundary before reasoning about where it is wrong.",
+      "lessonId": "v3-l19",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 5,
+      "primaryConceptId": "efcore.transactions",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "A single `await db.SaveChangesAsync()` writes 3 updated tickets, 1 new comment and 2 deleted tags. How many transactions does EF Core use, and what happens if the comment insert violates a constraint?",
+      "hints": [
+        "The boundary is drawn per call, not per entity or per table.",
+        "Ask what the database would be left holding if only some of those six statements had committed.",
+        "One call means one transaction: the constraint violation aborts it, and none of the six changes is applied."
+      ],
+      "solution": {
+        "modelAnswer": "One transaction; the violation rolls back all six changes.",
+        "explanationMarkdown": "EF Core opens one transaction per `SaveChanges` call and writes every pending change inside it. A failure in any statement aborts the whole transaction, so the three updates and two deletes are rolled back along with the failed insert. This is why the common pattern — make all your changes, then save once — is atomic without any explicit transaction code."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "one-all-rollback",
+            "textMarkdown": "One transaction; all six changes are rolled back.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The boundary is the call, not the entity. Everything pending at that moment commits together or not at all."
+          },
+          {
+            "id": "six",
+            "textMarkdown": "Six — one per entity — so the tickets and tags still commit.",
+            "correct": false,
+            "explanationMarkdown": "That would make every multi-entity change non-atomic by default, which is precisely what the single boundary exists to avoid. EF Core batches the statements inside one transaction."
+          },
+          {
+            "id": "three",
+            "textMarkdown": "Three — one per table — so only the comment insert is rolled back.",
+            "correct": false,
+            "explanationMarkdown": "Tables are not transaction boundaries. Statement order is derived from relationships, but all of them run inside the same transaction."
+          },
+          {
+            "id": "one-partial",
+            "textMarkdown": "One transaction, but EF Core skips the failing statement and commits the rest.",
+            "correct": false,
+            "explanationMarkdown": "Nothing skips a failed statement — that would silently discard a change you asked for. The exception propagates and the transaction aborts."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e702",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The gap between two saves",
+      "conceptIds": ["efcore.transactions"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Reading a handler for the state it can leave behind.",
+      "lessonId": "v3-l19",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "primaryConceptId": "efcore.transactions",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Larkspur's inventory service reserves stock when an order is submitted.\n\n```csharp\nvar order = await db.Orders.FindAsync(orderId);\norder!.Status = \"submitted\";\nawait db.SaveChangesAsync();\n\nforeach (var line in order.Lines)\n{\n    var stock = await db.Stock.FindAsync(line.ProductId);\n    stock!.Reserved += line.Quantity;\n}\nawait db.SaveChangesAsync();\n```\n\nThe second save occasionally fails with a check-constraint violation when stock would go negative. What state can the database be left in, and what is the minimal fix?",
+      "hints": [
+        "Count the transactions, then ask what is already durable when the second one fails.",
+        "The first save has committed by the time the loop runs. A failure afterwards cannot undo it.",
+        "Both facts — the status and the reservations — describe one business event, so they belong in one transaction. Moving the first save to the end achieves that."
+      ],
+      "solution": {
+        "modelAnswer": "The order can be left 'submitted' with no stock reserved. Fix: remove the first SaveChanges so both changes commit in one transaction.",
+        "explanationMarkdown": "The first `SaveChangesAsync` commits the status change immediately. If the reservation loop then fails, that commit stands — the order is submitted and nothing is reserved, which is exactly the inconsistency the check constraint exists to prevent. Deleting the first save leaves both the status update and the reservation updates pending until one final save, so the constraint violation rolls back the status too. An explicit `BeginTransaction` would also work but is unnecessary here: one save already gives one transaction."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "submitted-unreserved",
+            "textMarkdown": "The order is `submitted` with no stock reserved; remove the first `SaveChangesAsync` so one save covers both changes.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The first commit is durable before the failure occurs, so the two facts can disagree. Saving once makes them one transaction, and the constraint violation rolls back the status as well."
+          },
+          {
+            "id": "nothing-committed",
+            "textMarkdown": "Nothing is committed — EF Core rolls back the earlier save when a later one in the same request fails.",
+            "correct": false,
+            "explanationMarkdown": "There is no request-wide transaction by default. Once a `SaveChanges` returns, its transaction has committed and no later failure can reach back and undo it."
+          },
+          {
+            "id": "partial-reservations",
+            "textMarkdown": "Some product reservations are applied and others are not, because the loop saves per iteration.",
+            "correct": false,
+            "explanationMarkdown": "The loop does not save; it only mutates tracked entities. All the reservation updates go in the single save after it, so they succeed or fail together — the split is between status and reservations, not within them."
+          },
+          {
+            "id": "retry",
+            "textMarkdown": "The state is consistent; the fix is to retry the second save until it succeeds.",
+            "correct": false,
+            "explanationMarkdown": "Retrying a write that fails because stock would go negative will keep failing, and meanwhile the order stays submitted. Retries address transient faults, not a violated invariant."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e703",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Work out the rollback scope",
+      "conceptIds": ["efcore.transactions"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Given a sequence of steps and where it failed, decide what must be undone. Pure reasoning about a boundary — no database involved.",
+      "lessonId": "v3-l19",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "primaryConceptId": "efcore.transactions",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "You are writing a compensation routine for a workflow that is **not** inside one transaction. Each step is:\n\n```js\n{ id: \"reserve-stock\", kind: \"write\" }\n```\n\n`kind` is `\"write\"` (it changed durable state) or `\"read\"` (it did not).\n\nImplement `rollbackScope(steps, failedAt)`.\n\n`failedAt` is the `id` of the step that threw. Return an array of the ids of the steps that must be compensated: every **write** that ran *strictly before* the failing step, in their original order.\n\n- The failing step itself is never included — it did not complete.\n- Reads are never included; there is nothing to undo.\n- If `failedAt` matches no step, return an empty array: you cannot reason about a failure you cannot place.\n\nDo not modify the input.",
+      "hints": [
+        "Two questions, in order: where did the failure happen, and which of the earlier steps actually changed anything?",
+        "Locating the failing step gives you an index. Everything that needs compensating lies strictly before it.",
+        "`findIndex` returns exactly `-1` when nothing matches, so test for that. Otherwise take `steps.slice(0, index)`, keep only the ones whose `kind` is `\"write\"`, and return their ids."
+      ],
+      "solution": {
+        "code": "function rollbackScope(steps, failedAt) {\n  const index = steps.findIndex(s => s.id === failedAt);\n  if (index === -1) return [];\n  const before = steps.slice(0, index);\n  const writes = before.filter(s => s.kind === 'write');\n  return writes.map(s => s.id);\n}",
+        "explanationMarkdown": "Three decisions, each of which is a correctness rule rather than a coding preference. **Strictly before**: the failing step threw, so it did not complete, and compensating it would undo something that never happened. **Writes only**: a read changed no durable state, so there is nothing to compensate — including reads would generate meaningless work and possibly errors. **Unknown id returns empty**: if you cannot place the failure in the sequence you do not know what ran, and guessing is worse than doing nothing. Order is preserved because compensations usually have to run in a defined order themselves — typically the reverse of this list. The deeper point: all this bookkeeping is what a single transaction would have done for free, which is the argument for keeping the unit of work inside one."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "rollbackScope",
+        "starterCode": "function rollbackScope(steps, failedAt) {\n  // Which earlier steps actually changed durable state?\n  return steps.map(s => s.id);\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "writes-before-failure",
+            "args": [
+              [
+                { "id": "load-order", "kind": "read" },
+                { "id": "reserve-stock", "kind": "write" },
+                { "id": "charge-card", "kind": "write" },
+                { "id": "send-receipt", "kind": "write" }
+              ],
+              "send-receipt"
+            ],
+            "expected": ["reserve-stock", "charge-card"],
+            "hidden": false
+          },
+          {
+            "id": "failure-on-first-step",
+            "args": [
+              [
+                { "id": "reserve-stock", "kind": "write" },
+                { "id": "charge-card", "kind": "write" }
+              ],
+              "reserve-stock"
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "unknown-failure-is-not-guessed",
+            "args": [
+              [
+                { "id": "reserve-stock", "kind": "write" },
+                { "id": "charge-card", "kind": "write" }
+              ],
+              "refund"
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "reads-are-not-compensated",
+            "args": [
+              [
+                { "id": "load-order", "kind": "read" },
+                { "id": "check-credit", "kind": "read" },
+                { "id": "charge-card", "kind": "write" }
+              ],
+              "charge-card"
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "order-is-preserved",
+            "args": [
+              [
+                { "id": "write-b", "kind": "write" },
+                { "id": "read-x", "kind": "read" },
+                { "id": "write-a", "kind": "write" },
+                { "id": "fail-here", "kind": "write" }
+              ],
+              "fail-here"
+            ],
+            "expected": ["write-b", "write-a"],
+            "hidden": false
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c701",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Where is the transaction boundary?",
+      "conceptIds": ["efcore.transactions"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the default EF Core gives you.",
+      "lessonId": "v3-l19",
+      "type": "recall",
+      "primaryConceptId": "efcore.transactions",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "Without any explicit transaction code, what does EF Core wrap in a transaction?",
+      "answerMarkdown": "Everything pending at a **single call to `SaveChanges`** — however many entities and tables that touches. Two calls to `SaveChanges` are two separate transactions, with a gap between them in which a failure leaves the first committed and the second never run.",
+      "explanationMarkdown": "Remembering the boundary as 'per call' rather than 'per entity' or 'per request' is what lets you spot partial writes by counting saves. It is also why the fix for most of them is to delete a `SaveChanges` rather than to add transaction code."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c702",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "After a failed save",
+      "conceptIds": ["efcore.transactions"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Debugging recall: what the context still holds.",
+      "lessonId": "v3-l19",
+      "type": "debugging",
+      "primaryConceptId": "efcore.transactions",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "`SaveChanges` throws. A colleague catches the exception, fixes one field, and calls `SaveChanges` again on the same context. What is the risk?",
+      "answerMarkdown": "The database rolled back, but the **change tracker did not**. Every entity is still tracked in its modified state, so the second save retries *all* of the original changes, not just the corrected one — including whatever caused the failure. The safe approach is a fresh context for the retry, which is what the per-request scoped lifetime gives you by default in ASP.NET Core.",
+      "explanationMarkdown": "The asymmetry between database state and in-memory state after a failure is the thing to hold on to. It also explains why long-lived or shared contexts are a bad idea: one failure poisons every later save through that instance."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l20",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Concurrency tokens and the lost update",
+      "conceptIds": ["efcore.concurrency-tokens"],
+      "prerequisiteIds": ["db.optimistic-concurrency"],
+      "chapterId": "v3-ch07",
+      "sortOrder": 1,
+      "objectives": [
+        "Describe the lost-update sequence and why it produces no error by default.",
+        "Configure a concurrency token and explain what it adds to the generated UPDATE.",
+        "Choose a sensible response to DbUpdateConcurrencyException for a given feature."
+      ],
+      "estimatedMinutes": 18,
+      "bodyMarkdown": "Here is a sequence with no bug in any single line of it.\n\n1. Agent A loads ticket 42. Priority is `normal`.\n2. Agent B loads ticket 42. Priority is `normal`.\n3. A sets priority to `urgent` and saves.\n4. B sets the subject and saves.\n\nB's save writes the entity B is holding, which still has priority `normal` — because that is what it was when B loaded it. A's change is gone. Nobody saw an error. The database is internally consistent. The ticket is simply wrong, and the only person who will notice is A, later, wondering why the priority reverted.\n\nThis is the **lost update**, and the reason it is worth a lesson is that it is invisible by construction. The default UPDATE says *set these columns on the row with this id*, and the row with that id certainly exists, so it succeeds.\n\nThe fix is to make the UPDATE also assert what you believed when you loaded. A **concurrency token** is a column EF Core includes in the WHERE clause of every update to that entity:\n\n```sql\nUPDATE \"Tickets\" SET \"Subject\" = @p0, \"Version\" = @p1\nWHERE \"Id\" = @id AND \"Version\" = @originalVersion\n```\n\nIf someone else has saved in the meantime, the version no longer matches, **zero rows** are affected, and EF Core turns that into a `DbUpdateConcurrencyException`. The silence becomes a signal.\n\nTwo ways to declare one. A dedicated version column, which works on any provider:\n\n```csharp\npublic class Ticket\n{\n    public long Id { get; set; }\n    public string Subject { get; set; } = \"\";\n    public string Priority { get; set; } = \"normal\";\n\n    [ConcurrencyCheck]\n    public Guid Version { get; set; } = Guid.NewGuid();\n}\n```\n\n— remembering to assign a new value on every save, typically in an override of `SaveChanges`. Or a provider-managed token, which is less to get wrong: on PostgreSQL the hidden system column `xmin` changes on every row update, and EF Core can use it directly:\n\n```csharp\nmodelBuilder.Entity<Ticket>().UseXminAsConcurrencyToken();\n```\n\nYou can also mark an ordinary business column with `IsConcurrencyToken()`, which produces a narrower rule: conflict only when *that* field changed. Useful when two people editing unrelated fields should not collide.\n\nCatching the exception is where the real design decision lives, and there is no universal answer:\n\n```csharp\ntry\n{\n    await db.SaveChangesAsync();\n}\ncatch (DbUpdateConcurrencyException ex)\n{\n    var entry = ex.Entries.Single();\n    var current = await entry.GetDatabaseValuesAsync();   // what is there now\n    // decide: refuse, merge, or overwrite — deliberately\n}\n```\n\n**Refuse** — tell the user their copy is stale and show them what changed. Correct whenever a person is editing text; this is what the DevPractice platform does with notes and drafts, preserving both versions rather than picking one.\n\n**Merge** — apply your change on top of the current values when the fields do not overlap.\n\n**Overwrite** — reload, reapply, save. Legitimate for a counter or a last-writer-wins status field, and a bug for anything a human typed.\n\nThe thing not to do is catch it and retry blindly, because a blind retry is a lost update with extra steps."
+      ,
+      "workedExampleMarkdown": "The same ticket edit, with and without a token.\n\n**Without.** Both agents load version-less tickets; EF Core generates:\n\n```sql\n-- Agent A saves\nUPDATE \"Tickets\" SET \"Priority\" = 'urgent' WHERE \"Id\" = 42;   -- 1 row\n-- Agent B saves, moments later\nUPDATE \"Tickets\" SET \"Subject\" = 'Printer jam' WHERE \"Id\" = 42;  -- 1 row\n```\n\nBoth succeed. But B's tracked entity also carries `Priority = 'normal'`, and if B's form posted the whole ticket, that column is in the SET list too — silently reverting A. Even when it is not, B has just saved a decision made from a stale view of the row.\n\n**With `UseXminAsConcurrencyToken()`.** Now every update carries the row version B read:\n\n```sql\n-- Agent A saves\nUPDATE \"Tickets\" SET \"Priority\" = 'urgent' WHERE \"Id\" = 42 AND xmin = 8801;  -- 1 row\n-- Agent B saves, moments later\nUPDATE \"Tickets\" SET \"Subject\" = 'Printer jam' WHERE \"Id\" = 42 AND xmin = 8801;  -- 0 rows\n```\n\nA's commit changed `xmin`, so B's WHERE matches nothing. Zero rows affected is not something the database considers an error — it is EF Core that notices the count is not what it expected and raises `DbUpdateConcurrencyException`.\n\nHandling it for a human editing text:\n\n```csharp\ncatch (DbUpdateConcurrencyException ex)\n{\n    var entry = ex.Entries.Single();\n    var databaseValues = await entry.GetDatabaseValuesAsync();\n\n    if (databaseValues is null)\n        return Results.NotFound();          // someone deleted it\n\n    var current = (Ticket)databaseValues.ToObject();\n    return Results.Conflict(new\n    {\n        message = \"This ticket changed while you were editing it.\",\n        yours = submitted,\n        theirs = current\n    });\n}\n```\n\nThat 409 carries both versions, so the user can decide. Compare it with the alternative — reload, reapply, save — which returns 200 and quietly discards whatever the other agent did.",
+      "commonMistakes": [
+        "Assuming a transaction prevents lost updates. The two edits are in different transactions, each perfectly valid; the second simply overwrites the first.",
+        "Adding a `Version` column but never changing it, so every update compares against a value that never moves and the token never fires.",
+        "Catching `DbUpdateConcurrencyException` and retrying the same save, which reapplies the stale values — a lost update with extra steps.",
+        "Choosing overwrite because it is the shortest handler, on a field a human typed.",
+        "Forgetting that `GetDatabaseValues` can return null: the conflicting change may have been a delete, not an update.",
+        "Putting the token on the wrong entity — on `Comment` when the contested row is `Ticket` — so the conflicting writes never collide."
+      ],
+      "summaryMarkdown": "A lost update is silent because the default UPDATE only asserts the row's identity. A concurrency token adds 'and it has not changed since I read it' to the WHERE clause, turning a silent overwrite into `DbUpdateConcurrencyException`. What you do with that exception — refuse, merge, or overwrite — is a product decision, and blind retry is not one of the three.",
+      "exerciseIds": ["v3-e704", "v3-e705", "v3-e706"],
+      "reviewCardIds": ["v3-c703", "v3-c704"],
+      "references": [
+        { "label": "EF Core — Handling concurrency conflicts", "url": "https://learn.microsoft.com/en-us/ef/core/saving/concurrency" },
+        { "label": "Npgsql EF Core — Concurrency tokens", "url": "https://www.npgsql.org/efcore/modeling/concurrency.html" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e704",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why does nothing fail?",
+      "conceptIds": ["efcore.concurrency-tokens"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Reading an update path for the error it declines to produce.",
+      "lessonId": "v3-l20",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "primaryConceptId": "efcore.concurrency-tokens",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "`Ticket` has no concurrency token configured.\n\n```csharp\nvar ticket = await db.Tickets.FindAsync(id);      // both agents run this\nticket!.Subject = submitted.Subject;\nticket.Priority = submitted.Priority;\nawait db.SaveChangesAsync();\n```\n\nTwo agents load ticket 42 within a second of each other. A sets `Priority = \"urgent\"` and saves. B, whose form still shows `normal`, saves a subject change. What is the outcome, and why is there no exception?",
+      "hints": [
+        "Write out the UPDATE statement EF Core generates for B. What does its WHERE clause actually assert?",
+        "The WHERE clause names the row by id. Ask whether that row still exists — it does.",
+        "An UPDATE that matches one row is a successful UPDATE. Nothing in the statement claims anything about the row's previous contents, so nothing can contradict it."
+      ],
+      "solution": {
+        "modelAnswer": "B's save silently reverts Priority to 'normal'. No exception, because the UPDATE only matches on Id and that row exists.",
+        "explanationMarkdown": "Both agents' handlers assign `Priority` from their own submitted form, so B writes `normal` over A's `urgent`. EF Core's generated statement is `UPDATE \"Tickets\" SET \"Subject\" = @p0, \"Priority\" = @p1 WHERE \"Id\" = 42`, which affects exactly one row and therefore succeeds. Nothing in it asserts what the row contained when B read it, so there is nothing for the database to reject. A concurrency token adds that assertion — `AND xmin = @original` — making the update affect zero rows and EF Core raise `DbUpdateConcurrencyException`."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "silent-revert",
+            "textMarkdown": "B's save reverts `Priority` to `normal`; no exception, because the UPDATE matches on `Id` alone and that row exists.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The statement asserts identity, not contents. One row matched, so it succeeded — the loss is a business fact, not a database error."
+          },
+          {
+            "id": "only-subject",
+            "textMarkdown": "Only `Subject` is written, because EF Core detects that B did not change `Priority`.",
+            "correct": false,
+            "explanationMarkdown": "Change detection compares against the values B *loaded*, and B's handler explicitly assigns `Priority` from the submitted form. Even when only changed properties are written, B's stale value is a change relative to what B read."
+          },
+          {
+            "id": "exception",
+            "textMarkdown": "B gets a `DbUpdateConcurrencyException`, which is EF Core's default for a contested row.",
+            "correct": false,
+            "explanationMarkdown": "That exception is raised when an update affects zero rows, which only happens once a concurrency token narrows the WHERE clause. With no token configured there is nothing to contest."
+          },
+          {
+            "id": "transaction-protects",
+            "textMarkdown": "Nothing is lost — each `SaveChanges` runs in its own transaction, which isolates the two edits.",
+            "correct": false,
+            "explanationMarkdown": "Both transactions are individually valid and both commit. Isolation governs what a transaction can *see* while running; it does not stop a later committed write from overwriting an earlier one."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e705",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Rows affected with a token",
+      "conceptIds": ["efcore.concurrency-tokens"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Predicting the mechanism: what the database reports, and what EF Core makes of it.",
+      "lessonId": "v3-l20",
+      "sortOrder": 1,
+      "type": "predict-output",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "primaryConceptId": "efcore.concurrency-tokens",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "`Ticket` uses `UseXminAsConcurrencyToken()`. Both agents read ticket 42 when `xmin` was `8801`. Agent A saves first and commits successfully.\n\nAgent B now saves, and EF Core issues:\n\n```sql\nUPDATE \"Tickets\" SET \"Subject\" = @p0 WHERE \"Id\" = 42 AND xmin = 8801\n```\n\nHow many rows does this statement affect, and what does EF Core throw as a result? Answer in the form `<rows>, <ExceptionName>`.",
+      "hints": [
+        "A's commit changed the row. Ask what that did to the value of `xmin` for row 42.",
+        "The WHERE clause requires both conditions. The id still matches; the version no longer does.",
+        "Zero matching rows is not a database error — it is EF Core comparing affected rows against what it expected and raising a specific exception."
+      ],
+      "solution": {
+        "modelAnswer": "0, DbUpdateConcurrencyException",
+        "explanationMarkdown": "A's successful commit updated row 42, and PostgreSQL assigns a new `xmin` on every row version. B's WHERE clause still asks for `xmin = 8801`, which no longer describes any row, so the statement affects **0** rows. The database considers that a perfectly successful statement — it was asked to update matching rows and there were none. EF Core is the layer that knows it expected exactly one, and it raises `DbUpdateConcurrencyException`, exposing the conflicting entry through `ex.Entries` so you can fetch the current values and decide what to do."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": { "trim": true, "collapseWhitespace": true, "caseSensitive": false },
+        "expected": "0, DbUpdateConcurrencyException",
+        "acceptedAlternatives": [
+          "0,DbUpdateConcurrencyException",
+          "zero, DbUpdateConcurrencyException",
+          "0 rows, DbUpdateConcurrencyException",
+          "0 DbUpdateConcurrencyException"
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e706",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose a conflict response",
+      "conceptIds": ["efcore.concurrency-tokens"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written design decision. Two features, two different right answers.",
+      "lessonId": "v3-l20",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 13,
+      "primaryConceptId": "efcore.concurrency-tokens",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Both of these hit `DbUpdateConcurrencyException` on a contested row:\n\n1. **Editing a ticket's description** — an agent has typed several paragraphs into a form.\n2. **Incrementing a view counter** — `ticket.ViewCount += 1` on every page load.\n\nFor each, say which response you would implement — refuse, merge, or overwrite (reload-and-reapply) — and why. Then explain why blindly retrying the save is the wrong default in **both** cases, even though it would make the exception go away.",
+      "hints": [
+        "Ask what the user would lose in each case if you picked the wrong strategy, and how much they would mind.",
+        "Typed text cannot be reconstructed by the server; an increment can be reapplied to whatever the current value is.",
+        "A blind retry re-sends the values you already had — which for the description means overwriting someone's work, and for the counter means writing a number computed from a stale read."
+      ],
+      "solution": {
+        "modelAnswer": "For the description, refuse: return 409 with both versions and let the agent decide, because the server cannot reconstruct paragraphs a human typed and silently discarding them is the worst possible outcome. For the counter, overwrite by reloading and reapplying the increment — the operation is relative, so recomputing it against the current value is exactly correct, and no human intent is lost. Blind retry is wrong in both because it re-sends the stale values: for the description it overwrites the other agent's edit, and for the counter it writes old + 1 rather than current + 1, so a concurrent increment is still lost. The distinction is whether the change is an absolute value someone chose or a relative operation the server can reapply.",
+        "explanationMarkdown": "The useful generalisation is to ask whether the write is an *absolute value chosen by a person* or a *relative operation the server can recompute*. Absolute values from humans must be refused and surfaced; relative operations can be safely reapplied. Blind retry treats everything as the second kind."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Chooses refuse (409 surfacing both versions) for the description, and justifies it by the irreplaceability of typed text.",
+          "Chooses overwrite / reload-and-reapply for the counter, and justifies it by the increment being relative rather than absolute.",
+          "Explains that a blind retry re-sends stale values rather than recomputing from current state.",
+          "Identifies the concrete harm of blind retry in the description case: the other agent's edit is overwritten.",
+          "Identifies the concrete harm in the counter case: writing old+1 instead of current+1 still loses a concurrent increment.",
+          "Draws a general distinction between absolute human-chosen values and relative server-recomputable operations."
+        ],
+        "modelAnswerMarkdown": "**Description — refuse.** Catch the exception, fetch the current row with `GetDatabaseValuesAsync`, and return `409` carrying both the submitted text and the stored text so the agent can compare and choose. The server has no way to reconstruct paragraphs a person typed, and quietly discarding either version is the worst outcome available. This is what the DevPractice platform itself does for notes and drafts.\n\n**View counter — overwrite by reloading and reapplying.** The operation is *relative*: whatever the count is now, add one. Reload the entity, apply `+= 1` to the fresh value, save again. Nothing a human decided is at stake, and the retry produces exactly the right number. (A better long-term answer is to stop reading the value at all — `UPDATE ... SET ViewCount = ViewCount + 1` lets the database do it atomically — but as a conflict response, reload-and-reapply is correct.)\n\n**Why blind retry is wrong in both.** Retrying the same `SaveChanges` re-sends the values already in the tracked entity. For the description that means writing the text loaded *before* the other agent's edit, so the retry succeeds and their work vanishes — the exception was the only warning and it has now been swallowed. For the counter it means writing `old + 1`, computed from a stale read, so if another request incremented in between, that increment is lost and the total silently drifts low.\n\nThe general test: is the change an absolute value a person chose, or a relative operation the server can recompute? Absolute values must be surfaced; relative operations can be reapplied. Blind retry treats every change as the second kind."
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c703",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does a concurrency token change?",
+      "conceptIds": ["efcore.concurrency-tokens"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the mechanism, not just the name.",
+      "lessonId": "v3-l20",
+      "type": "recall",
+      "primaryConceptId": "efcore.concurrency-tokens",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "Concretely, what does declaring a concurrency token change about the SQL EF Core generates, and how does that become an exception?",
+      "answerMarkdown": "It adds the token column to the **WHERE clause of every UPDATE and DELETE** for that entity: `WHERE \"Id\" = @id AND \"Version\" = @originalValue`. If another writer has committed since you read the row, that condition matches nothing, so the statement affects **zero** rows. The database is content; EF Core compares affected rows against the one it expected and raises `DbUpdateConcurrencyException`.",
+      "explanationMarkdown": "Knowing it is 'an extra WHERE condition plus a rows-affected check' demystifies the whole feature — including why a token that never changes silently does nothing, and why the exception comes from EF Core rather than from PostgreSQL."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c704",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Is retrying safe?",
+      "conceptIds": ["efcore.concurrency-tokens"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer: when a retry is a fix and when it is the bug.",
+      "lessonId": "v3-l20",
+      "type": "transfer",
+      "primaryConceptId": "efcore.concurrency-tokens",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "A handler catches `DbUpdateConcurrencyException` and calls `SaveChangesAsync()` again. When is that safe, and when is it a lost update in disguise?",
+      "answerMarkdown": "Retrying the *same* save is essentially never safe: the tracked entity still holds the values read before the conflict, so the retry overwrites whatever the other writer committed. A retry is only correct after **reloading** and **reapplying** the change to the current values — and only when the change is relative (add one, append an item) rather than an absolute value a person chose. For human-authored content, refuse and surface the conflict instead.",
+      "explanationMarkdown": "The distinction to carry away is absolute-versus-relative. A relative operation can be recomputed against fresh state; an absolute value cannot be recovered by the server, so the only honest response is to tell the user."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l21",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Indexes and the cost of a query",
+      "conceptIds": ["efcore.indexes", "efcore.query-performance"],
+      "prerequisiteIds": ["db.index-selection", "efcore.generated-sql"],
+      "chapterId": "v3-ch07",
+      "sortOrder": 2,
+      "objectives": [
+        "Declare an index in the model and say what it costs as well as what it saves.",
+        "Recognise a predicate written so that no index can be used.",
+        "Count the queries a page issues and identify the N+1 pattern from the code."
+      ],
+      "estimatedMinutes": 19,
+      "bodyMarkdown": "Two things make a query slow, and they need different fixes.\n\nThe first is **reading too many rows**. An index is a sorted structure the database can search instead of scanning the table. Declared in the model:\n\n```csharp\nmodelBuilder.Entity<Ticket>().HasIndex(t => t.OwnerId);\nmodelBuilder.Entity<Ticket>().HasIndex(t => new { t.OwnerId, t.CreatedAt });\nmodelBuilder.Entity<Ticket>().HasIndex(t => t.Reference).IsUnique();\n```\n\nThe composite one matters more than it looks. An index on `(OwnerId, CreatedAt)` serves a filter on `OwnerId`, and a filter on `OwnerId` *ordered by* `CreatedAt`, and it does not serve a filter on `CreatedAt` alone — the leading column comes first, like a phone book sorted by surname then first name. That single fact explains most 'why isn't my index being used' questions.\n\nIndexes are not free. Every insert, update and delete maintains them, and they occupy space. An index nothing queries is a tax with no benefit, which is why 'add an index to everything' is not a strategy.\n\nThe second reason is **writing the predicate so no index can apply**. This is the one that surprises people, because the query looks reasonable:\n\n```csharp\n// cannot use an index on Reference\nawait db.Tickets.Where(t => t.Reference.ToLower() == code.ToLower()).ToListAsync();\n```\n\nThe index stores `Reference`, not `LOWER(Reference)`. Applying a function to the column means the database must compute it for every row before comparing — a full scan, however good the index. The fixes are to compare in a way the index can serve (a case-insensitive collation, or storing a normalised column and indexing that), or to create a matching expression index. The general rule: **keep the column bare on one side of the comparison.**\n\nThe third cost is not about any single query at all — it is **how many queries** a page runs. That is the N+1 pattern from D06, and it deserves repeating here because it is the one that survives every index you add. Forty perfectly-indexed queries are still forty round trips. Fixing it means `Include`, `AsSplitQuery`, or a projection that fetches what the page needs in one statement.\n\nWhich brings us to method. Do not guess, and do not trust a stopwatch on a development machine with two hundred rows. Ask the database:\n\n```sql\nEXPLAIN ANALYZE\nSELECT t.\"Id\", t.\"Subject\" FROM \"Tickets\" AS t WHERE t.\"OwnerId\" = 7;\n```\n\n`Seq Scan` means it read the table. `Index Scan` means it used the index. That distinction, on realistic data volumes, is worth more than any amount of reasoning about what *should* be fast — and it is the same `EXPLAIN` you used in chapter 10, because this part was never about the language."
+      ,
+      "workedExampleMarkdown": "Larkspur's queue page is slow. Three separate problems, found in order.\n\n**One — the filter scans.**\n\n```csharp\nvar tickets = await db.Tickets\n    .Where(t => t.OwnerId == ownerId && t.Status != \"closed\")\n    .OrderByDescending(t => t.CreatedAt)\n    .Take(50)\n    .ToListAsync();\n```\n\n```\nSeq Scan on \"Tickets\"  (cost=0.00..8912.00 rows=143 width=96)\n  Filter: ((\"OwnerId\" = 7) AND (\"Status\" <> 'closed'))\n  Rows Removed by Filter: 412857\n```\n\nHalf a million rows read to return fifty. Adding `HasIndex(t => new { t.OwnerId, t.CreatedAt })` lets the database find this owner's rows already in date order, so the `Take(50)` stops early:\n\n```\nIndex Scan Backward using \"IX_Tickets_OwnerId_CreatedAt\"  (cost=0.42..38.10 rows=50 width=96)\n```\n\n**Two — a predicate the index cannot serve.** The search box does this:\n\n```csharp\n.Where(t => t.Reference.ToLower() == query.ToLower())\n```\n\n`LOWER(\"Reference\")` is not what the index on `Reference` stores, so it scans regardless. Normalising on write and comparing the stored column bare — or a case-insensitive collation — restores the index.\n\n**Three — the count that was not one query.**\n\n```csharp\nforeach (var ticket in tickets)\n    row.CommentCount = ticket.Comments.Count;   // lazy: one query each\n```\n\nFifty tickets, fifty extra queries, none of which any index will remove. The projection fixes it in one statement:\n\n```csharp\n.Select(t => new TicketRow(t.Id, t.Subject, t.Comments.Count))\n```\n\n```sql\nSELECT t.\"Id\", t.\"Subject\", (\n    SELECT count(*)::int FROM \"Comments\" AS c WHERE t.\"Id\" = c.\"TicketId\") \nFROM \"Tickets\" AS t WHERE ...\n```\n\nThree fixes, three different kinds. Only the first was an index.",
+      "commonMistakes": [
+        "Adding an index for every column that appears in a WHERE clause anywhere, and paying for all of them on every write.",
+        "Expecting an index on `(A, B)` to serve a query filtering only on `B`. The leading column decides.",
+        "Wrapping the column in a function — `ToLower()`, `Substring`, a date cast — and then wondering why the index is ignored.",
+        "Measuring on a development database with a few hundred rows, where a sequential scan is genuinely fast.",
+        "Adding indexes to fix an N+1. The queries were never slow individually; there were simply forty of them.",
+        "Reading `EXPLAIN` without `ANALYZE` and treating the estimated row counts as measurements."
+      ],
+      "summaryMarkdown": "An index makes a filter cheap and every write slightly more expensive, and a composite index is only usable from its leading column. A function applied to the column defeats it entirely, so keep the column bare in the comparison. And before any of that, count the queries: N+1 is a cost no index can reduce. Use `EXPLAIN ANALYZE` on realistic data rather than reasoning about what ought to be fast.",
+      "exerciseIds": ["v3-e707", "v3-e708", "v3-e709"],
+      "reviewCardIds": ["v3-c705", "v3-c706"],
+      "references": [
+        { "label": "EF Core — Indexes", "url": "https://learn.microsoft.com/en-us/ef/core/modeling/indexes" },
+        { "label": "EF Core — Efficient querying", "url": "https://learn.microsoft.com/en-us/ef/core/performance/efficient-querying" },
+        { "label": "PostgreSQL — Using EXPLAIN", "url": "https://www.postgresql.org/docs/current/using-explain.html" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e707",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The index that is never used",
+      "conceptIds": ["efcore.indexes"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A correctly declared index and a query that cannot touch it.",
+      "lessonId": "v3-l21",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "primaryConceptId": "efcore.indexes",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "The model declares an index, and the plan still shows a sequential scan.\n\n```csharp\nmodelBuilder.Entity<Ticket>().HasIndex(t => t.Reference);\n\nvar match = await db.Tickets\n    .Where(t => t.Reference.ToLower() == code.ToLower())\n    .FirstOrDefaultAsync();\n```\n\n```\nSeq Scan on \"Tickets\"  (cost=0.00..9120.00 rows=1 width=96)\n  Filter: (lower(\"Reference\") = 'ord-000420'::text)\n```\n\nWhy is the index ignored?",
+      "hints": [
+        "Compare what the index stores against what the filter compares.",
+        "The filter is on `lower(\"Reference\")`. Is that a value the index contains?",
+        "An index on a column can only answer questions about that column's stored values. Transform the column and the database must compute the transformation for every row first."
+      ],
+      "solution": {
+        "modelAnswer": "The index stores Reference, but the query filters on lower(Reference) — a different value the index does not contain, so every row must be read and transformed.",
+        "explanationMarkdown": "An index is a sorted structure over the stored values of a column. `ToLower()` translates to `lower(\"Reference\")`, which is not what was indexed, so the sorted structure cannot answer the question and the database falls back to computing `lower()` for every row. The fixes all amount to making the compared expression match something indexed: use a case-insensitive collation on the column, store a normalised `ReferenceNormalized` column and index that, or create an expression index on `lower(\"Reference\")`. The general habit is to keep the column bare on its side of the comparison."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "function-on-column",
+            "textMarkdown": "The filter compares `lower(\"Reference\")`, which is not the value the index stores, so the index cannot be searched.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Applying a function to the indexed column changes the question being asked, and the sorted structure can only answer questions about the values it holds."
+          },
+          {
+            "id": "not-unique",
+            "textMarkdown": "The index is not declared `IsUnique()`, so PostgreSQL will not use it for a single-row lookup.",
+            "correct": false,
+            "explanationMarkdown": "Non-unique indexes are used for lookups all the time; uniqueness is a constraint, not a precondition for being searched. It would not help here anyway, because the filtered expression still would not match."
+          },
+          {
+            "id": "firstordefault",
+            "textMarkdown": "`FirstOrDefaultAsync` always scans, because it must confirm no earlier row matches.",
+            "correct": false,
+            "explanationMarkdown": "With a usable index, `FirstOrDefault` is cheap — the database seeks and stops. The scan here is caused by the predicate, not by the operator."
+          },
+          {
+            "id": "parameter",
+            "textMarkdown": "`code.ToLower()` is computed in C#, so the value is a parameter and parameters defeat indexes.",
+            "correct": false,
+            "explanationMarkdown": "Parameters are entirely index-friendly — that side is a constant by the time the plan runs. It is the transformation on the *column* side that causes the scan."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e708",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Count the queries a page will issue",
+      "conceptIds": ["efcore.query-performance"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Turn the loading strategy into a number before you write the code. Pure arithmetic over a plan description.",
+      "lessonId": "v3-l21",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "primaryConceptId": "efcore.query-performance",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Implement `queryCount(plan)`, where `plan` describes how a page loads a list and its related data:\n\n```js\n{ rootRows: 40, navigations: 1, strategy: \"lazy\" }\n```\n\n- `rootRows` — how many rows the main query returns.\n- `navigations` — how many related collections the page touches per row.\n- `strategy` — how related data is loaded.\n\nReturn the total number of SQL queries:\n\n- `\"lazy\"` — one for the list, then one per navigation **per row**: `1 + rootRows * navigations`.\n- `\"split\"` — one for the list, then one per navigation overall: `1 + navigations`.\n- `\"include\"` — a single joined query: always `1`.\n- `\"none\"` — no related data is touched: always `1`.\n\nAny other `strategy` is unrecognised; return `-1` rather than guessing.",
+      "hints": [
+        "Each strategy is its own arithmetic. Decide which branch you are in before computing anything.",
+        "Lazy is the only one where the row count matters — that multiplication is exactly what makes N+1 grow with data.",
+        "Return `-1` for an unrecognised strategy rather than falling through to a plausible default; a wrong number here would be quietly believed."
+      ],
+      "solution": {
+        "code": "function queryCount(plan) {\n  const strategy = plan.strategy;\n  if (strategy === 'lazy') return 1 + plan.rootRows * plan.navigations;\n  if (strategy === 'split') return 1 + plan.navigations;\n  if (strategy === 'include') return 1;\n  if (strategy === 'none') return 1;\n  return -1;\n}",
+        "explanationMarkdown": "The multiplication in the lazy branch is the whole lesson: query count grows with the number of rows, so a page that is fine with ten tickets issues four hundred and one queries with four hundred. Split loading trades the join for a fixed, small number of queries — one per navigation, regardless of row count — which is the right choice when a join would duplicate a wide parent row many times over. Include is a single joined statement. Returning `-1` for an unknown strategy is deliberate: a plausible-looking default would be silently trusted by whatever reads this number, and being told 'I don't know' is far more useful than being told '1'."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "queryCount",
+        "starterCode": "function queryCount(plan) {\n  // Each strategy has its own arithmetic. Which one is this?\n  return 1;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "lazy-is-n-plus-one",
+            "args": [{ "rootRows": 40, "navigations": 1, "strategy": "lazy" }],
+            "expected": 41,
+            "hidden": false
+          },
+          {
+            "id": "lazy-two-navigations",
+            "args": [{ "rootRows": 40, "navigations": 2, "strategy": "lazy" }],
+            "expected": 81,
+            "hidden": false
+          },
+          {
+            "id": "lazy-with-no-rows",
+            "args": [{ "rootRows": 0, "navigations": 3, "strategy": "lazy" }],
+            "expected": 1,
+            "hidden": false
+          },
+          {
+            "id": "split-is-fixed",
+            "args": [{ "rootRows": 40, "navigations": 2, "strategy": "split" }],
+            "expected": 3,
+            "hidden": false
+          },
+          {
+            "id": "include-is-one-join",
+            "args": [{ "rootRows": 500, "navigations": 2, "strategy": "include" }],
+            "expected": 1,
+            "hidden": false
+          },
+          {
+            "id": "none-touches-nothing",
+            "args": [{ "rootRows": 500, "navigations": 0, "strategy": "none" }],
+            "expected": 1,
+            "hidden": false
+          },
+          {
+            "id": "unknown-strategy-is-not-guessed",
+            "args": [{ "rootRows": 40, "navigations": 1, "strategy": "eager-ish" }],
+            "expected": -1,
+            "hidden": false
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e709",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Triage a slow endpoint",
+      "conceptIds": ["efcore.query-performance", "efcore.indexes"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written triage. Three symptoms, and they do not all have the same cause.",
+      "lessonId": "v3-l21",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 15,
+      "primaryConceptId": "efcore.query-performance",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "A ticket queue endpoint takes 6 seconds in production and 40ms locally. You capture this from production logs:\n\n- 51 SQL statements are issued per request.\n- The first statement's plan shows `Seq Scan on \"Tickets\"`, `Rows Removed by Filter: 480000`.\n- The remaining 50 statements are each `SELECT ... FROM \"Comments\" WHERE \"TicketId\" = $1`, each taking under 1ms.\n\nIn a few sentences: name the two distinct problems, say which fix addresses which, and explain why the endpoint is fast on your machine.",
+      "hints": [
+        "Two numbers stand out and they are unrelated to each other: how much one query reads, and how many queries there are.",
+        "An index changes the first. Nothing about indexing reduces a count of 51.",
+        "Local data volume explains both the sequential scan being cheap and the fifty extra round trips being invisible."
+      ],
+      "solution": {
+        "modelAnswer": "Two problems. First, the list query has no usable index, so it scans 480,000 rows — fixed by a composite index on the filter and sort columns. Second, the fifty comment queries are an N+1 from touching a navigation per ticket — fixed by Include, AsSplitQuery, or a projection that fetches the counts in one statement; no index reduces a query count. It is fast locally because the development database has few rows: a sequential scan over a small table is genuinely quick, and fifty round trips to a local database cost microseconds rather than the network latency they incur in production.",
+        "explanationMarkdown": "The habit worth taking away is separating 'how expensive is one query' from 'how many queries are there'. They have different evidence (a plan versus a count), different fixes (indexes versus loading strategy), and a fix for one does nothing for the other."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Names the missing/unusable index on the list query as the cause of the sequential scan over 480,000 rows.",
+          "Names the 50 comment statements as an N+1 caused by touching a navigation per ticket.",
+          "States that an index fixes the scan but does nothing about the query count.",
+          "Proposes a concrete N+1 fix — Include, AsSplitQuery, or a projection computing the counts in one statement.",
+          "Explains the local-versus-production gap by data volume and round-trip latency, not by machine speed alone."
+        ],
+        "modelAnswerMarkdown": "There are two independent problems here, and it matters that they are counted separately.\n\n**The list query reads far too much.** `Rows Removed by Filter: 480000` means the database examined half a million rows to return a page. That is a missing or unusable index on the columns the query filters and sorts by — a composite index on `(OwnerId, CreatedAt)` would let it seek to this owner's rows already in order and stop after the page size.\n\n**There are fifty queries that should be zero or one.** Each `SELECT ... FROM \"Comments\" WHERE \"TicketId\" = $1` is a lazy navigation load, one per ticket in the page — textbook N+1. Individually they are under a millisecond, which is exactly why nobody notices them in a profiler that sorts by slowest statement. The fix is a loading strategy: `Include` for a join, `AsSplitQuery` for one comment query total, or best here, a projection that computes `t.Comments.Count` inside the query. **No index reduces a count of 51.**\n\n**Why it is fast locally.** The development database has a few hundred tickets, so the sequential scan reads almost nothing and finishes instantly, and fifty round trips over a loopback connection cost microseconds. In production the table is large *and* every round trip crosses a network. Both problems scale with data and latency, and neither is visible on a laptop — which is the argument for capturing plans and statement counts from production rather than reasoning from local timings."
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c705",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which column leads?",
+      "conceptIds": ["efcore.indexes"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the rule that decides whether a composite index applies.",
+      "lessonId": "v3-l21",
+      "type": "recall",
+      "primaryConceptId": "efcore.indexes",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "You have an index on `(OwnerId, CreatedAt)`. Which of these can use it: a filter on `OwnerId`; a filter on `CreatedAt`; a filter on `OwnerId` ordered by `CreatedAt`?",
+      "answerMarkdown": "The first and third can. The second cannot. A composite index is sorted by its **leading** column first, so it can serve queries that constrain `OwnerId` — with or without also using `CreatedAt` — but a query that only knows `CreatedAt` has no way in, like looking someone up in a phone book when you only know their first name.",
+      "explanationMarkdown": "This single rule answers most 'why isn't my index used' questions, and it also tells you the column order to choose: the column you always filter on goes first, the one you narrow or sort by goes second."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c706",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Index or query count?",
+      "conceptIds": ["efcore.query-performance"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer: choosing the right diagnosis from the symptom.",
+      "lessonId": "v3-l21",
+      "type": "transfer",
+      "primaryConceptId": "efcore.query-performance",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "A page is slow. Its log shows 200 statements, each under 1ms. Would an index help?",
+      "answerMarkdown": "No. Each statement is already fast; the problem is that there are two hundred of them, which is a loading-strategy problem (N+1), not a scanning problem. Indexes reduce the cost of *a* query; they never reduce the *number* of queries. The fix is `Include`, `AsSplitQuery`, or a projection that fetches what the page needs in one statement.",
+      "explanationMarkdown": "Keeping 'how expensive is one query' and 'how many queries' as separate questions saves a lot of wasted effort — they have different evidence and different fixes, and adding indexes to an N+1 changes nothing at all."
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v3-a07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Data correctness placement check",
+      "conceptIds": [
+        "efcore.transactions",
+        "efcore.concurrency-tokens",
+        "efcore.indexes",
+        "efcore.query-performance"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering chapter D07. Reason about what concurrent callers can interleave and what the database is asked to do; no hints are shown until you submit.",
+      "chapterId": "v3-ch07",
+      "qualification": { "minimumCorrect": 4, "requireAllCritical": true },
+      "items": [
+        {
+          "id": "v3-a07-i1",
+          "objectiveIds": ["efcore.transactions"],
+          "critical": true,
+          "promptMarkdown": "A handler calls `SaveChangesAsync()` twice: first to mark an invoice paid, then to insert a ledger entry. The second call throws. What is the state of the database?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "paid-no-ledger",
+                "textMarkdown": "The invoice is marked paid and there is no ledger entry.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The first save committed its own transaction before the second ran, and nothing can retroactively undo it. This is the partial write two saves make possible."
+              },
+              {
+                "id": "both-rolled-back",
+                "textMarkdown": "Both are rolled back, because they are in the same request.",
+                "correct": false,
+                "explanationMarkdown": "A request is not a transaction. Unless you opened one explicitly, each `SaveChanges` commits independently as soon as it returns."
+              },
+              {
+                "id": "neither",
+                "textMarkdown": "Neither is applied — EF Core defers all writes until the request completes.",
+                "correct": false,
+                "explanationMarkdown": "There is no deferral to the end of a request. `SaveChanges` writes and commits at the point it is called."
+              },
+              {
+                "id": "ledger-only",
+                "textMarkdown": "The ledger entry is written and the invoice update is rolled back.",
+                "correct": false,
+                "explanationMarkdown": "The order is reversed here: the invoice update is the one that succeeded, and the ledger insert is the one that threw."
+              }
+            ]
+          },
+          "explanationMarkdown": "Counting `SaveChanges` calls is the fastest way to find partial writes in unfamiliar code."
+        },
+        {
+          "id": "v3-a07-i2",
+          "objectiveIds": ["efcore.concurrency-tokens"],
+          "critical": true,
+          "promptMarkdown": "Two requests read the same row, both modify it, and both save. No concurrency token is configured. What happens?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "second-wins-silently",
+                "textMarkdown": "Both saves succeed and the second overwrites the first, with no error anywhere.",
+                "correct": true,
+                "explanationMarkdown": "Correct — the lost update. Each UPDATE matches the row by id, that row exists, so each is a successful statement."
+              },
+              {
+                "id": "deadlock",
+                "textMarkdown": "The database detects the conflict and one request fails with a deadlock.",
+                "correct": false,
+                "explanationMarkdown": "Deadlocks come from transactions waiting on each other's locks. These two transactions do not overlap in time and never contend for a lock."
+              },
+              {
+                "id": "exception",
+                "textMarkdown": "The second save raises `DbUpdateConcurrencyException`.",
+                "correct": false,
+                "explanationMarkdown": "That requires a token in the WHERE clause so the update affects zero rows. With no token there is nothing to detect the conflict with."
+              },
+              {
+                "id": "merge",
+                "textMarkdown": "EF Core merges the two sets of changes, since it tracks which properties each request modified.",
+                "correct": false,
+                "explanationMarkdown": "Change tracking is per-context and per-request; neither context knows the other exists. Nothing merges across requests."
+              }
+            ]
+          },
+          "explanationMarkdown": "The defining feature of a lost update is that nothing goes wrong technically. Only a token turns it into an event you can respond to."
+        },
+        {
+          "id": "v3-a07-i3",
+          "objectiveIds": ["efcore.indexes"],
+          "critical": false,
+          "promptMarkdown": "Which query can use an index declared as `HasIndex(o => new { o.CustomerId, o.PlacedAt })`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "customer-then-date",
+                "textMarkdown": "`Where(o => o.CustomerId == id).OrderByDescending(o => o.PlacedAt)`",
+                "correct": true,
+                "explanationMarkdown": "Correct. It constrains the leading column and then uses the second for ordering — exactly the shape a composite index serves best."
+              },
+              {
+                "id": "date-only",
+                "textMarkdown": "`Where(o => o.PlacedAt > cutoff)`",
+                "correct": false,
+                "explanationMarkdown": "The index is sorted by `CustomerId` first, so rows for a given date are scattered throughout it. Without a constraint on the leading column there is no way in."
+              },
+              {
+                "id": "lowered-customer",
+                "textMarkdown": "`Where(o => o.CustomerId.ToString().ToLower() == key)`",
+                "correct": false,
+                "explanationMarkdown": "Transforming the column means the filter no longer compares the stored value, so the index cannot be searched however well it matches on paper."
+              },
+              {
+                "id": "status",
+                "textMarkdown": "`Where(o => o.Status == \"open\")`",
+                "correct": false,
+                "explanationMarkdown": "`Status` is not in this index at all. It would need its own index, if the filter is selective enough to be worth one."
+              }
+            ]
+          },
+          "explanationMarkdown": "Leading column first, and keep the column bare in the comparison — those two rules cover most index questions."
+        },
+        {
+          "id": "v3-a07-i4",
+          "objectiveIds": ["efcore.query-performance"],
+          "critical": true,
+          "promptMarkdown": "A report page issues 1 query for 200 orders and then 200 more, one per order, each taking 0.4ms. Total time is dominated by these 201 statements. What is the correct fix?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "loading-strategy",
+                "textMarkdown": "Change the loading strategy — `Include`, `AsSplitQuery`, or a projection — so the related data arrives in one or two statements.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The individual statements are already fast; the cost is their number, and only the loading strategy changes that."
+              },
+              {
+                "id": "index",
+                "textMarkdown": "Add an index on the foreign key the 200 statements filter by.",
+                "correct": false,
+                "explanationMarkdown": "At 0.4ms each they are almost certainly using an index already. Making 200 fast queries slightly faster does not address the fact that there are 200."
+              },
+              {
+                "id": "cache",
+                "textMarkdown": "Cache the report output so the queries run less often.",
+                "correct": false,
+                "explanationMarkdown": "Caching hides the cost rather than removing it, and introduces staleness. It is not unreasonable as a later addition, but the query pattern should be fixed first."
+              },
+              {
+                "id": "bigger-pool",
+                "textMarkdown": "Increase the connection pool so the 200 statements can run in parallel.",
+                "correct": false,
+                "explanationMarkdown": "They run sequentially on one context by design, and parallelising them would multiply database load to work around a pattern that should not exist."
+              }
+            ]
+          },
+          "explanationMarkdown": "Separate 'how expensive is one query' from 'how many queries'. This symptom is entirely the second."
+        },
+        {
+          "id": "v3-a07-i5",
+          "objectiveIds": ["efcore.concurrency-tokens", "efcore.transactions"],
+          "critical": false,
+          "promptMarkdown": "A developer adds `[ConcurrencyCheck] public Guid Version { get; set; } = Guid.NewGuid();` to an entity, but never changes `Version` when updating. What is the effect?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "never-fires",
+                "textMarkdown": "The token is included in the WHERE clause but never changes, so conflicts are still undetected.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The comparison always matches because the stored value never moves — the appearance of protection with none of the substance."
+              },
+              {
+                "id": "always-fires",
+                "textMarkdown": "Every update throws `DbUpdateConcurrencyException`, because the default initialiser generates a new Guid each time the entity is constructed.",
+                "correct": false,
+                "explanationMarkdown": "The initialiser runs when *new* instances are constructed in C#; entities loaded from the database get the stored value, so the comparison matches and the update succeeds."
+              },
+              {
+                "id": "auto",
+                "textMarkdown": "EF Core assigns a new value automatically, because that is what `[ConcurrencyCheck]` means.",
+                "correct": false,
+                "explanationMarkdown": "The attribute only says 'include this column in the WHERE clause'. Generating a new value is your job — or the database's, with a provider-managed token like `xmin`."
+              },
+              {
+                "id": "no-effect",
+                "textMarkdown": "No effect at all — the attribute is ignored without explicit `IsConcurrencyToken()` configuration.",
+                "correct": false,
+                "explanationMarkdown": "The attribute is honoured and does change the generated SQL. The problem is the value it compares, not whether it is applied."
+              }
+            ]
+          },
+          "explanationMarkdown": "A token that never changes is worse than no token, because it looks like the problem has been handled. Provider-managed tokens such as `xmin` avoid the whole class of mistake."
+        }
+      ]
+    }
+  ]
+}

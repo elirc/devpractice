@@ -1,0 +1,1502 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v2-ch19",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Frontend depth",
+      "conceptIds": [
+        "ui.complex-forms",
+        "ui.large-list-performance",
+        "ui.accessible-async",
+        "ui.optimistic-updates"
+      ],
+      "prerequisiteIds": [
+        "react.controlled-forms",
+        "react.derived-state"
+      ],
+      "bodyMarkdown": "V1's React chapters covered a form with three fields and a list with ten rows. Both stop behaving the way you expect at scale, and the ways they stop are specific rather than mysterious.\n\nA form with interdependent fields is not a bigger version of a form with independent ones: validity becomes a property of the whole, error timing starts to matter more than error text, and 'required' turns out to depend on what else was answered. A list of fifty thousand rows is not a longer version of a list of fifty: the cost moves from rendering to reconciling, and the fix is to stop rendering most of it.\n\nThe third strand is the one that gets dropped under deadline. An interface that updates asynchronously is silent to a screen reader unless someone decides what it should say, and an interface that shows a result before the server has confirmed it has taken on a debt it must be able to repay.\n\nEvery exercise here is a pure function over plain data, because the browser runner has no DOM. That constraint is less artificial than it sounds: the parts worth testing - which fields are in error, which rows are visible, what should be announced, what the list looks like after a failed update - are all decisions about data that React then renders.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v2-l19",
+        "v2-l20",
+        "v2-l21"
+      ],
+      "assessmentId": "v2-a19",
+      "objectiveIds": [
+        "ui.complex-forms",
+        "ui.large-list-performance",
+        "ui.accessible-async",
+        "ui.optimistic-updates"
+      ],
+      "missionIds": [],
+      "sortOrder": 18
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l19",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Forms whose fields depend on each other",
+      "conceptIds": [
+        "ui.complex-forms"
+      ],
+      "prerequisiteIds": [
+        "react.controlled-forms",
+        "react.validation"
+      ],
+      "bodyMarkdown": "A three-field form is a solved problem. The difficulty starts when the answer to one field changes what the others mean: choosing 'other' makes a free-text box required, choosing 'phone' makes a number required and an email address irrelevant, a start date constrains an end date.\n\n**Validity stops being per-field.** `required` is no longer a property of a field; it is a property of a field *given the current values*. The moment that is true, per-field validators that cannot see the rest of the form start producing wrong answers - an empty `phone` is perfectly valid until someone selects phone contact, and no amount of inspecting the phone field alone will reveal that.\n\nThe practical consequence is to validate the **whole form as one function of all values**, returning the set of fields currently in error. It is easier to test - it is a pure function from values to errors - and it makes cross-field rules expressible instead of awkward.\n\n**When to show an error is a separate decision from whether one exists.** Validating on every keystroke means the user is told their email address is invalid after typing one character, which is both true and useless. The convention that works is: compute validity continuously, reveal it per field once that field has been *touched* (blurred), and reveal everything on submit. Same errors, different disclosure - and separating the two is what stops the code becoming a tangle.\n\n**A hidden field must not hold a live error.** When selecting email contact hides the phone field, an error attached to `phone` will silently block submission with no visible explanation. Either clear values that have become irrelevant, or exclude hidden fields from validity - and be deliberate, because the alternative is a submit button that does nothing and says nothing.\n\n**Submission is a state machine, not a boolean.** `idle`, `submitting`, `succeeded`, `failed` - with the button disabled while submitting, because a double submission is a duplicate record. The failure path matters most: keep what the user typed, say what went wrong, and let them retry without re-entering anything.",
+      "chapterId": "v2-ch19",
+      "sortOrder": 0,
+      "objectives": [
+        "Express validity as one pure function of all form values, so cross-field rules are stateable.",
+        "Separate the existence of an error from the decision to reveal it.",
+        "Explain why a hidden field holding an error blocks submission invisibly."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "Ashgrove's escalation form, with rules that depend on each other.\n\n```js\n// Per-field validation cannot express this rule at all.\nfunction validatePhone(phone) {\n  return phone ? null : 'Phone is required';   // wrong whenever contact is email\n}\n```\n\nThe rule is not 'phone is required'. It is 'phone is required *when contact method is phone*', and a validator that receives only the phone value has been handed too little information to decide.\n\n```js\n// Validity as one function of everything.\nfunction errorsFor(values) {\n  const errors = {};\n  if (!values.reason) errors.reason = 'Choose a reason';\n  if (values.reason === 'other' && values.detail.trim().length < 10) {\n    errors.detail = 'Describe the problem in a little more detail';\n  }\n  if (values.contact === 'phone' && !values.phone) {\n    errors.phone = 'Phone number is required for a phone callback';\n  }\n  return errors;\n}\n```\n\nOne function, all the rules, no hidden state - and testable without rendering anything, which is why this is the shape the exercises use.\n\nDisclosure is layered on top rather than mixed in:\n\n```js\nconst errors = errorsFor(values);\nconst shown = submitted ? errors : pick(errors, touched);\nconst canSubmit = Object.keys(errors).length === 0 && status !== 'submitting';\n```\n\nNote that `canSubmit` consults `errors`, not `shown`. Gating submission on the errors the user happens to have seen would let an untouched invalid field through - and gating disclosure on submission alone would ambush someone with six red messages the first time they click.\n\nThe trap this arrangement still has: if selecting email contact hides the phone field, `errors.phone` can persist while nothing on screen mentions it. Submission is then blocked by an error the user cannot see or fix. Clearing irrelevant values when the branch changes is the usual fix, and it has to be deliberate.",
+      "commonMistakes": [
+        "Validating each field in isolation, which cannot express a rule that depends on another field.",
+        "Validating on every keystroke, so an error appears after the first character of a correct entry.",
+        "Gating the submit button on the errors the user has seen rather than on all errors, letting an untouched invalid field through.",
+        "Leaving an error attached to a field that conditional logic has hidden, which blocks submission with nothing visible to fix.",
+        "Treating submission as a boolean, so a slow request can be submitted twice and create a duplicate record.",
+        "Clearing the form on a failed submission, forcing the user to retype everything they just lost."
+      ],
+      "summaryMarkdown": "Compute validity as one pure function of all values so cross-field rules can be stated at all. Decide separately when to reveal each error - touched fields, plus everything on submit - while gating submission on the full error set. Watch for errors stranded on hidden fields, and model submission as a state machine that preserves input when it fails.",
+      "exerciseIds": [
+        "v2-e19-01",
+        "v2-e19-02",
+        "v2-e19-03"
+      ],
+      "reviewCardIds": [
+        "v2-c19-01",
+        "v2-c19-02"
+      ],
+      "references": [
+        {
+          "label": "MDN: Client-side form validation",
+          "url": "https://developer.mozilla.org/en-US/docs/Learn/Forms/Form_validation"
+        },
+        {
+          "label": "WAI: Form instructions and error messages",
+          "url": "https://www.w3.org/WAI/tutorials/forms/notifications/"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e19-01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Validate a form whose rules depend on each other",
+      "conceptIds": [
+        "ui.complex-forms"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Every rule in one function, because none of them can be decided alone.",
+      "lessonId": "v2-l19",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 18,
+      "promptMarkdown": "Implement `escalationErrors(values)` for Ashgrove's escalation form. Return an array of the field names currently in error, sorted alphabetically.\n\n`values` has `reason`, `detail`, `contact`, `phone` and `dueDate`, all strings.\n\nThe rules:\n\n- `reason` - in error when it is empty.\n- `detail` - in error only when `reason` is `'other'` and `detail`, once trimmed, is shorter than 10 characters.\n- `contact` - in error unless it is exactly `'email'` or `'phone'`.\n- `phone` - in error only when `contact` is `'phone'` and `phone`, once trimmed, is empty. When `contact` is `'email'` the phone field is hidden, so it must **never** be reported, whatever it contains.\n- `dueDate` - in error when empty, or when it is earlier than `'2026-01-01'`. Dates are ISO `YYYY-MM-DD` strings and compare correctly with `<`.\n\nReturn an empty array when the form is valid. Do not modify the input.",
+      "hints": [
+        "Decide each rule against the whole `values` object rather than against a single field - two of these rules cannot be evaluated from their own field alone.",
+        "For `detail` and `phone`, the condition has two parts joined by `and`: the branch that makes the field relevant, and the field's own emptiness. Getting the branch part right is what keeps a hidden field silent.",
+        "Trim before measuring: a field containing only spaces is empty for validation purposes, and `'   '.length` is 3."
+      ],
+      "solution": {
+        "code": "function escalationErrors(values) {\n  const errors = [];\n\n  if (values.reason.trim() === '') {\n    errors.push('reason');\n  }\n  if (values.reason === 'other' && values.detail.trim().length < 10) {\n    errors.push('detail');\n  }\n  if (values.contact !== 'email' && values.contact !== 'phone') {\n    errors.push('contact');\n  }\n  if (values.contact === 'phone' && values.phone.trim() === '') {\n    errors.push('phone');\n  }\n  if (values.dueDate === '' || values.dueDate < '2026-01-01') {\n    errors.push('dueDate');\n  }\n\n  errors.sort();\n  return errors;\n}",
+        "explanationMarkdown": "Two of these five rules are impossible to evaluate from their own field. `detail` is required only when `reason` is `'other'`; `phone` is required only when `contact` is `'phone'`. A per-field validator receiving just `detail` has been given strictly too little information, which is the structural reason cross-field forms want one function over all values.\n\nThe `phone` rule carries the lesson's trap. Because the field is hidden when contact is email, reporting an error for it would block submission with nothing on screen to fix. Leading with the branch condition - `contact === 'phone' && ...` - means a stale phone value left over from an earlier selection is simply not consulted.\n\nTrimming before measuring treats a field of spaces as empty, which is what a user means by empty even though `'   '` is truthy and has length 3. And ISO dates compare correctly with `<` because `YYYY-MM-DD` sorts lexicographically in the same order it sorts chronologically - true for this format specifically, and not something to assume of date strings in general."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "escalationErrors",
+        "starterCode": "function escalationErrors(values) {\n  // Each field judged alone, so the conditional rules are wrong.\n  const errors = [];\n  if (values.reason === '') errors.push('reason');\n  if (values.detail === '') errors.push('detail');\n  if (values.phone === '') errors.push('phone');\n  return errors;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "valid-email-form",
+            "args": [
+              {
+                "reason": "billing",
+                "detail": "",
+                "contact": "email",
+                "phone": "",
+                "dueDate": "2026-04-01"
+              }
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "valid-phone-form",
+            "args": [
+              {
+                "reason": "billing",
+                "detail": "",
+                "contact": "phone",
+                "phone": "020 7000 0000",
+                "dueDate": "2026-04-01"
+              }
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "hidden-phone-is-never-reported",
+            "args": [
+              {
+                "reason": "billing",
+                "detail": "",
+                "contact": "email",
+                "phone": "   ",
+                "dueDate": "2026-04-01"
+              }
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "phone-required-when-selected",
+            "args": [
+              {
+                "reason": "billing",
+                "detail": "",
+                "contact": "phone",
+                "phone": "  ",
+                "dueDate": "2026-04-01"
+              }
+            ],
+            "expected": [
+              "phone"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "detail-required-only-for-other",
+            "args": [
+              {
+                "reason": "other",
+                "detail": "too short",
+                "contact": "email",
+                "phone": "",
+                "dueDate": "2026-04-01"
+              }
+            ],
+            "expected": [
+              "detail"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "detail-ignored-for-known-reason",
+            "args": [
+              {
+                "reason": "billing",
+                "detail": "",
+                "contact": "email",
+                "phone": "",
+                "dueDate": "2026-04-01"
+              }
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "unknown-contact-method",
+            "args": [
+              {
+                "reason": "billing",
+                "detail": "",
+                "contact": "pigeon",
+                "phone": "",
+                "dueDate": "2026-04-01"
+              }
+            ],
+            "expected": [
+              "contact"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "past-due-date",
+            "args": [
+              {
+                "reason": "billing",
+                "detail": "",
+                "contact": "email",
+                "phone": "",
+                "dueDate": "2025-12-31"
+              }
+            ],
+            "expected": [
+              "dueDate"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "several-errors-sorted",
+            "args": [
+              {
+                "reason": "",
+                "detail": "",
+                "contact": "pigeon",
+                "phone": "",
+                "dueDate": ""
+              }
+            ],
+            "expected": [
+              "contact",
+              "dueDate",
+              "reason"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "detail-of-exactly-ten-is-fine",
+            "args": [
+              {
+                "reason": "other",
+                "detail": "  abcdefghij  ",
+                "contact": "email",
+                "phone": "",
+                "dueDate": "2026-04-01"
+              }
+            ],
+            "expected": [],
+            "hidden": true
+          },
+          {
+            "id": "boundary-date-is-allowed",
+            "args": [
+              {
+                "reason": "billing",
+                "detail": "",
+                "contact": "email",
+                "phone": "",
+                "dueDate": "2026-01-01"
+              }
+            ],
+            "expected": [],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ui.complex-forms"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e19-02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the submit button that does nothing",
+      "conceptIds": [
+        "ui.complex-forms"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Valid on screen, refused on click, and no message anywhere.",
+      "lessonId": "v2-l19",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "Ashgrove support report that the escalation form sometimes cannot be submitted. The button is enabled, clicking it does nothing visible, and no error is shown.\n\n```jsx\nconst errors = escalationErrors(values);\nconst shown = pick(errors, touched);\n\n<button\n  disabled={shown.length > 0 || status === 'submitting'}\n  onClick={() => {\n    if (errors.length > 0) return;\n    submit(values);\n  }}\n>Escalate</button>\n```\n\n`escalationErrors` is correct. Reports cluster on users who selected a reason of 'other'. What is happening?",
+      "hints": [
+        "The button's enabled state and the click handler consult two different things. Write down which errors each one sees.",
+        "`shown` contains only errors for fields the user has touched. `errors` contains all of them, including for fields never focused.",
+        "A user who selects 'other' but never focuses the detail field has an error in `errors` and nothing in `shown`."
+      ],
+      "solution": {
+        "modelAnswer": "The button is enabled from touched errors while the handler returns on all errors, so an untouched invalid field silently blocks submission.",
+        "explanationMarkdown": "The two gates disagree. `disabled` is computed from `shown` - errors for fields the user has touched - while the click handler returns early on `errors`, the full set. A user who selects 'other' and never focuses the detail field produces an error that is in `errors` and absent from `shown`, so the button looks available, the click is swallowed, and nothing explains why.\n\nThis is the disclosure/validity split done halfway. The correct arrangement uses the full error set for both gating and submission, and uses `touched` only to decide which messages are visible. Then the button is disabled and the reason is on screen once the field is touched.\n\nThe better fix goes further: reveal every error on submit. Clicking a disabled-looking button should mark all fields touched so the form explains itself, rather than leaving the user to guess which field is unhappy. A silent refusal is the worst of the available behaviours because it gives the user nothing at all to act on."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "two-gates",
+            "textMarkdown": "The button is disabled from `shown` (touched fields only) while the handler returns on `errors` (all fields), so an error on an untouched field blocks submission invisibly.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The two gates consult different sets, and the gap between them is exactly a field the user has never focused."
+          },
+          {
+            "id": "stale-values",
+            "textMarkdown": "`values` is stale inside the handler because of a closure, so it submits an older version of the form.",
+            "correct": false,
+            "explanationMarkdown": "Nothing here suggests a stale closure, and a stale value would produce a wrong submission rather than no submission at all."
+          },
+          {
+            "id": "async",
+            "textMarkdown": "`submit` is asynchronous and the missing `await` swallows the error.",
+            "correct": false,
+            "explanationMarkdown": "The handler returns before calling `submit`, so `submit` never runs in the reported cases. The absence of an await is not what stops it."
+          },
+          {
+            "id": "validator",
+            "textMarkdown": "`escalationErrors` is reporting an error for the hidden phone field.",
+            "correct": false,
+            "explanationMarkdown": "The exercise states the validator is correct, and the reports cluster on the \"other\" reason rather than on the contact method - which points at `detail`, not `phone`."
+          }
+        ]
+      },
+      "primaryConceptId": "ui.complex-forms"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e19-03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Specify the disclosure and failure behaviour of a form",
+      "conceptIds": [
+        "ui.complex-forms"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "When to show an error, and what to do with the answer that failed to save.",
+      "lessonId": "v2-l19",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "You are specifying Ashgrove's escalation form for a developer who will implement it.\n\nWrite the specification for two things only: **when each error becomes visible**, and **what happens when submission fails**.\n\nCover the first keystroke, blur, the submit attempt, and a failed request. State what happens to the values the user typed, and say what the interface communicates to someone using a screen reader. Justify each choice in terms of what the user can act on.",
+      "hints": [
+        "Work through one user's session in order and say what is on screen at each moment: typing the first character, leaving the field, clicking submit, receiving a 500.",
+        "Errors existing and errors being shown are separate. Decide the reveal rule per field, and then decide what submit does to that rule.",
+        "For the failure path, the question that matters is what the user has to do next. Anything that makes them retype what they already entered is a defect, not an inconvenience."
+      ],
+      "solution": {
+        "modelAnswer": "**Disclosure.** Validity is computed continuously from all values, but a field's message is hidden until that field has been blurred at least once. Typing the first character of an email address must not produce 'invalid email' - the entry is incomplete, not wrong, and an error the user is already in the middle of fixing is noise. Once a field has been blurred, its message appears and updates live as they correct it, because at that point the feedback is about something they have finished.\n\nOn a submit attempt, every field is marked touched and every error becomes visible at once, and focus moves to the first field in error. The submit control is gated on the full error set, never on the visible subset - otherwise an untouched invalid field blocks submission with nothing on screen to explain it.\n\nA field hidden by conditional logic never shows or contributes an error, so selecting email contact cannot leave an invisible phone error blocking the form.\n\n**Failure.** Submission moves through idle, submitting, succeeded and failed. While submitting, the control is disabled to prevent a duplicate escalation, and the state is announced.\n\nOn failure, every value the user entered is preserved without exception - retyping a long description because a request timed out is the worst outcome available. The error appears in a `role=\"alert\"` region so it is announced without moving focus, distinguishes 'we could not reach the server, try again' from 'the server rejected this, here is what to change', and offers a retry that resubmits the existing values.\n\n**Screen reader.** Each message is associated with its input via `aria-describedby` and the field is marked `aria-invalid`, so the error is read when the field receives focus rather than existing only as red text nearby. Status changes - submitting, succeeded, failed - are announced from a polite live region, except the failure which uses `alert` because it requires action. Colour is never the only signal: every error has text and an icon.",
+        "explanationMarkdown": "The strongest answers treat disclosure as a rule with three distinct moments - typing, blur, submit - rather than a single 'show errors' switch, and explicitly gate the submit control on all errors while showing only some.\n\nThe failure half is where specifications usually thin out. Preserving input is the non-negotiable part; distinguishing a transport failure from a rejection is what tells the user whether to retry or to change something, and it is the difference between a useful message and 'Something went wrong'.\n\nAssociating messages with inputs via `aria-describedby` rather than merely placing them nearby is the accessibility detail that separates a considered answer from one that mentions screen readers in passing."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Specifies distinct behaviour at the first keystroke, at blur, and on submit, rather than a single reveal rule.",
+          "Gates the submit control on the complete error set while showing only touched errors, and explains why the two must not be the same set.",
+          "States that a conditionally hidden field neither shows nor contributes an error.",
+          "Guarantees that all entered values survive a failed submission, and distinguishes a transport failure from a server rejection.",
+          "Associates each message with its field for assistive technology and announces status changes, rather than relying on nearby red text."
+        ],
+        "modelAnswerMarkdown": "See the model answer: continuous validity, per-field reveal on blur, reveal everything plus move focus on submit, submission gated on all errors, and a failure path that preserves every value and announces an actionable message."
+      },
+      "primaryConceptId": "ui.complex-forms"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c19-01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why per-field validation runs out",
+      "conceptIds": [
+        "ui.complex-forms"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the structural reason cross-field rules need a different shape.",
+      "lessonId": "v2-l19",
+      "type": "recall",
+      "promptMarkdown": "Why can a validator that receives only one field value not express the rule \"phone is required when the contact method is phone\"?",
+      "answerMarkdown": "Because the rule is a function of two values and the validator has been given one. Whether an empty phone field is an error depends entirely on the contact method, which the phone validator cannot see. Computing errors from the whole values object makes the rule stateable, and has the side benefit of being a pure function that can be tested without rendering the form.",
+      "explanationMarkdown": "The tell that a form has outgrown per-field validation is a validator that needs a second argument, or a shared mutable object smuggled in so one field can consult another. Both are signs the rule belongs at the form level.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ui.complex-forms"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c19-02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer: the error nobody can see",
+      "conceptIds": [
+        "ui.complex-forms"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the hidden-field trap to a new conditional form.",
+      "lessonId": "v2-l19",
+      "type": "transfer",
+      "promptMarkdown": "A form hides the 'company name' field unless the account type is 'business'. A user selects 'business', leaves company name empty, then switches back to 'personal' and clicks submit. Nothing happens. What is the likely cause and the fix?",
+      "answerMarkdown": "The error for `companyName` was recorded while the field was visible and is still in the error set after the field was hidden, so submission is blocked by an error with nothing on screen to fix. The fix is to make the rule conditional on the branch - company name is only required while the account type is 'business' - and to clear values that have become irrelevant when the branch changes.",
+      "explanationMarkdown": "This is the same shape as the phone-and-email case and is worth recognising by its symptom: a submit control that refuses without explanation. Whenever conditional visibility exists, ask what happens to an error attached to something the user can no longer see.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ui.complex-forms"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l20",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Lists that stay fast when they get long",
+      "conceptIds": [
+        "ui.large-list-performance"
+      ],
+      "prerequisiteIds": [
+        "react.keys",
+        "react.state-updates"
+      ],
+      "bodyMarkdown": "A list of fifty rows is free. A list of fifty thousand is a different problem, and the difference is not linear, because several costs grow at once: creating the elements, reconciling them against the previous tree, and the browser laying out and painting the resulting nodes.\n\n**The fix that actually works is to render fewer rows.** Everything else is a refinement. If the viewport shows twenty rows, render roughly twenty - plus a small overscan above and below so scrolling does not reveal blank space - and position them as though the rest existed. That is windowing, and it converts a cost proportional to the data into a cost proportional to the screen, which is the only version that stays constant as the dataset grows.\n\nThe arithmetic is worth being able to do without a library. With fixed-height rows: the first visible row is `floor(scrollTop / rowHeight)`; the last is `ceil((scrollTop + viewportHeight) / rowHeight)`; extend by the overscan and clamp to the bounds of the data. Everything else a windowing library does is bookkeeping around that.\n\n**Keys decide whether reconciliation is cheap or wrong.** A key identifies a row across renders. Using the array index means that inserting at the top renumbers everything: React is told row 0 changed from 'Ana' to 'Ben' rather than that a row was inserted, so it updates every row instead of adding one - and any state living in those rows, such as a half-typed input or a focus position, follows the index rather than the record. That is the part that produces user-visible wrongness rather than mere slowness.\n\n**Then stop re-rendering rows that did not change.** A new inline callback per row on every parent render gives each row a new prop, so memoisation cannot help. Stable identities - hoisted handlers, or a handler that reads the row id from the event - are what make `memo` do anything at all.\n\n**Measure before optimising, and measure the right thing.** 'The list is slow' has several possible causes: too many nodes, expensive per-row work, an unnecessary re-render of the whole list on every keystroke in a filter box, or a layout thrash caused by reading geometry in a loop. They have different fixes, and windowing only helps the first.",
+      "chapterId": "v2-ch19",
+      "sortOrder": 1,
+      "objectives": [
+        "Compute the visible slice of a long list from scroll position and row height.",
+        "Explain how an index key turns an insertion into a full-list update and moves row state to the wrong record.",
+        "Distinguish the causes of a slow list, and say which one windowing addresses."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "The windowing arithmetic, and the key mistake that survives it.\n\n```js\n// 50,000 rows, all of them created and reconciled on every render.\n{tickets.map((t) => <Row key={t.id} ticket={t} />)}\n```\n\n```js\n// Render the visible slice, and reserve the space the rest would occupy.\nconst first = Math.floor(scrollTop / ROW_HEIGHT);\nconst last = Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT);\nconst start = Math.max(0, first - OVERSCAN);\nconst end = Math.min(tickets.length, last + OVERSCAN);\n\n<div style={{ height: tickets.length * ROW_HEIGHT }}>\n  <div style={{ transform: `translateY(${start * ROW_HEIGHT}px)` }}>\n    {tickets.slice(start, end).map((t) => <Row key={t.id} ticket={t} />)}\n  </div>\n</div>\n```\n\nThe outer height keeps the scrollbar honest; the translate puts the rendered slice where it belongs. Around twenty-five rows exist at any moment regardless of whether the dataset holds fifty or fifty thousand.\n\nThe clamps are not decoration. Without `Math.max(0, ...)` a scroll position of zero with an overscan of five asks for row -5; without `Math.min(total, ...)` the end of the list requests rows past the data and renders blanks.\n\n```jsx\n// The key that makes an insertion look like an edit.\n{tickets.map((t, i) => <Row key={i} ticket={t} />)}\n```\n\nInsert a ticket at the top and every subsequent index shifts. React compares old key 0 with new key 0, sees different content, and updates - then does the same for all the rest. Beyond the wasted work, any state inside a row stays with its index: a half-typed reply moves to the ticket above, which reads as data corruption to whoever is looking at it.",
+      "commonMistakes": [
+        "Rendering every row of a large list and then trying to make each row cheaper, rather than rendering fewer rows.",
+        "Using the array index as a key, so an insertion at the top updates every row and leaves row state attached to the wrong record.",
+        "Forgetting to clamp the computed window, so the first screen asks for negative indexes and the last renders blank rows past the end.",
+        "Omitting overscan, so fast scrolling reveals empty space before the next rows are rendered.",
+        "Creating a new inline callback per row on every render, which changes a prop every time and defeats memoisation.",
+        "Re-rendering the whole list on every keystroke in a filter input instead of debouncing or isolating the input state.",
+        "Assuming windowing fixes any slow list, when the cause may be per-row work or an unrelated re-render."
+      ],
+      "summaryMarkdown": "Render a slice sized to the viewport rather than to the data: first visible row from `floor(scrollTop / rowHeight)`, last from `ceil((scrollTop + viewportHeight) / rowHeight)`, extended by overscan and clamped to the data. Key rows by stable identity so an insertion is an insertion, not an edit of everything below it. Keep prop identities stable so memoisation can work, and diagnose which of the several possible causes of slowness you actually have.",
+      "exerciseIds": [
+        "v2-e19-04",
+        "v2-e19-05",
+        "v2-e19-06"
+      ],
+      "reviewCardIds": [
+        "v2-c19-03",
+        "v2-c19-04"
+      ],
+      "references": [
+        {
+          "label": "React: Rendering lists and keys",
+          "url": "https://react.dev/learn/rendering-lists"
+        },
+        {
+          "label": "MDN: Element.scrollTop",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollTop"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e19-04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Compute the visible slice of a long list",
+      "conceptIds": [
+        "ui.large-list-performance"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The arithmetic a windowing library performs, clamped at both ends.",
+      "lessonId": "v2-l20",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `visibleRange(scrollTop, rowHeight, viewportHeight, total, overscan)`.\n\nReturn `{ start, end }`, where `start` is the index of the first row to render and `end` is **exclusive** - the slice is `rows.slice(start, end)`.\n\n- The first row intersecting the viewport is `floor(scrollTop / rowHeight)`.\n- The last is `ceil((scrollTop + viewportHeight) / rowHeight)`.\n- Extend by `overscan` rows in both directions.\n- Clamp `start` to at least `0` and `end` to at most `total`.\n- When `total` is `0`, return `{ start: 0, end: 0 }`.\n\nAll arguments are non-negative numbers, and `rowHeight` is greater than zero.",
+      "hints": [
+        "Compute the unclamped first and last rows from the arithmetic given, then apply the overscan, then clamp. Doing it in that order keeps each step simple.",
+        "`floor` for the first row and `ceil` for the last are not interchangeable: the first partially visible row has already started above the fold, while the last needs rounding up to cover the remainder of the viewport.",
+        "Clamp with `Math.max(0, ...)` and `Math.min(total, ...)`. Without them the top of the list asks for negative indexes and the bottom asks for rows that do not exist."
+      ],
+      "solution": {
+        "code": "function visibleRange(scrollTop, rowHeight, viewportHeight, total, overscan) {\n  if (total === 0) {\n    return { start: 0, end: 0 };\n  }\n  const firstVisible = Math.floor(scrollTop / rowHeight);\n  const lastVisible = Math.ceil((scrollTop + viewportHeight) / rowHeight);\n  const start = Math.max(0, firstVisible - overscan);\n  const end = Math.min(total, lastVisible + overscan);\n  return { start: start, end: end };\n}",
+        "explanationMarkdown": "The two rounding choices are the substance. `floor` on the first row includes the row that is partially scrolled off the top - it is still on screen, so it must be rendered. `ceil` on the last row covers the remainder of the viewport when it does not divide evenly into rows; using `floor` there would leave a partially visible strip at the bottom un-rendered, which shows as a flickering gap while scrolling.\n\nThe clamps handle the two ends, and each fixes a real symptom. At `scrollTop` of 0 with an overscan of 5, `firstVisible - overscan` is `-5`; passing that to `slice` would quietly reinterpret it as an offset from the end of the array, rendering the wrong rows entirely. At the bottom, an unclamped `end` asks for indexes past the data and produces blank rows.\n\nReturning an exclusive `end` matches `slice`, which is what the caller uses. Choosing an inclusive end is defensible but then every caller must remember to add one, and that is the kind of off-by-one that survives review."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "visibleRange",
+        "starterCode": "function visibleRange(scrollTop, rowHeight, viewportHeight, total, overscan) {\n  // No overscan and no clamping.\n  const start = Math.floor(scrollTop / rowHeight);\n  const end = Math.floor((scrollTop + viewportHeight) / rowHeight);\n  return { start: start, end: end };\n}",
+        "assertInputUnchanged": false,
+        "cases": [
+          {
+            "id": "top-of-list-clamps-start",
+            "args": [
+              0,
+              40,
+              800,
+              5000,
+              5
+            ],
+            "expected": {
+              "start": 0,
+              "end": 25
+            },
+            "hidden": false
+          },
+          {
+            "id": "scrolled-into-the-middle",
+            "args": [
+              4000,
+              40,
+              800,
+              5000,
+              5
+            ],
+            "expected": {
+              "start": 95,
+              "end": 125
+            },
+            "hidden": false
+          },
+          {
+            "id": "bottom-clamps-end",
+            "args": [
+              199200,
+              40,
+              800,
+              5000,
+              5
+            ],
+            "expected": {
+              "start": 4975,
+              "end": 5000
+            },
+            "hidden": false
+          },
+          {
+            "id": "no-overscan",
+            "args": [
+              4000,
+              40,
+              800,
+              5000,
+              0
+            ],
+            "expected": {
+              "start": 100,
+              "end": 120
+            },
+            "hidden": false
+          },
+          {
+            "id": "partial-row-is-included",
+            "args": [
+              10,
+              40,
+              800,
+              5000,
+              0
+            ],
+            "expected": {
+              "start": 0,
+              "end": 21
+            },
+            "hidden": false
+          },
+          {
+            "id": "viewport-not-divisible-by-row",
+            "args": [
+              0,
+              40,
+              810,
+              5000,
+              0
+            ],
+            "expected": {
+              "start": 0,
+              "end": 21
+            },
+            "hidden": false
+          },
+          {
+            "id": "empty-list",
+            "args": [
+              0,
+              40,
+              800,
+              0,
+              5
+            ],
+            "expected": {
+              "start": 0,
+              "end": 0
+            },
+            "hidden": false
+          },
+          {
+            "id": "list-shorter-than-viewport",
+            "args": [
+              0,
+              40,
+              800,
+              3,
+              5
+            ],
+            "expected": {
+              "start": 0,
+              "end": 3
+            },
+            "hidden": false
+          },
+          {
+            "id": "exact-fit-no-partial-row",
+            "args": [
+              0,
+              40,
+              800,
+              5000,
+              0
+            ],
+            "expected": {
+              "start": 0,
+              "end": 20
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ui.large-list-performance"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e19-05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the list whose rows lose their state",
+      "conceptIds": [
+        "ui.large-list-performance"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Scrolling is smooth. The half-written reply moves to the wrong ticket.",
+      "lessonId": "v2-l20",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "Ashgrove's ticket queue renders a windowed list. Agents report that when a new ticket arrives at the top, a reply they were part-way through typing appears on a different ticket.\n\n```jsx\nconst { start, end } = visibleRange(scrollTop, ROW_HEIGHT, height, tickets.length, 5);\n\n{tickets.slice(start, end).map((ticket, i) => (\n  <TicketRow\n    key={i}\n    ticket={ticket}\n    onSelect={() => select(ticket.id)}\n  />\n))}\n```\n\n`TicketRow` keeps the in-progress reply in its own `useState`. Select every accurate statement.",
+      "hints": [
+        "Ask what the key identifies across renders, and what happens to it when a row is inserted above the visible slice.",
+        "`i` is the index within the sliced array, so it restarts at 0 for whatever is currently at the top of the window - it is not even stable against scrolling, let alone insertion.",
+        "React keeps component state keyed by position and key. If the key still matches but the ticket beneath it changed, the state stays and the data moves."
+      ],
+      "solution": {
+        "modelAnswer": "The index key is unstable, so row state stays with the position while the ticket beneath it changes.",
+        "explanationMarkdown": "The key is the index **within the slice**, which makes it doubly unstable: it changes when a ticket is inserted above, and it also changes as the user scrolls, because the slice starts at a different ticket. React uses the key to decide which previous component instance corresponds to which new element, so a matching key means 'same row, possibly new props' - and the local `useState` holding the draft reply stays exactly where it is while a different ticket slides underneath it.\n\n`key={ticket.id}` fixes both symptoms at once. An insertion becomes an insertion: React matches the existing keys, mounts one new row, and every other row keeps its identity and its state. It is also the cheaper reconciliation, though the correctness argument is the one that matters here.\n\nThe inline `onSelect` is a genuine but separate issue: it creates a new function per row on every render, so `memo` on `TicketRow` cannot prevent re-renders. That costs performance and does not move anyone's draft."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "index-key",
+            "textMarkdown": "Using the slice index as a key means React matches rows by position, so an insertion leaves each row component - and its local draft state - attached to a different ticket.",
+            "correct": true,
+            "explanationMarkdown": "Correct, and this is the reported symptom: the state stays with the position while the data moves."
+          },
+          {
+            "id": "slice-index",
+            "textMarkdown": "The index is taken from the sliced array rather than the full list, so it is not even stable while scrolling.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Slice-relative indexes restart at 0 for each window, which makes the key change on scroll as well as on insertion."
+          },
+          {
+            "id": "inline-callback",
+            "textMarkdown": "The inline `onSelect` gives every row a new prop identity on each render, which defeats memoisation of `TicketRow`.",
+            "correct": true,
+            "explanationMarkdown": "Correct, though this is a performance problem rather than the cause of the misplaced draft."
+          },
+          {
+            "id": "windowing",
+            "textMarkdown": "Windowing itself causes the lost state, so the list should render all rows.",
+            "correct": false,
+            "explanationMarkdown": "Windowing is not the cause; the key is. Rendering fifty thousand rows would hide this particular symptom while reintroducing the performance problem windowing solved."
+          }
+        ]
+      },
+      "primaryConceptId": "ui.large-list-performance"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e19-06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose the right fix for a slow list",
+      "conceptIds": [
+        "ui.large-list-performance"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Four plausible causes, one measurement, and only one fix that helps.",
+      "lessonId": "v2-l20",
+      "sortOrder": 2,
+      "type": "choice",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "A ticket list of 8,000 rows is slow. Profiling shows:\n\n- typing a single character in the filter box takes 900ms;\n- the profiler attributes almost all of it to rendering `TicketRow`, 8,000 times;\n- each individual `TicketRow` render is around 0.1ms;\n- scrolling, once typing stops, is smooth.\n\nWhich change addresses the measured problem most directly?",
+      "hints": [
+        "Read the measurement rather than the complaint. Which specific interaction is slow, and how many components does the profiler say are rendering during it?",
+        "0.1ms per row is not an expensive row. 8,000 of them in one keystroke is the number that matters.",
+        "Scrolling being smooth tells you something important about whether the number of rendered nodes is the bottleneck in the steady state."
+      ],
+      "solution": {
+        "modelAnswer": "Window the list so a keystroke re-renders about twenty-five rows instead of eight thousand.",
+        "explanationMarkdown": "The measurement points at one thing: 8,000 rows re-rendering per keystroke, at 0.1ms each, which is the 900ms. The individual row is already cheap, so optimising the row is optimising the wrong factor - halving 0.1ms still leaves 450ms.\n\nWindowing reduces the count from 8,000 to roughly the number on screen, which takes the keystroke to a few milliseconds. It attacks the term that is actually large.\n\nDebouncing the filter is worth doing and does not fix this: it makes the 900ms happen less often rather than making it shorter, and the first keystroke after a pause still blocks. Memoising rows does not help either, because the filter genuinely changes which rows exist. That scrolling is already smooth is the clue that the steady-state node count is tolerable and the problem is the re-render burst."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "window",
+            "textMarkdown": "Window the list so only the visible slice plus overscan renders, taking a keystroke from 8,000 row renders to about 25.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The profiler names the count as the problem, and windowing is the change that reduces the count."
+          },
+          {
+            "id": "memo-rows",
+            "textMarkdown": "Wrap `TicketRow` in `memo` so unchanged rows skip re-rendering.",
+            "correct": false,
+            "explanationMarkdown": "Filtering changes which rows are present, so memoisation has little to skip. It is worth doing for other reasons and will not move this measurement."
+          },
+          {
+            "id": "debounce",
+            "textMarkdown": "Debounce the filter input by 300ms so fewer renders happen while typing.",
+            "correct": false,
+            "explanationMarkdown": "This reduces how often the 900ms cost is paid without reducing the cost. The pause before results still feels slow and the first keystroke still blocks."
+          },
+          {
+            "id": "faster-row",
+            "textMarkdown": "Optimise `TicketRow` to render in 0.05ms instead of 0.1ms.",
+            "correct": false,
+            "explanationMarkdown": "Halving an already-small per-row cost leaves 450ms. When a measurement shows a large count multiplied by a small cost, the count is the term to attack."
+          }
+        ]
+      },
+      "primaryConceptId": "ui.large-list-performance"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c19-03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The windowing arithmetic",
+      "conceptIds": [
+        "ui.large-list-performance"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall how the visible slice is derived.",
+      "lessonId": "v2-l20",
+      "type": "recall",
+      "promptMarkdown": "Given `scrollTop`, `rowHeight` and `viewportHeight`, how do you compute the first and last visible rows, and why is one rounded down and the other up?",
+      "answerMarkdown": "First is `floor(scrollTop / rowHeight)`; last is `ceil((scrollTop + viewportHeight) / rowHeight)`. The first row is rounded down because a row partially scrolled off the top is still visible and must be rendered. The last is rounded up because the viewport rarely divides evenly into rows, and rounding down would leave the partially visible strip at the bottom empty. Both then extend by the overscan and clamp to 0 and the row count.",
+      "explanationMarkdown": "The clamps are the part most often omitted. Without them the top of the list computes a negative start, which `slice` reinterprets as an offset from the end, and the bottom renders blank rows past the data.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ui.large-list-performance"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c19-04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Debug: state attached to the wrong row",
+      "conceptIds": [
+        "ui.large-list-performance"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply key reasoning to a data-corruption symptom.",
+      "lessonId": "v2-l20",
+      "type": "debugging",
+      "promptMarkdown": "A user reports that a half-typed comment jumped to a different item after the list refreshed. What do you check first, and why does this symptom point there specifically?",
+      "answerMarkdown": "Check the list's `key`. A symptom where local row state stays put while the data underneath it changes is characteristic of keys based on array index: React matches components by key, so a matching key after an insertion means 'same row, new props', and the component keeps its state while receiving a different record. Switching to a stable identifier from the data fixes it.",
+      "explanationMarkdown": "This is worth recognising by symptom because it is usually reported as data corruption rather than as a rendering bug, and the report says nothing about performance even though the same mistake also causes unnecessary re-renders.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ui.large-list-performance"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l21",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Async that announces itself, and updates that might not stick",
+      "conceptIds": [
+        "ui.accessible-async",
+        "ui.optimistic-updates"
+      ],
+      "prerequisiteIds": [
+        "a11y.accessible-name",
+        "ui.stale-response"
+      ],
+      "bodyMarkdown": "Two things change when an interface updates without a page load. It becomes possible for a sighted user to see something a screen-reader user is never told about, and it becomes tempting to show a result before the server has agreed to it.\n\n**Announce state changes deliberately.** A spinner appearing and a table repopulating are visual events; neither moves focus, and neither is announced unless something says so. A live region - `aria-live=\"polite\"`, or `role=\"status\"` - reports changes to its content without stealing focus, which is what you want for 'Loading', '12 results' and 'Saved'. `role=\"alert\"` is assertive and interrupts, which is right for a failure needing action and wrong for everything routine.\n\nTwo rules make live regions work. The region must be **in the document before** the message appears - a region added at the same moment as its text is frequently not announced at all. And the message must be a **summary**: 'Showing 12 of 340 tickets' is useful, whereas announcing each row as it renders is unusable.\n\n**Optimistic updates are a loan.** Showing the new state immediately makes an interface feel instant, and it commits you to three things: rendering the change before confirmation, reverting exactly if the request fails, and telling the user that it reverted. The third is the one that gets skipped, which produces the worst version - a change the user believes they made, silently undone.\n\nOptimism is appropriate when the operation almost always succeeds, the change is easy to describe, and reverting is cheap and comprehensible: toggling a flag, reordering, marking as read. It is a poor fit when failure is likely, when the server assigns something you cannot predict, or when the consequence is significant - payments and deletions are better honest and slightly slower than instant and occasionally wrong.\n\n**The server stays authoritative.** When the response arrives it replaces the optimistic state, and any pending change for a record the server does not have is discarded rather than invented. A stale response must not overwrite a newer one, which is the same ordering problem V1 met with search results - the last response to arrive is not necessarily the one you asked for most recently.",
+      "chapterId": "v2-ch19",
+      "sortOrder": 2,
+      "objectives": [
+        "Choose between a polite live region and an alert, and place it so the message is announced.",
+        "Apply pending changes over authoritative server data without inventing records.",
+        "State when an optimistic update is inappropriate and what must happen when one fails."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "The announcement, and the reconciliation.\n\n```jsx\n// Not announced: the region and its content arrive together.\n{status === 'loading' && <div aria-live=\"polite\">Loading tickets</div>}\n```\n\nAssistive technology watches an existing region for changes. Inserting the region and its text in the same update frequently produces no announcement at all - the region was never there to be watched.\n\n```jsx\n// Announced: the region is always present; only its text changes.\n<div aria-live=\"polite\" role=\"status\">{announcement}</div>\n```\n\nwith the message chosen as a summary rather than a running commentary:\n\n```js\nfunction announcementFor(state) {\n  if (state.status === 'loading') return 'Loading tickets.';\n  if (state.status === 'error') return 'Could not load tickets.';\n  if (state.count === 0) return 'No tickets match your filters.';\n  return `${state.count} tickets.`;\n}\n```\n\nThen the optimistic half. The user marks a ticket resolved; the row updates immediately; the request is still in flight:\n\n```js\nfunction withPending(serverTickets, pending) {\n  return serverTickets.map((ticket) =>\n    pending[ticket.id] ? { ...ticket, status: pending[ticket.id] } : ticket,\n  );\n}\n```\n\nTwo properties are doing the work. The server list is the source of truth for **which records exist** - a pending change for a ticket the server does not return is dropped, not resurrected, because the alternative is inventing a row that someone else may have deleted. And the pending map is consulted per record, so an unrelated ticket updated by a colleague arrives normally instead of being overwritten by our optimistic view of the world.\n\nWhen the request fails, the entry is removed from `pending` - the row reverts by itself, because it was only ever a projection - and an `alert` region says so. Reverting silently is the failure mode to avoid: the user believes they resolved the ticket, and it is open.",
+      "commonMistakes": [
+        "Rendering a live region only while a message exists, so the region is inserted with its content and never announced.",
+        "Using `role=\"alert\"` for routine status changes, which interrupts the user for every load.",
+        "Announcing each row as it renders instead of a summary, which makes the interface unusable with a screen reader.",
+        "Reverting a failed optimistic update without telling the user, leaving them believing a change was saved.",
+        "Applying optimism to operations that frequently fail or that assign server-generated values you cannot predict.",
+        "Letting a pending change invent a record the server did not return, resurrecting something another user deleted.",
+        "Allowing a slow earlier response to overwrite a newer one, so the interface shows a stale result."
+      ],
+      "summaryMarkdown": "Announce asynchronous change on purpose: a persistent polite region for routine status, an alert for failures that need action, and summaries rather than commentary. Treat an optimistic update as a loan - render immediately, revert exactly, and always say that it reverted. Keep the server authoritative about which records exist, and never let a stale response overwrite a newer one.",
+      "exerciseIds": [
+        "v2-e19-07",
+        "v2-e19-08",
+        "v2-e19-09"
+      ],
+      "reviewCardIds": [
+        "v2-c19-05",
+        "v2-c19-06"
+      ],
+      "references": [
+        {
+          "label": "MDN: ARIA live regions",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/ARIA_Live_Regions"
+        },
+        {
+          "label": "WAI-ARIA: status role",
+          "url": "https://www.w3.org/TR/wai-aria-1.2/#status"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e19-07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose what an asynchronous view announces",
+      "conceptIds": [
+        "ui.accessible-async"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "One summary per state, and nothing at all when there is nothing to say.",
+      "lessonId": "v2-l21",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Implement `announcementFor(state)` for Ashgrove's ticket list live region.\n\n`state` has `status` (`'idle'`, `'loading'`, `'ready'` or `'error'`), and may have `count` (a number) and `message` (a string).\n\nReturn the text the live region should contain:\n\n- `'idle'` - the empty string. There is nothing to announce before a search has been run.\n- `'loading'` - `'Loading tickets.'`\n- `'ready'` with `count` of `0` - `'No tickets match your filters.'`\n- `'ready'` with `count` of `1` - `'1 ticket.'`\n- `'ready'` with any other `count` - for example `'12 tickets.'`\n- `'error'` - `'Could not load tickets.'`, and when `message` is a non-empty string, append a space and the message, for example `'Could not load tickets. Try again shortly.'`\n\nAny unrecognised `status` returns the empty string.",
+      "hints": [
+        "Handle the statuses one at a time and return immediately from each. The count rules only apply to one of them.",
+        "The singular case is a separate branch, not a formatting trick: '1 tickets.' is the kind of detail a screen-reader user hears in full.",
+        "For the error message, treat an absent, empty or whitespace-only message the same as no message - appending a trailing space to the sentence helps nobody."
+      ],
+      "solution": {
+        "code": "function announcementFor(state) {\n  if (state.status === 'loading') {\n    return 'Loading tickets.';\n  }\n  if (state.status === 'error') {\n    const base = 'Could not load tickets.';\n    if (typeof state.message === 'string' && state.message.trim() !== '') {\n      return base + ' ' + state.message.trim();\n    }\n    return base;\n  }\n  if (state.status === 'ready') {\n    if (state.count === 0) {\n      return 'No tickets match your filters.';\n    }\n    if (state.count === 1) {\n      return '1 ticket.';\n    }\n    return state.count + ' tickets.';\n  }\n  return '';\n}",
+        "explanationMarkdown": "Returning the empty string for `idle` matters more than it looks. The region is always in the document so it can be watched, and an empty string is how you keep it silent - rendering the region conditionally instead would mean it is inserted together with its first message, which is the single most common reason a live region never announces anything.\n\nThe three count branches exist because this text is spoken. '0 tickets.' is technically accurate and unhelpful; 'No tickets match your filters.' tells the user the search ran and explains the outcome. '1 tickets.' is the sort of small wrongness that is invisible in a table and obvious when read aloud.\n\nTrimming the optional message and checking it is non-empty avoids emitting 'Could not load tickets. ' with a dangling space, and treats a whitespace-only message as no message. Defaulting the unrecognised status to silence rather than to an error message keeps a future status from announcing something untrue."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "announcementFor",
+        "starterCode": "function announcementFor(state) {\n  // Same sentence for every state, and no singular handling.\n  return state.count + ' tickets.';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "idle-is-silent",
+            "args": [
+              {
+                "status": "idle"
+              }
+            ],
+            "expected": "",
+            "hidden": false
+          },
+          {
+            "id": "loading",
+            "args": [
+              {
+                "status": "loading"
+              }
+            ],
+            "expected": "Loading tickets.",
+            "hidden": false
+          },
+          {
+            "id": "ready-many",
+            "args": [
+              {
+                "status": "ready",
+                "count": 12
+              }
+            ],
+            "expected": "12 tickets.",
+            "hidden": false
+          },
+          {
+            "id": "ready-one",
+            "args": [
+              {
+                "status": "ready",
+                "count": 1
+              }
+            ],
+            "expected": "1 ticket.",
+            "hidden": false
+          },
+          {
+            "id": "ready-none",
+            "args": [
+              {
+                "status": "ready",
+                "count": 0
+              }
+            ],
+            "expected": "No tickets match your filters.",
+            "hidden": false
+          },
+          {
+            "id": "error-without-message",
+            "args": [
+              {
+                "status": "error"
+              }
+            ],
+            "expected": "Could not load tickets.",
+            "hidden": false
+          },
+          {
+            "id": "error-with-message",
+            "args": [
+              {
+                "status": "error",
+                "message": "Try again shortly."
+              }
+            ],
+            "expected": "Could not load tickets. Try again shortly.",
+            "hidden": false
+          },
+          {
+            "id": "error-with-blank-message",
+            "args": [
+              {
+                "status": "error",
+                "message": "   "
+              }
+            ],
+            "expected": "Could not load tickets.",
+            "hidden": false
+          },
+          {
+            "id": "unknown-status-is-silent",
+            "args": [
+              {
+                "status": "refetching"
+              }
+            ],
+            "expected": "",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ui.accessible-async"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e19-08",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Apply pending changes without inventing records",
+      "conceptIds": [
+        "ui.optimistic-updates"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The projection that makes an interface feel instant while the server stays in charge.",
+      "lessonId": "v2-l21",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 17,
+      "promptMarkdown": "Implement `withPending(serverTickets, pending)` for Ashgrove's optimistic ticket list.\n\n`serverTickets` is an array of `{ id, status }` as last returned by the server. `pending` maps a ticket id to the status the user has optimistically applied.\n\nReturn a **new** array, in the same order as `serverTickets`, where a ticket with a pending change carries the pending status.\n\nThree rules keep the server authoritative:\n\n- A pending entry for an id **not** present in `serverTickets` is ignored - never append it. The server decides which tickets exist, and a record it did not return may have been deleted by someone else.\n- A ticket with no pending entry is copied through unchanged.\n- A pending status equal to the server's status still produces a ticket equal to the server's.\n\nDo not modify either argument, and do not mutate the ticket objects inside `serverTickets`.",
+      "hints": [
+        "Build the result by walking `serverTickets`, not by walking `pending`. That single choice is what makes an unknown pending id impossible to append.",
+        "For each ticket, ask whether `pending` has an entry for its id. Use a presence check rather than truthiness, so a status that happens to be an empty string is still applied.",
+        "Return a new object for a changed ticket rather than assigning to the existing one - the input array's objects must come back unmodified."
+      ],
+      "solution": {
+        "code": "function withPending(serverTickets, pending) {\n  const result = [];\n  for (const ticket of serverTickets) {\n    if (Object.prototype.hasOwnProperty.call(pending, ticket.id)) {\n      result.push({ id: ticket.id, status: pending[ticket.id] });\n    } else {\n      result.push(ticket);\n    }\n  }\n  return result;\n}",
+        "explanationMarkdown": "Walking the server list rather than the pending map is the whole design. It makes the 'ignore unknown ids' rule automatic instead of a special case, and it encodes the intended relationship: pending changes are a *projection over* authoritative data, not a second source of records. Walking `pending` and pushing anything not found would resurrect a ticket another user had just deleted, which is a genuinely confusing bug to be on the receiving end of.\n\nConstructing a new object for a changed ticket, rather than assigning to the one from `serverTickets`, keeps the server data intact. Mutating it would corrupt the cache the next render reads from, so a failed request could no longer revert cleanly - the 'exact revert' half of the optimistic bargain depends on the original still being there.\n\n`hasOwnProperty` rather than a truthiness test keeps a legitimately falsy pending value - an empty-string status, or a `0` in a numeric variant of this function - from being silently skipped."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "withPending",
+        "starterCode": "function withPending(serverTickets, pending) {\n  // Walks the pending map, so an unknown id is appended as a new ticket.\n  const result = serverTickets.slice();\n  for (const id of Object.keys(pending)) {\n    result.push({ id: id, status: pending[id] });\n  }\n  return result;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "no-pending-changes",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "status": "open"
+                },
+                {
+                  "id": "t-2",
+                  "status": "closed"
+                }
+              ],
+              {}
+            ],
+            "expected": [
+              {
+                "id": "t-1",
+                "status": "open"
+              },
+              {
+                "id": "t-2",
+                "status": "closed"
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "one-pending-change",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "status": "open"
+                },
+                {
+                  "id": "t-2",
+                  "status": "open"
+                }
+              ],
+              {
+                "t-2": "resolved"
+              }
+            ],
+            "expected": [
+              {
+                "id": "t-1",
+                "status": "open"
+              },
+              {
+                "id": "t-2",
+                "status": "resolved"
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "unknown-pending-id-is-ignored",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "status": "open"
+                }
+              ],
+              {
+                "t-9": "resolved"
+              }
+            ],
+            "expected": [
+              {
+                "id": "t-1",
+                "status": "open"
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "order-is-preserved",
+            "args": [
+              [
+                {
+                  "id": "t-3",
+                  "status": "open"
+                },
+                {
+                  "id": "t-1",
+                  "status": "open"
+                }
+              ],
+              {
+                "t-1": "resolved",
+                "t-3": "closed"
+              }
+            ],
+            "expected": [
+              {
+                "id": "t-3",
+                "status": "closed"
+              },
+              {
+                "id": "t-1",
+                "status": "resolved"
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "pending-matching-server-is-a-no-op",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "status": "open"
+                }
+              ],
+              {
+                "t-1": "open"
+              }
+            ],
+            "expected": [
+              {
+                "id": "t-1",
+                "status": "open"
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "empty-server-list-with-pending",
+            "args": [
+              [],
+              {
+                "t-1": "resolved"
+              }
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "empty-string-status-is-applied",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "status": "open"
+                }
+              ],
+              {
+                "t-1": ""
+              }
+            ],
+            "expected": [
+              {
+                "id": "t-1",
+                "status": ""
+              }
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ui.optimistic-updates"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e19-09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the optimistic delete that reverts in silence",
+      "conceptIds": [
+        "ui.optimistic-updates"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Instant, convincing, and wrong about once a week.",
+      "lessonId": "v2-l21",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Ashgrove added an optimistic delete to the ticket queue.\n\n```jsx\nasync function remove(id) {\n  setTickets((current) => current.filter((t) => t.id !== id));\n  try {\n    await api.deleteTicket(id);\n  } catch {\n    refetch();\n  }\n}\n```\n\n`refetch` reloads the list from the server. Select every accurate criticism.",
+      "hints": [
+        "Trace what the user sees when the request fails, in order, and ask what they are told at each step.",
+        "`refetch` does restore the row - eventually, and without comment. Consider whether the user is still looking at that part of the list by then.",
+        "Separately, ask whether deletion is a good candidate for optimism at all, given what it costs to be wrong."
+      ],
+      "solution": {
+        "modelAnswer": "The revert is silent, and deletion is a poor candidate for optimism.",
+        "explanationMarkdown": "The revert happens - `refetch` brings the row back - and it happens silently. The user saw the ticket disappear, believes it is deleted, and may well have scrolled away before the row returns. Nothing is announced, so a screen-reader user gets no indication at all. The obligation an optimistic update takes on is to *say* when it failed, and this code discharges only the revert half.\n\nDeletion is also a weak candidate for optimism on its merits. The lesson's test is whether failure is unlikely, the change easy to describe, and the revert cheap and comprehensible. A disappearing-then-reappearing row fails the last part: it reads as a glitch rather than as a recoverable error, and the consequence of being wrong is high. Marking as read or reordering are the natural fits; destructive actions are better honest and slightly slower.\n\nUsing a full `refetch` to undo one row is a lesser point but a real one: it discards unrelated in-flight state and can race with other updates. Restoring the specific row is more precise, and pairs naturally with keeping the removed ticket until the request resolves."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "silent-revert",
+            "textMarkdown": "The failure path restores the row without telling the user anything, so they continue believing the deletion succeeded.",
+            "correct": true,
+            "explanationMarkdown": "Correct, and this is the core defect: an optimistic update must announce its own reversal, or it silently lies about what happened."
+          },
+          {
+            "id": "poor-candidate",
+            "textMarkdown": "Deletion is a poor fit for optimism, because a row vanishing and returning reads as a glitch and the cost of being wrong is high.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Optimism suits frequent, low-consequence, easily described changes; destructive actions are better handled honestly."
+          },
+          {
+            "id": "refetch-broad",
+            "textMarkdown": "Reverting via a full `refetch` discards unrelated in-flight state and can race with concurrent updates.",
+            "correct": true,
+            "explanationMarkdown": "Correct, and a targeted restore of the affected row is both cheaper and less disruptive."
+          },
+          {
+            "id": "filter-mutates",
+            "textMarkdown": "The `filter` call mutates the existing tickets array, corrupting the cache.",
+            "correct": false,
+            "explanationMarkdown": "`filter` returns a new array and does not modify the original. The state update here is written correctly."
+          }
+        ]
+      },
+      "primaryConceptId": "ui.optimistic-updates"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c19-05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why a conditional live region stays silent",
+      "conceptIds": [
+        "ui.accessible-async"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the placement rule for an announcement region.",
+      "lessonId": "v2-l21",
+      "type": "recall",
+      "promptMarkdown": "Why does rendering `<div aria-live=\"polite\">Loading</div>` only while loading often fail to announce anything, and what is the fix?",
+      "answerMarkdown": "Assistive technology announces changes to the content of a region it is already observing. Inserting the region and its text in the same update gives it nothing to compare against, and the message is frequently missed entirely. The fix is to keep the region in the document at all times and change only its text - rendering an empty string when there is nothing to say.",
+      "explanationMarkdown": "This is the most common reason a live region 'does not work', and it is invisible to anyone testing visually, because the text appears on screen exactly as intended.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ui.accessible-async"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c19-06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer: should this be optimistic?",
+      "conceptIds": [
+        "ui.optimistic-updates"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the optimism criteria to two different operations.",
+      "lessonId": "v2-l21",
+      "type": "transfer",
+      "promptMarkdown": "Ashgrove wants instant feedback for (a) starring a ticket and (b) issuing a refund. Which should be optimistic, and what must be true either way?",
+      "answerMarkdown": "Star it optimistically: failure is rare, the change is trivially describable, and reverting a star is cheap and comprehensible. Do not make the refund optimistic - failure is plausible, the amount may be adjusted by the provider, and a refund that appears and then vanishes is alarming rather than merely surprising. Either way, a failed update must revert exactly and say so; the difference is whether the user should be shown an unconfirmed state at all.",
+      "explanationMarkdown": "The useful test is what being wrong costs the user. Low-consequence, high-success, easily reverted operations suit optimism; anything involving money, deletion or a server-assigned value is better shown honestly with a pending state.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ui.optimistic-updates"
+    },
+    {
+      "kind": "assessment",
+      "id": "v2-a19",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Frontend depth placement check",
+      "conceptIds": [
+        "ui.complex-forms",
+        "ui.large-list-performance",
+        "ui.accessible-async",
+        "ui.optimistic-updates"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five questions on interdependent forms, long-list performance, accessible asynchronous interaction and optimistic updates. No hints and no solutions are shown until you submit.",
+      "chapterId": "v2-ch19",
+      "items": [
+        {
+          "id": "v2-a19-i1",
+          "objectiveIds": [
+            "ui.complex-forms"
+          ],
+          "critical": true,
+          "promptMarkdown": "A form disables its submit control when the errors currently *shown* to the user is empty, and returns early inside the click handler when *any* error exists.\n\nWhat does a user experience?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a19-1-silent",
+                "textMarkdown": "With an error on a field they have never touched, the control looks available, the click does nothing, and nothing explains why.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The two gates consult different sets, and the gap between them is a field the user has not focused."
+              },
+              {
+                "id": "a19-1-double",
+                "textMarkdown": "The form submits twice, because the handler runs before the disabled state updates.",
+                "correct": false,
+                "explanationMarkdown": "The handler returns early rather than submitting. Duplicate submission is a real form hazard but not what these two conditions produce."
+              },
+              {
+                "id": "a19-1-fine",
+                "textMarkdown": "Nothing unusual: showing only touched errors while validating all of them is the recommended pattern.",
+                "correct": false,
+                "explanationMarkdown": "Showing only touched errors is right; gating the *control* on that subset is not. The control must reflect all errors."
+              },
+              {
+                "id": "a19-1-crash",
+                "textMarkdown": "The form throws, because the handler reads an error set that has not been computed yet.",
+                "correct": false,
+                "explanationMarkdown": "Both sets are computed on every render. There is no ordering problem here, only a disagreement about which set governs which behaviour."
+              }
+            ]
+          },
+          "explanationMarkdown": "Disclosure and gating are separate decisions: reveal touched errors, gate on all of them, and reveal everything on a submit attempt."
+        },
+        {
+          "id": "v2-a19-i2",
+          "objectiveIds": [
+            "ui.large-list-performance"
+          ],
+          "critical": true,
+          "promptMarkdown": "A windowed list renders `items.slice(start, end).map((item, i) => <Row key={i} … />)`. Rows hold local state.\n\nWhat is the consequence?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a19-2-state-moves",
+                "textMarkdown": "Row state stays attached to a position rather than a record, so scrolling or an insertion leaves it on the wrong item.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The index is relative to the slice, so it changes on scroll as well as on insertion, and React keeps state where the key matches."
+              },
+              {
+                "id": "a19-2-slow-only",
+                "textMarkdown": "It is purely a performance issue: rendering is slower but the displayed data stays correct.",
+                "correct": false,
+                "explanationMarkdown": "Performance suffers too, but the user-visible symptom is state appearing against the wrong record, which reads as data corruption."
+              },
+              {
+                "id": "a19-2-warning",
+                "textMarkdown": "React refuses to render and warns that keys must be unique.",
+                "correct": false,
+                "explanationMarkdown": "Slice indexes are unique within a render, so no warning is produced. The keys are unique and unstable, which is the harder problem."
+              },
+              {
+                "id": "a19-2-fine",
+                "textMarkdown": "It is correct, because the slice indexes are unique within each render.",
+                "correct": false,
+                "explanationMarkdown": "Uniqueness within one render is not enough; a key must identify the same record across renders, and a slice index does not."
+              }
+            ]
+          },
+          "explanationMarkdown": "Keys must be stable identities from the data. Index keys make an insertion look like an edit of everything below it."
+        },
+        {
+          "id": "v2-a19-i3",
+          "objectiveIds": [
+            "ui.large-list-performance"
+          ],
+          "critical": false,
+          "promptMarkdown": "Typing one character in a filter box takes 900ms. The profiler shows 8,000 `Row` renders at roughly 0.1ms each. Scrolling is smooth.\n\nWhich change most directly addresses the measurement?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a19-3-window",
+                "textMarkdown": "Render only the visible slice plus overscan, so a keystroke re-renders about twenty-five rows.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A large count multiplied by a small per-item cost means the count is the term to attack."
+              },
+              {
+                "id": "a19-3-debounce",
+                "textMarkdown": "Debounce the filter input, so the work happens less often.",
+                "correct": false,
+                "explanationMarkdown": "That changes the frequency of the 900ms cost, not its size. The pause after typing stops still feels slow."
+              },
+              {
+                "id": "a19-3-memo",
+                "textMarkdown": "Memoise `Row` so unchanged rows skip rendering.",
+                "correct": false,
+                "explanationMarkdown": "Filtering changes which rows exist, so there is little for memoisation to skip in this particular interaction."
+              },
+              {
+                "id": "a19-3-css",
+                "textMarkdown": "Simplify each row's styles to reduce layout cost.",
+                "correct": false,
+                "explanationMarkdown": "The profiler attributes the time to React rendering rather than to layout, and 0.1ms per row is already cheap."
+              }
+            ]
+          },
+          "explanationMarkdown": "Read the measurement: 8,000 x 0.1ms. Reduce the count, not the per-item cost."
+        },
+        {
+          "id": "v2-a19-i4",
+          "objectiveIds": [
+            "ui.accessible-async"
+          ],
+          "critical": true,
+          "promptMarkdown": "A results view renders `{loading && <div aria-live=\"polite\">Loading</div>}` and reports that screen-reader users are never told a search is running.\n\nWhat is the cause?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a19-4-inserted",
+                "textMarkdown": "The region is inserted at the same moment as its content, so there is no existing region whose text changed to announce.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Keep the region mounted at all times and vary its text, using an empty string when there is nothing to say."
+              },
+              {
+                "id": "a19-4-polite",
+                "textMarkdown": "`polite` is ignored by screen readers; `assertive` is required for any announcement.",
+                "correct": false,
+                "explanationMarkdown": "Polite regions are announced, just without interrupting. Assertive would be wrong for a routine loading message anyway."
+              },
+              {
+                "id": "a19-4-role",
+                "textMarkdown": "A live region has no effect without also setting `role=\"status\"`.",
+                "correct": false,
+                "explanationMarkdown": "`aria-live=\"polite\"` is sufficient on its own; `role=\"status\"` implies it. The placement is the problem, not the attribute."
+              },
+              {
+                "id": "a19-4-text",
+                "textMarkdown": "The message is too short to be announced.",
+                "correct": false,
+                "explanationMarkdown": "Length is not a factor. Short summaries are in fact what live regions are for."
+              }
+            ]
+          },
+          "explanationMarkdown": "A live region must exist before its content changes, which is why conditional rendering of the region itself defeats it."
+        },
+        {
+          "id": "v2-a19-i5",
+          "objectiveIds": [
+            "ui.optimistic-updates"
+          ],
+          "critical": false,
+          "promptMarkdown": "An optimistic update fails and the interface restores the previous state by refetching, without any message.\n\nWhat is the most serious problem?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a19-5-silent",
+                "textMarkdown": "The user believes the change was saved, and nothing tells them it was undone.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Reverting is only half the obligation; announcing the reversal is what stops the interface from quietly lying."
+              },
+              {
+                "id": "a19-5-slow",
+                "textMarkdown": "Refetching is slower than restoring the previous state locally.",
+                "correct": false,
+                "explanationMarkdown": "True and worth improving, but a performance detail rather than the reason the user ends up misinformed."
+              },
+              {
+                "id": "a19-5-race",
+                "textMarkdown": "The refetch may race with other in-flight requests.",
+                "correct": false,
+                "explanationMarkdown": "A genuine secondary risk, and still less serious than the user being left with a false belief about their own action."
+              },
+              {
+                "id": "a19-5-none",
+                "textMarkdown": "Nothing serious: the state is correct once the refetch completes, which is what matters.",
+                "correct": false,
+                "explanationMarkdown": "Eventual correctness on screen is not the same as the user knowing. They may have navigated away, and a screen-reader user gets no signal at all."
+              }
+            ]
+          },
+          "explanationMarkdown": "An optimistic update is a loan: render immediately, revert exactly, and say that it reverted."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

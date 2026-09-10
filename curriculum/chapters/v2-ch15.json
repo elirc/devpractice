@@ -1,0 +1,1615 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v2-ch15",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "API evolution",
+      "conceptIds": [
+        "api.filtering",
+        "api.versioning",
+        "api.pagination-compatibility",
+        "api.schema-change-safety"
+      ],
+      "prerequisiteIds": [
+        "node.error-contracts",
+        "node.runtime-validation",
+        "db.cursor-pagination"
+      ],
+      "bodyMarkdown": "The Fernwood jobs API has three consumers: the dispatch board, a depot tablet app that updates when someone remembers, and a customer's integration written two years ago by a contractor nobody can reach.\n\nThat last one is the whole subject of this chapter. An API you control end to end can be changed at will. An API with a client you cannot redeploy is a **contract**, and every change to it is either compatible or breaking — a property of the change itself, not of how carefully you announce it.\n\nYou will learn to expose filtering that is expressive without becoming an open query language you can never optimise or secure; to tell a compatible change from a breaking one and to evolve a response without a version bump when you can; to keep pagination working for clients holding cursors issued by the old code; and to sequence a schema change so old and new code run correctly *at the same time*, which is the situation during every deployment.\n\nThe recurring idea: adding is usually safe, removing and tightening usually are not, and the moment worth designing for is the one where both versions are live.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v2-l07",
+        "v2-l08",
+        "v2-l09"
+      ],
+      "assessmentId": "v2-a15",
+      "objectiveIds": [
+        "api.filtering",
+        "api.versioning",
+        "api.pagination-compatibility",
+        "api.schema-change-safety"
+      ],
+      "missionIds": [],
+      "sortOrder": 14
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Filtering without inventing a query language",
+      "conceptIds": [
+        "api.filtering"
+      ],
+      "prerequisiteIds": [
+        "node.runtime-validation",
+        "db.index-selection"
+      ],
+      "bodyMarkdown": "Every list endpoint starts with one filter and grows. `?status=open` becomes `?status=open&depot=3`, then someone needs a date range, then someone needs *not* cancelled, and eventually a well-meaning engineer ships `?where={\"status\":{\"$in\":[\"open\"]}}` and the API now has a query language.\n\nThat is a threshold worth noticing, because crossing it costs three things at once. **Security**: arbitrary field access lets a caller filter on columns you never meant to expose, and inferring values from filter results is a real technique — filtering on `internal_notes` you do not return still tells the caller what it contains. **Performance**: you can no longer guarantee any query is indexed, so one caller can sequential-scan a large table on demand. **Evolution**: the query language becomes part of the contract, so renaming a column is now a breaking API change.\n\nThe durable design is an **allow-list of named filters**. Each is a field the API explicitly supports, with a declared type and a declared set of operators:\n\n```js\nconst FILTERS = {\n  status:      { type: 'enum', values: ['open', 'scheduled', 'done'], ops: ['eq', 'in'] },\n  depotId:     { type: 'int',  ops: ['eq'] },\n  scheduledFor:{ type: 'date', ops: ['gte', 'lte'] },\n};\n```\n\nEverything follows from that table. An unknown field is rejected rather than ignored — **this matters more than it looks**: silently ignoring `?statuss=open` returns every job to a caller who believes they filtered, and they will not notice until it matters. An unsupported operator is rejected. Values are parsed and validated to the declared type before they reach the database, so type confusion cannot travel. And because the set is finite, you can check that every permitted combination is indexed.\n\nTwo more rules earn their keep. **Always bound the result**: a default page size and a maximum, so no filter combination can ask for everything. And **keep filtering separate from authorisation** — filters narrow what a caller asked for, never what they are allowed to see. Ownership scoping is applied on top, always, and is not something the caller can influence.",
+      "chapterId": "v2-ch15",
+      "sortOrder": 0,
+      "objectives": [
+        "Design a filter surface as an allow-list of named fields, types and operators.",
+        "Explain why an unknown filter parameter must be rejected rather than ignored.",
+        "Keep filtering separate from ownership scoping so a filter can never widen access."
+      ],
+      "estimatedMinutes": 17,
+      "workedExampleMarkdown": "One request, validated against the allow-list.\n\n```\nGET /jobs?status=open&status=scheduled&scheduledFor.gte=2026-03-01&limit=500&sort=cost\n```\n\n```js\n// status: declared enum, op 'in' permitted, both values known -> accepted\n// scheduledFor.gte: declared date, op 'gte' permitted, parses -> accepted\n// limit=500: above the maximum of 100 -> clamped to 100, reported in meta\n// sort=cost: 'cost' is not a declared sort field -> 400, not ignored\n```\n\nThe resulting query is fully determined by the allow-list, so it can be reviewed once and indexed once:\n\n```sql\nSELECT ... FROM jobs\n WHERE owner_id = $1                    -- authorisation, never from the caller\n   AND status = ANY($2)\n   AND scheduled_for >= $3\n ORDER BY scheduled_for, id\n LIMIT 100;\n```\n\n**Note the two different responses to bad input.** `limit=500` is clamped, because the caller's intent is clear and satisfiable — they want a lot of rows, and 100 is the most they may have. `sort=cost` is a 400, because the caller's intent is *not* satisfiable and returning results sorted some other way would be silently answering a different question. Clamp when you can honour the intent; reject when you cannot.\n\n**And note where `owner_id` comes from.** It is taken from the session, not from a parameter, and it is applied whether or not any filter was supplied. If it were a filter, omitting it would widen access — which is how list endpoints leak.",
+      "commonMistakes": [
+        "Ignoring unknown query parameters, so a typo silently returns unfiltered data to a caller who believes it was filtered.",
+        "Accepting a generic where-clause object, which turns every column name into part of the public contract.",
+        "Letting the caller supply the owner or tenant id as just another filter, so omitting it widens access.",
+        "Omitting a maximum page size, so one caller can request the entire table.",
+        "Interpolating filter values into SQL instead of parameterising them.",
+        "Adding filters one at a time with no check that the resulting query is indexed, until one combination scans the table."
+      ],
+      "summaryMarkdown": "Filtering grows into a query language unless you design a boundary. An allow-list of named fields with declared types and operators keeps the surface finite, so it can be secured, indexed and evolved. Reject unknown parameters rather than ignoring them, clamp what you can honour and reject what you cannot, always bound the page size, and apply ownership scoping outside the filter set so no filter can widen access.",
+      "exerciseIds": [
+        "v2-e019",
+        "v2-e020",
+        "v2-e021"
+      ],
+      "reviewCardIds": [
+        "v2-c013",
+        "v2-c014"
+      ],
+      "references": [
+        {
+          "label": "OWASP: Mass assignment cheat sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html"
+        },
+        {
+          "label": "MDN: URL query strings",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e019",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Reject, ignore or clamp?",
+      "conceptIds": [
+        "api.filtering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Three kinds of bad input, three correct responses. Match them.",
+      "lessonId": "v2-l07",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "A list endpoint declares filters for `status` and `depotId`, and a maximum `limit` of 100.\n\nA request arrives: `?status=open&owner=42&limit=1000`\n\n`owner` is not a declared filter. What should the endpoint do?",
+      "hints": [
+        "The three parameters are not the same kind of problem. Handle each on its own merits.",
+        "For each one ask: can I honour what the caller clearly wants? If yes, honour a permitted version of it. If no, say so.",
+        "An unknown parameter is not satisfiable and must not be silently dropped — especially one named `owner`, which the caller may believe is restricting access."
+      ],
+      "solution": {
+        "modelAnswer": "reject-owner-clamp-limit",
+        "explanationMarkdown": "`status=open` is accepted. `limit=1000` is clamped to 100, because the intent is clear and a permitted version of it exists. `owner=42` must produce a 400: it is not a declared filter, and ignoring it would return every job to a caller who believes they asked for one owner's."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "reject-owner-clamp-limit",
+            "textMarkdown": "Return 400 naming `owner` as an unsupported parameter.",
+            "correct": true,
+            "explanationMarkdown": "Correct. An unknown parameter cannot be honoured, and silently ignoring one named `owner` is how a caller ends up believing a result set is scoped when it is not."
+          },
+          {
+            "id": "ignore-owner",
+            "textMarkdown": "Ignore `owner`, apply `status`, and clamp `limit` to 100.",
+            "correct": false,
+            "explanationMarkdown": "Clamping the limit is right; ignoring `owner` is the trap. The caller receives a 200 and a plausible-looking list that answers a broader question than they asked."
+          },
+          {
+            "id": "reject-all",
+            "textMarkdown": "Return 400 for both `owner` and `limit`, since both are invalid.",
+            "correct": false,
+            "explanationMarkdown": "`limit=1000` is not invalid, merely more than permitted, and the caller's intent — as many as possible — can be honoured by clamping. Rejecting it makes the API tiresome for no safety gain."
+          },
+          {
+            "id": "treat-as-owner",
+            "textMarkdown": "Treat `owner=42` as an ownership filter and scope the results to owner 42.",
+            "correct": false,
+            "explanationMarkdown": "Never. Ownership comes from the authenticated session; honouring a caller-supplied owner is precisely how one client reads another's data."
+          }
+        ]
+      },
+      "primaryConceptId": "api.filtering",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e020",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Validate filters against an allow-list",
+      "conceptIds": [
+        "api.filtering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The boundary that keeps a filter surface finite, written as a pure function.",
+      "lessonId": "v2-l07",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `parseFilters(allowed, params)`.\n\n`allowed` maps a field name to `{ ops }`, an array of permitted operator names, e.g. `{ status: { ops: ['eq'] }, scheduledFor: { ops: ['gte', 'lte'] } }`.\n\n`params` is an array of `{ field, op, value }`.\n\nReturn `{ accepted, errors }`:\n\n- `accepted` is an array of the params that are permitted, **in input order**, each copied as `{ field, op, value }`.\n- `errors` is an array of strings, in input order, one per rejected param:\n  - `` `unknown field: <field>` `` when the field is not in `allowed`\n  - `` `unsupported operator: <field>.<op>` `` when the field is allowed but the operator is not\n\nRules:\n\n- A param is either accepted or produces exactly one error, never both.\n- Check the field first: an unknown field with a bad operator reports only the unknown field.\n- Do not modify `allowed` or `params`.\n- Only fields present as own properties of `allowed` count — a field named `toString` is not allowed just because objects have one.",
+      "hints": [
+        "Every param has exactly one outcome. Decide it with a short chain of checks in a fixed order.",
+        "`allowed[field]` is truthy for inherited properties like `constructor` and `toString`, which is not what 'declared filter' means.",
+        "Use a hasOwnProperty check for the field, then look for the op in that field's `ops` array; push to `accepted` or to `errors` accordingly."
+      ],
+      "solution": {
+        "code": "function parseFilters(allowed, params) {\n  const accepted = [];\n  const errors = [];\n  for (let i = 0; i < params.length; i += 1) {\n    const p = params[i];\n    if (!Object.prototype.hasOwnProperty.call(allowed, p.field)) {\n      errors.push('unknown field: ' + p.field);\n      continue;\n    }\n    const ops = allowed[p.field].ops;\n    let permitted = false;\n    for (let j = 0; j < ops.length; j += 1) {\n      if (ops[j] === p.op) {\n        permitted = true;\n        break;\n      }\n    }\n    if (!permitted) {\n      errors.push('unsupported operator: ' + p.field + '.' + p.op);\n      continue;\n    }\n    accepted.push({ field: p.field, op: p.op, value: p.value });\n  }\n  return { accepted: accepted, errors: errors };\n}",
+        "explanationMarkdown": "The shape of this function is the shape of the design: a param is compared against a declaration, and anything not declared is refused. There is no path where an unrecognised field reaches the query builder, which is what makes the filter surface finite enough to secure and index.\n\n`hasOwnProperty` rather than `allowed[p.field]` is not pedantry. `allowed['toString']` is a function on every object, so a plain truthiness test would accept a filter on `toString` and then read `.ops` of a function, producing an unhandled error at best and unexpected behaviour at worst. Any time a user-supplied string is used as an object key, this is the check you want.\n\nCopying the accepted param rather than passing the caller's object through means nothing downstream can be surprised by extra keys the caller attached — the same allow-list instinct applied to the object as well as to the field name."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "parseFilters",
+        "starterCode": "function parseFilters(allowed, params) {\n  // Silently drops anything it does not recognise.\n  const accepted = [];\n  for (let i = 0; i < params.length; i += 1) {\n    if (allowed[params[i].field]) {\n      accepted.push(params[i]);\n    }\n  }\n  return { accepted: accepted, errors: [] };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "all-accepted",
+            "args": [
+              {
+                "status": {
+                  "ops": [
+                    "eq"
+                  ]
+                },
+                "depotId": {
+                  "ops": [
+                    "eq"
+                  ]
+                }
+              },
+              [
+                {
+                  "field": "status",
+                  "op": "eq",
+                  "value": "open"
+                },
+                {
+                  "field": "depotId",
+                  "op": "eq",
+                  "value": 3
+                }
+              ]
+            ],
+            "expected": {
+              "accepted": [
+                {
+                  "field": "status",
+                  "op": "eq",
+                  "value": "open"
+                },
+                {
+                  "field": "depotId",
+                  "op": "eq",
+                  "value": 3
+                }
+              ],
+              "errors": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "unknown-field-is-reported",
+            "args": [
+              {
+                "status": {
+                  "ops": [
+                    "eq"
+                  ]
+                }
+              },
+              [
+                {
+                  "field": "owner",
+                  "op": "eq",
+                  "value": 42
+                }
+              ]
+            ],
+            "expected": {
+              "accepted": [],
+              "errors": [
+                "unknown field: owner"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "unsupported-operator",
+            "args": [
+              {
+                "status": {
+                  "ops": [
+                    "eq"
+                  ]
+                }
+              },
+              [
+                {
+                  "field": "status",
+                  "op": "gte",
+                  "value": "open"
+                }
+              ]
+            ],
+            "expected": {
+              "accepted": [],
+              "errors": [
+                "unsupported operator: status.gte"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "field-checked-before-operator",
+            "args": [
+              {
+                "status": {
+                  "ops": [
+                    "eq"
+                  ]
+                }
+              },
+              [
+                {
+                  "field": "secret",
+                  "op": "regex",
+                  "value": ".*"
+                }
+              ]
+            ],
+            "expected": {
+              "accepted": [],
+              "errors": [
+                "unknown field: secret"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "mixed-input-preserves-order",
+            "args": [
+              {
+                "status": {
+                  "ops": [
+                    "eq"
+                  ]
+                },
+                "scheduledFor": {
+                  "ops": [
+                    "gte",
+                    "lte"
+                  ]
+                }
+              },
+              [
+                {
+                  "field": "scheduledFor",
+                  "op": "gte",
+                  "value": "2026-03-01"
+                },
+                {
+                  "field": "owner",
+                  "op": "eq",
+                  "value": 42
+                },
+                {
+                  "field": "status",
+                  "op": "eq",
+                  "value": "open"
+                },
+                {
+                  "field": "scheduledFor",
+                  "op": "regex",
+                  "value": "x"
+                }
+              ]
+            ],
+            "expected": {
+              "accepted": [
+                {
+                  "field": "scheduledFor",
+                  "op": "gte",
+                  "value": "2026-03-01"
+                },
+                {
+                  "field": "status",
+                  "op": "eq",
+                  "value": "open"
+                }
+              ],
+              "errors": [
+                "unknown field: owner",
+                "unsupported operator: scheduledFor.regex"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "inherited-property-is-not-a-filter",
+            "args": [
+              {
+                "status": {
+                  "ops": [
+                    "eq"
+                  ]
+                }
+              },
+              [
+                {
+                  "field": "toString",
+                  "op": "eq",
+                  "value": "x"
+                }
+              ]
+            ],
+            "expected": {
+              "accepted": [],
+              "errors": [
+                "unknown field: toString"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "no-params",
+            "args": [
+              {
+                "status": {
+                  "ops": [
+                    "eq"
+                  ]
+                }
+              },
+              []
+            ],
+            "expected": {
+              "accepted": [],
+              "errors": []
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "api.filtering",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e021",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the filter endpoint for defects",
+      "conceptIds": [
+        "api.filtering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A handler that works in testing and leaks in production. Find the most serious defect.",
+      "lessonId": "v2-l07",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "```js\napp.get('/jobs', async (req, reply) => {\n  const where = {};\n  for (const [key, value] of Object.entries(req.query)) {\n    if (key === 'limit' || key === 'cursor') continue;\n    where[key] = value;\n  }\n  if (req.query.ownerId) where.ownerId = Number(req.query.ownerId);\n  else where.ownerId = req.session.userId;\n\n  const jobs = await db.job.findMany({\n    where,\n    take: Number(req.query.limit ?? 50),\n  });\n  return reply.send({ data: jobs });\n});\n```\n\nWhich is the most serious defect?",
+      "hints": [
+        "Several things here are wrong. Rank them by what an attacker can do, not by what looks untidy.",
+        "Look at the `ownerId` branch specifically. What does a caller have to send to choose whose jobs they see?",
+        "Authorisation is being taken from caller-supplied input, with the session used only as a fallback when the caller stays silent."
+      ],
+      "solution": {
+        "modelAnswer": "owner-override",
+        "explanationMarkdown": "`if (req.query.ownerId) where.ownerId = Number(...)` lets any caller read any owner's jobs by adding `?ownerId=7`. The session is consulted only when the caller does not specify one, which inverts the rule: authorisation must be applied *regardless* of input, never as a default that input can replace.\n\n```js\nconst where = buildFromAllowList(req.query);   // filters only\nwhere.ownerId = req.session.userId;            // authorisation, applied last, always\n```\n\nThe other defects are real and worth fixing in the same change. Copying every unknown query key into `where` makes each column filterable, so a caller can probe `internalNotes` even though it is never returned. And `take` is unbounded, so `?limit=1000000` is a denial-of-service primitive. But those let a caller ask *expensive* or *revealing* questions, whereas the ownerId branch hands over other people's data outright."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "owner-override",
+            "textMarkdown": "A caller can supply `?ownerId=` to read another owner's jobs, because the session is only a fallback rather than an unconditional scope.",
+            "correct": true,
+            "explanationMarkdown": "Correct, and the most serious of several defects here: it is a direct authorisation bypass requiring nothing more than a query parameter."
+          },
+          {
+            "id": "unbounded-limit",
+            "textMarkdown": "`take` has no maximum, so a caller can request the whole table.",
+            "correct": false,
+            "explanationMarkdown": "A genuine defect and worth fixing, but it lets a caller ask an expensive question about their own data rather than read someone else's."
+          },
+          {
+            "id": "arbitrary-fields",
+            "textMarkdown": "Every query parameter becomes a filter, so any column can be filtered on.",
+            "correct": false,
+            "explanationMarkdown": "Also genuine, and it enables inference about fields that are never returned. Still ranks below an outright bypass that needs no inference at all."
+          },
+          {
+            "id": "no-validation",
+            "textMarkdown": "Values are passed through as strings without type validation.",
+            "correct": false,
+            "explanationMarkdown": "Worth fixing — it produces confusing errors and can defeat an index — but Prisma parameterises values, so this is a correctness and performance issue rather than the leak."
+          }
+        ]
+      },
+      "primaryConceptId": "api.filtering",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c013",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why reject an unknown filter?",
+      "conceptIds": [
+        "api.filtering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the reasoning behind the strictest rule in filter design.",
+      "lessonId": "v2-l07",
+      "type": "recall",
+      "promptMarkdown": "Why must a list endpoint reject an unrecognised query parameter instead of ignoring it?",
+      "answerMarkdown": "Because ignoring it returns a wider result set than the caller asked for, with a 200 that looks correct. A typo like `?statuss=open` silently returns every job, and the caller has no signal that their filter did nothing.",
+      "explanationMarkdown": "The failure is silent and the result is plausible, which is the worst combination — nobody investigates a successful response. It is worse still when the ignored parameter is one the caller believes restricts access, because they may be relying on it to avoid showing data to the wrong person. Rejecting unknown input converts an invisible wrong answer into an obvious, fixable error.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "api.filtering"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c014",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Where does the tenant scope come from?",
+      "conceptIds": [
+        "api.filtering",
+        "authz.resource-scoped-permissions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the filter-versus-authorisation split to a new endpoint.",
+      "lessonId": "v2-l07",
+      "type": "transfer",
+      "promptMarkdown": "A reporting endpoint supports `?teamId=` so a manager can view one team. How do you keep that from becoming an access-control bypass?",
+      "answerMarkdown": "Treat `teamId` as a filter that narrows within what the caller may already see, and apply the authorisation scope separately and unconditionally: resolve the set of teams this user may view from the session, then intersect the requested team with it, rejecting or returning empty when it is not a member of that set. The parameter must never be the thing that determines access.",
+      "explanationMarkdown": "The distinction is that a filter answers 'which of the things I am allowed to see do I want?', while authorisation answers 'what am I allowed to see?'. Conflating them produces the classic bug where omitting a parameter widens access, or supplying someone else's id grants it. Keeping the scope derivation in one place, applied to every query regardless of input, is what makes the endpoint reviewable.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "api.filtering"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l08",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Evolving a response without breaking clients",
+      "conceptIds": [
+        "api.versioning",
+        "api.pagination-compatibility"
+      ],
+      "prerequisiteIds": [
+        "http.status-codes",
+        "db.cursor-pagination"
+      ],
+      "bodyMarkdown": "Whether a change is breaking is decided by what clients are entitled to assume, not by how significant it feels to you.\n\nThe reliable test is the **robustness rule**: a client should ignore fields it does not recognise, and must not be surprised by fields disappearing or changing meaning. From that, a short list follows.\n\n**Usually compatible:** adding an optional response field; adding an optional request parameter with a default that preserves existing behaviour; adding a new enum value to a field clients only display; widening what you accept.\n\n**Always breaking:** removing or renaming a response field; changing a field's type (`\"3\"` to `3` breaks anyone doing string comparison); making an optional request parameter required; narrowing what you accept; changing the meaning of a value while keeping its name — the worst kind, because nothing fails loudly.\n\n**Deceptive:** adding an enum value is compatible only if clients *display* it. If they `switch` on it, a new `status: 'deferred'` falls through to whatever their default branch does, which is often 'treat as done'. Adding a field is compatible unless a client validates strictly and rejects unknown properties — some generated clients do.\n\nWhen a change is genuinely breaking, prefer **expand and contract** over a version bump. Add the new field alongside the old one; populate both; give consumers time to migrate; remove the old field only once you can see nobody reads it. This needs telemetry — logging which response fields are consumed is impossible, so instead log which *clients* are on which version, or require a client identifier. Removing a field because 'it has been six months' is guessing.\n\n**Pagination compatibility** deserves its own note, because cursors are the one part of a response clients hand straight back. A cursor is an opaque token to the client and a *data structure* to you — and the moment you change its encoding, every cursor already in flight becomes undecodable. Two rules make this survivable. **Version the cursor itself**, so old tokens can still be read: `v1:eyJ...`. And **never let a client construct one** — if the encoding is transparent, clients will start building cursors by hand, and your freedom to change it disappears. Encoding the sort key and id, then base64ing them, is enough; signing them also stops a caller from paging through data by editing a token.",
+      "chapterId": "v2-ch15",
+      "sortOrder": 1,
+      "objectives": [
+        "Classify a proposed API change as compatible or breaking, and justify it from what clients may assume.",
+        "Apply expand-and-contract to make a breaking change safely over time.",
+        "Keep pagination working for clients holding cursors issued by an earlier version."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "A field must change from a string to a structured object. Compare the two approaches.\n\n**The version bump.**\n\n```\nGET /v1/jobs -> { \"address\": \"12 Mill Lane, Bristol\" }\nGET /v2/jobs -> { \"address\": { \"line1\": \"12 Mill Lane\", \"city\": \"Bristol\" } }\n```\n\nNow two code paths exist for every subsequent change, and the contractor's integration stays on v1 forever. Version bumps do not retire themselves.\n\n**Expand and contract.**\n\n```\nPhase 1 (expand)   { \"address\": \"12 Mill Lane, Bristol\",\n                     \"addressParts\": { \"line1\": \"12 Mill Lane\", \"city\": \"Bristol\" } }\n                   Both populated. Adding a field is compatible, so nothing breaks.\n\nPhase 2 (migrate)  Clients move to addressParts at their own pace.\n                   Track who is still sending an old client identifier.\n\nPhase 3 (contract) Remove `address` once the telemetry shows nobody reads it.\n```\n\nOne code path, no permanent v1, and the risky step happens when you have evidence rather than a calendar.\n\n**The cursor version.** Suppose pagination moves from `id` alone to `(scheduledFor, id)`:\n\n```js\nfunction decodeCursor(token) {\n  const [version, payload] = token.split(':');\n  if (version === 'v2') return JSON.parse(atob(payload));            // { scheduledFor, id }\n  if (version === 'v1') return { scheduledFor: null, id: JSON.parse(atob(payload)).id };\n  throw new BadRequest('unrecognised cursor');\n}\n```\n\nA client mid-scan with a v1 token keeps working — it is upgraded to the new scheme on its next request, which is possible only because the token said what it was. An unversioned cursor would have to be guessed at, and guessing wrong means silently returning the wrong page.",
+      "commonMistakes": [
+        "Treating 'we added a field' as automatically safe when a client validates strictly and rejects unknown properties.",
+        "Adding an enum value without checking whether clients switch on it and have a default branch that mishandles it.",
+        "Changing what a value means while keeping its name and type, so nothing fails loudly and the damage is silent.",
+        "Bumping to /v2 for a change that expand-and-contract would have absorbed, creating a second code path that never retires.",
+        "Removing a deprecated field on a schedule rather than on evidence that nobody reads it.",
+        "Changing the cursor encoding without a version prefix, so every token already in flight becomes undecodable or, worse, decodable as the wrong thing."
+      ],
+      "summaryMarkdown": "Compatibility is decided by what clients may assume: adding optional things is usually safe, while removing, renaming, retyping or redefining is breaking. Watch the deceptive cases — new enum values and strict client validation. Prefer expand-and-contract to a version bump, and contract on evidence rather than on a date. Version your cursors and keep them opaque, so tokens issued by old code can still be honoured.",
+      "exerciseIds": [
+        "v2-e022",
+        "v2-e023",
+        "v2-e024"
+      ],
+      "reviewCardIds": [
+        "v2-c015",
+        "v2-c016"
+      ],
+      "references": [
+        {
+          "label": "MDN: HTTP content negotiation",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Content_negotiation"
+        },
+        {
+          "label": "PostgreSQL: Row-wise comparison",
+          "url": "https://www.postgresql.org/docs/current/functions-comparisons.html#ROW-WISE-COMPARISON"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e022",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which of these changes is breaking?",
+      "conceptIds": [
+        "api.versioning"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Four proposed changes to a live endpoint. Decide which ones a client can survive.",
+      "lessonId": "v2-l08",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "`GET /jobs` currently returns `{ id, status, cost }` where `cost` is a number of pence.\n\nWhich of the following are **breaking** changes for a client you cannot redeploy? Select all that apply.",
+      "hints": [
+        "Ask of each: could a reasonable client, written against the current response, now do something wrong without erroring?",
+        "One of these keeps the field name and type identical and is still the most dangerous change on the list.",
+        "Changing units, changing types, and requiring something previously optional all break callers; adding a field they can ignore does not."
+      ],
+      "solution": {
+        "modelAnswer": "cost-to-pounds, cost-to-string, require-depot",
+        "explanationMarkdown": "Changing `cost` from pence to pounds is breaking and silent — the field name and type are unchanged, so every client keeps parsing it and every displayed price is wrong by a factor of 100. Changing it to a string breaks arithmetic and comparisons. Making `depotId` required breaks every existing caller that omits it. Adding `scheduledFor` is compatible for any client following the robustness rule."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "cost-to-pounds",
+            "textMarkdown": "Change `cost` from pence to pounds, keeping the field name and numeric type.",
+            "correct": true,
+            "explanationMarkdown": "Breaking, and the most dangerous kind: nothing fails, no error is raised, and every price shown by every existing client is silently wrong by a factor of 100."
+          },
+          {
+            "id": "cost-to-string",
+            "textMarkdown": "Change `cost` from a number to a decimal string such as `\"12.50\"`.",
+            "correct": true,
+            "explanationMarkdown": "Breaking. Arithmetic and comparisons on the client change behaviour — `\"9.00\" > \"10.00\"` is true as a string comparison — even though the value looks equivalent to a human."
+          },
+          {
+            "id": "require-depot",
+            "textMarkdown": "Make the previously optional `depotId` request parameter required.",
+            "correct": true,
+            "explanationMarkdown": "Breaking. Narrowing what you accept invalidates every existing caller that relied on the old default."
+          },
+          {
+            "id": "add-field",
+            "textMarkdown": "Add an optional `scheduledFor` field to each job in the response.",
+            "correct": false,
+            "explanationMarkdown": "Compatible under the robustness rule, since clients should ignore fields they do not recognise. Worth confirming that no consumer validates strictly and rejects unknown properties, but this is the standard safe change."
+          }
+        ]
+      },
+      "primaryConceptId": "api.versioning",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e023",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Classify a schema change",
+      "conceptIds": [
+        "api.versioning"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Encode the compatibility rules so they stop being a matter of opinion in review.",
+      "lessonId": "v2-l08",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `classifyChange(before, after)`.\n\nEach argument describes a response shape as an object mapping a field name to `{ type, required }`, e.g. `{ id: { type: 'number', required: true }, note: { type: 'string', required: false } }`.\n\nReturn `{ verdict, reasons }` where `reasons` is an array of strings in the order described below, and `verdict` is `'breaking'` when `reasons` is non-empty, otherwise `'compatible'`.\n\nProduce a reason for each of these, checking fields in the order they appear in `before` first, then the new fields in the order they appear in `after`:\n\n- a field in `before` that is absent from `after`: `` `removed: <field>` ``\n- a field in both whose `type` differs: `` `retyped: <field>` ``\n- a field in both that was `required: false` and is now `required: true`: `` `now required: <field>` ``\n- a field only in `after` with `required: true`: `` `new required field: <field>` ``\n\nRules:\n\n- A field can produce more than one reason; report retyped before now-required.\n- A new **optional** field produces no reason: that is the compatible change.\n- A field becoming optional when it was required produces no reason.\n- Do not modify either argument.",
+      "hints": [
+        "Two passes: one over the old fields, one over the new ones. They ask different questions.",
+        "For a field present in both there are two independent things to check, and the order the reasons come out in is specified.",
+        "First loop over `before`'s keys: absent from `after` means removed and nothing more to check; otherwise compare type, then the required transition. Then loop over `after`'s keys, reporting only new ones that are required."
+      ],
+      "solution": {
+        "code": "function classifyChange(before, after) {\n  const reasons = [];\n  const beforeKeys = Object.keys(before);\n  for (let i = 0; i < beforeKeys.length; i += 1) {\n    const key = beforeKeys[i];\n    if (!Object.prototype.hasOwnProperty.call(after, key)) {\n      reasons.push('removed: ' + key);\n      continue;\n    }\n    if (before[key].type !== after[key].type) {\n      reasons.push('retyped: ' + key);\n    }\n    if (before[key].required === false && after[key].required === true) {\n      reasons.push('now required: ' + key);\n    }\n  }\n  const afterKeys = Object.keys(after);\n  for (let i = 0; i < afterKeys.length; i += 1) {\n    const key = afterKeys[i];\n    if (Object.prototype.hasOwnProperty.call(before, key)) continue;\n    if (after[key].required === true) {\n      reasons.push('new required field: ' + key);\n    }\n  }\n  return { verdict: reasons.length > 0 ? 'breaking' : 'compatible', reasons: reasons };\n}",
+        "explanationMarkdown": "The asymmetry between the two loops is the content of the compatibility rule. Going *away* from the old shape, almost every difference is breaking: a field that disappears, changes type, or becomes mandatory all invalidate assumptions a client already holds. Going *toward* the new shape, only a new mandatory field is a problem, because a client that has never heard of an optional field simply does not send it.\n\nThe `continue` after `removed` matters: once a field is gone there is nothing to compare its type against, and reading `after[key].type` would throw. Ordering the checks so the impossible case exits first is what keeps the rest of the loop simple.\n\nThis is deliberately conservative — it flags changes that some clients would survive, such as retyping a field nobody reads. That is the right default for an automated check: a false alarm costs a conversation, while a missed breaking change costs a customer's integration."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "classifyChange",
+        "starterCode": "function classifyChange(before, after) {\n  // Only notices removed fields.\n  const reasons = [];\n  const keys = Object.keys(before);\n  for (let i = 0; i < keys.length; i += 1) {\n    if (!after[keys[i]]) reasons.push('removed: ' + keys[i]);\n  }\n  return { verdict: reasons.length > 0 ? 'breaking' : 'compatible', reasons: reasons };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "identical-is-compatible",
+            "args": [
+              {
+                "id": {
+                  "type": "number",
+                  "required": true
+                }
+              },
+              {
+                "id": {
+                  "type": "number",
+                  "required": true
+                }
+              }
+            ],
+            "expected": {
+              "verdict": "compatible",
+              "reasons": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "new-optional-field-is-compatible",
+            "args": [
+              {
+                "id": {
+                  "type": "number",
+                  "required": true
+                }
+              },
+              {
+                "id": {
+                  "type": "number",
+                  "required": true
+                },
+                "note": {
+                  "type": "string",
+                  "required": false
+                }
+              }
+            ],
+            "expected": {
+              "verdict": "compatible",
+              "reasons": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "removed-field",
+            "args": [
+              {
+                "id": {
+                  "type": "number",
+                  "required": true
+                },
+                "cost": {
+                  "type": "number",
+                  "required": true
+                }
+              },
+              {
+                "id": {
+                  "type": "number",
+                  "required": true
+                }
+              }
+            ],
+            "expected": {
+              "verdict": "breaking",
+              "reasons": [
+                "removed: cost"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "retyped-field",
+            "args": [
+              {
+                "cost": {
+                  "type": "number",
+                  "required": true
+                }
+              },
+              {
+                "cost": {
+                  "type": "string",
+                  "required": true
+                }
+              }
+            ],
+            "expected": {
+              "verdict": "breaking",
+              "reasons": [
+                "retyped: cost"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "optional-becomes-required",
+            "args": [
+              {
+                "depotId": {
+                  "type": "number",
+                  "required": false
+                }
+              },
+              {
+                "depotId": {
+                  "type": "number",
+                  "required": true
+                }
+              }
+            ],
+            "expected": {
+              "verdict": "breaking",
+              "reasons": [
+                "now required: depotId"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "required-becomes-optional-is-compatible",
+            "args": [
+              {
+                "depotId": {
+                  "type": "number",
+                  "required": true
+                }
+              },
+              {
+                "depotId": {
+                  "type": "number",
+                  "required": false
+                }
+              }
+            ],
+            "expected": {
+              "verdict": "compatible",
+              "reasons": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "new-required-field",
+            "args": [
+              {
+                "id": {
+                  "type": "number",
+                  "required": true
+                }
+              },
+              {
+                "id": {
+                  "type": "number",
+                  "required": true
+                },
+                "depotId": {
+                  "type": "number",
+                  "required": true
+                }
+              }
+            ],
+            "expected": {
+              "verdict": "breaking",
+              "reasons": [
+                "new required field: depotId"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "several-reasons-in-order",
+            "args": [
+              {
+                "cost": {
+                  "type": "number",
+                  "required": false
+                },
+                "note": {
+                  "type": "string",
+                  "required": true
+                }
+              },
+              {
+                "cost": {
+                  "type": "string",
+                  "required": true
+                },
+                "depotId": {
+                  "type": "number",
+                  "required": true
+                }
+              }
+            ],
+            "expected": {
+              "verdict": "breaking",
+              "reasons": [
+                "retyped: cost",
+                "now required: cost",
+                "removed: note",
+                "new required field: depotId"
+              ]
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "api.versioning",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e024",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Propose a migration for the cursor change",
+      "conceptIds": [
+        "api.pagination-compatibility"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Write the plan you would put in the pull request description.",
+      "lessonId": "v2-l08",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "`GET /jobs` paginates with a cursor that is currently `base64(JSON.stringify({ id }))`. You need to change it to `(scheduledFor, id)` because the sort is not total and rows are being skipped.\n\nClients hold cursors right now and will send them after you deploy. One consumer is an integration you cannot redeploy.\n\nIn five to nine sentences, describe how you would ship this so no client breaks and no in-flight scan silently returns the wrong page. Say what you would do with cursors issued by the old code, and how you would eventually stop supporting them.",
+      "hints": [
+        "The dangerous outcome is not an error — it is an old token being decoded as if it were a new one and quietly producing a wrong page.",
+        "You need to be able to tell the two encodings apart with certainty. What must the token carry for that to be possible?",
+        "Version the token, accept both encodings for a period while upgrading old ones on read, and retire the old form only once telemetry shows they have stopped arriving."
+      ],
+      "solution": {
+        "modelAnswer": "I would prefix the token with a version — `v2:base64(...)` — and treat any token without a recognised prefix as the old `v1` form, because the two encodings must be distinguishable with certainty rather than by guessing at the decoded shape. On receiving a v1 token I would decode the id and translate it into the new scheme by looking up that row's `scheduledFor`, so a client mid-scan continues from the right place and receives a v2 cursor in the response; if the row has since been deleted I would return a clear error rather than silently restarting at page one, because a silent restart makes a client loop forever. Every response would emit only v2 tokens, so each client upgrades on its next request without changing any code. I would log the cursor version on each request, which gives me the evidence to retire v1 — when the v1 rate has been zero for longer than the longest plausible scan, plus a margin for the integration I cannot redeploy. Only then would I remove the v1 branch and start rejecting unversioned tokens. Throughout, the token stays opaque and I would document that clients must never construct or parse one, since the whole migration depends on the encoding being mine to change.",
+        "explanationMarkdown": "The core insight is that the failure to design against is a *silent wrong page*, not an error, which is why the tokens must be self-identifying rather than sniffed. A strong answer also handles the deleted-row case deliberately and retires the old form on telemetry rather than on a date.\n\nA weaker answer says 'support both formats for a while'. That is the right shape, but without a version marker 'support both' means guessing from the decoded payload, which is exactly where a wrong-but-plausible interpretation slips through."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Makes the two cursor encodings distinguishable with certainty, by versioning the token rather than inferring the format from its decoded contents.",
+          "Explains what happens to a client holding an old cursor: it is accepted and translated, so an in-flight scan continues correctly and receives a new-format token.",
+          "Identifies the silent failure being avoided — an old token decoded as a new one returning a wrong page — rather than only avoiding an error.",
+          "Retires the old format on evidence (telemetry showing old tokens have stopped arriving) rather than on a fixed date, and keeps the token opaque to clients."
+        ],
+        "modelAnswerMarkdown": "See the model answer. Credit self-identifying tokens, a deliberate decision for the deleted-row case, and evidence-based retirement. Also credit noting that responses should emit only the new format so clients upgrade passively."
+      },
+      "primaryConceptId": "api.pagination-compatibility",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c015",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The most dangerous compatible-looking change",
+      "conceptIds": [
+        "api.versioning"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the change that breaks clients without breaking anything.",
+      "lessonId": "v2-l08",
+      "type": "recall",
+      "promptMarkdown": "Which kind of API change keeps the field name and type identical, passes every schema check, and is still breaking?",
+      "answerMarkdown": "Changing what the value means — units, timezone, or the definition behind a status. A `cost` that switches from pence to pounds, or a `dueAt` that switches from UTC to local time, parses perfectly everywhere and is wrong everywhere.",
+      "explanationMarkdown": "Every automated safeguard we have — schema diffs, type checks, contract tests written against the shape — operates on structure, and the meaning of a value is not part of the structure. That is why this class of change needs a human to catch it, and why it belongs in a review checklist rather than a linter. When it is unavoidable, the safe route is a new field with a name that states the unit, and retiring the old one on evidence.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "api.versioning"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c016",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why must a cursor be opaque?",
+      "conceptIds": [
+        "api.pagination-compatibility"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the reasoning to a client that has started parsing tokens.",
+      "lessonId": "v2-l08",
+      "type": "transfer",
+      "promptMarkdown": "You discover a consumer is base64-decoding your cursors and constructing their own to jump to a position. What has been lost, and what would you do?",
+      "answerMarkdown": "The freedom to change the encoding has been lost: the cursor's internal structure is now part of the contract in practice, so any change to it breaks that consumer. I would document the token as opaque, start signing it so hand-built tokens are rejected, and give the consumer a supported way to express what they actually need — a filter or sort parameter — before enforcing it.",
+      "explanationMarkdown": "This is Hyrum's law in miniature: with enough consumers, every observable behaviour of a system will be depended on by someone, whether or not you documented it. Signing makes the boundary real rather than advisory, but enforcing it without first providing the missing capability just breaks a customer to win an argument — the capability they were reaching for is usually legitimate and cheap to support properly.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "api.pagination-compatibility"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Schema changes that survive a deployment",
+      "conceptIds": [
+        "api.schema-change-safety"
+      ],
+      "prerequisiteIds": [
+        "sql.migrations",
+        "ops.deployment-order"
+      ],
+      "bodyMarkdown": "There is a window during every deployment when **old code and new code are both running against the same database**. Rolling deploys, blue-green, a single restart with a request in flight — all produce it. Most migration accidents are a failure to design for that window rather than a failure of the migration itself.\n\nThe mental model: a migration and a deploy are two events, and you do not control their exact interleaving. Every schema change must therefore be safe in **both** orders — migration first with old code still live, and new code live before the migration finishes.\n\nThis is why **expand and contract** applies to databases as it does to APIs:\n\n1. **Expand** — add the new column, nullable, with a default. Old code ignores it; new code can use it. Safe in either order.\n2. **Backfill** — populate existing rows, in batches, outside the deploy.\n3. **Migrate** — deploy code that writes both old and new, then code that reads new.\n4. **Contract** — drop the old column, in a later release, once nothing references it.\n\nThe single most common mistake is **rename in one step**. `ALTER TABLE jobs RENAME COLUMN note TO description` is instantaneous and atomic, and it breaks every running instance of the old code the moment it commits — those instances are still selecting `note`. A rename is a drop and an add wearing a disguise; do it as expand-migrate-contract, over three releases.\n\nSome operations are hazardous for a different reason: they hold a lock long enough to stall the application. Adding a column with a **volatile** default, or adding a `NOT NULL` constraint to a populated table, can rewrite or scan the whole table while holding a lock that queues every other query behind it. Modern PostgreSQL avoids the rewrite for a constant default, and offers `NOT VALID` followed by `VALIDATE CONSTRAINT` to add constraints without a blocking scan. The general habit: know whether a statement takes a lock and for how long, and set a `lock_timeout` so a migration that cannot get its lock **fails fast instead of queueing the entire application behind it**.\n\nFinally, treat the contract step as the risky one. It is the only irreversible step: adding is undoable, dropping a populated column is not. Ship it separately, when nothing else is changing, so a rollback is a single clean revert.",
+      "chapterId": "v2-ch15",
+      "sortOrder": 2,
+      "objectives": [
+        "Sequence a schema change so old and new code are both correct during the deploy window.",
+        "Explain why a single-step rename is unsafe and what replaces it.",
+        "Identify migration statements that take blocking locks and how to avoid stalling the application."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "Renaming `jobs.note` to `jobs.description`, done safely.\n\n**Release 1 — expand.**\n\n```sql\nALTER TABLE jobs ADD COLUMN description text;   -- nullable, no default, no rewrite\n```\n\n```js\n// Application writes both, reads the old one.\nawait tx.job.update({ where: { id }, data: { note: value, description: value } });\nconst shown = job.note;\n```\n\nSafe in either order: old code ignores a column it does not know about, and new code writing `description` before the column exists simply has not been deployed yet.\n\n**Between releases — backfill.**\n\n```sql\nUPDATE jobs SET description = note\n WHERE description IS NULL AND id BETWEEN $1 AND $2;   -- in batches\n```\n\nBatched so no single statement locks a large range of rows for long.\n\n**Release 2 — migrate the read.**\n\n```js\nconst shown = job.description ?? job.note;   // still writing both\n```\n\nThe fallback covers any row the backfill has not reached. If something is wrong, this release reverts cleanly, because both columns are still populated.\n\n**Release 3 — contract.**\n\n```sql\nALTER TABLE jobs DROP COLUMN note;\n```\n\nOnly once no code references `note` and the deploy of release 2 is fully rolled out. This is the irreversible step, so it ships alone.\n\n**The one-step version, for contrast:**\n\n```sql\nALTER TABLE jobs RENAME COLUMN note TO description;\n```\n\nThe instant this commits, every old instance still serving traffic issues `SELECT ... note` and gets `column \"note\" does not exist`. The migration succeeded; the application is down. Three releases is not bureaucracy — it is the price of not requiring the database and every server to change in the same instant.",
+      "commonMistakes": [
+        "Renaming or dropping a column in the same release that stops using it, breaking old instances still serving traffic.",
+        "Assuming the migration always runs before the new code, when rolling deploys make both orders possible.",
+        "Adding a NOT NULL constraint to a populated table in one statement, scanning the whole table under a lock.",
+        "Backfilling in a single UPDATE, holding locks on a large range of rows for the duration.",
+        "Shipping the irreversible contract step alongside feature changes, so a rollback cannot be a clean revert.",
+        "Running migrations without a lock_timeout, so one blocked statement queues every query behind it."
+      ],
+      "summaryMarkdown": "Old and new code always overlap during a deploy, so every schema change must be correct in both orders. Expand, backfill in batches, migrate reads, then contract in a later release. A rename is a drop plus an add and cannot be done in one step. Know which statements take blocking locks, set a lock_timeout so a migration fails fast rather than stalling the application, and ship the irreversible drop on its own.",
+      "exerciseIds": [
+        "v2-e025",
+        "v2-e026",
+        "v2-e027"
+      ],
+      "reviewCardIds": [
+        "v2-c017",
+        "v2-c018"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: ALTER TABLE",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html"
+        },
+        {
+          "label": "PostgreSQL: Explicit locking",
+          "url": "https://www.postgresql.org/docs/current/explicit-locking.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e025",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the deployment outage",
+      "conceptIds": [
+        "api.schema-change-safety"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The migration succeeded and the site went down. Read the timeline.",
+      "lessonId": "v2-l09",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "A release renamed a column and updated the code in the same deploy.\n\n```\n14:02:10  migration applied: ALTER TABLE jobs RENAME COLUMN note TO description\n14:02:11  errors begin: column \"note\" does not exist\n14:02:40  instance 1 of 4 replaced with new build\n14:03:25  instance 2 of 4 replaced\n14:04:02  instance 3 of 4 replaced\n14:04:51  instance 4 of 4 replaced\n14:04:52  errors stop\n```\n\nThe migration ran correctly and the new code is correct. What went wrong, and what should have been done?",
+      "hints": [
+        "Look at the gap between 14:02:11 and 14:04:52. What was running during it?",
+        "A rolling deploy replaces instances one at a time, so old code keeps serving traffic for minutes after the migration commits.",
+        "The schema changed in a way that old code could not tolerate; the change needed to be additive first, with the removal in a later release."
+      ],
+      "solution": {
+        "modelAnswer": "expand-contract",
+        "explanationMarkdown": "For 161 seconds, instances running the old build issued `SELECT ... note` against a schema where `note` no longer existed. Nothing here was faulty in isolation — the migration worked, the new code works — but the change assumed the database and every server would switch in the same instant, which a rolling deploy never does.\n\nThe safe sequence is three releases: add `description` (old code ignores it, new code writes both), backfill and move reads across, and only then drop `note`. Each step is correct whichever order the migration and the deploy happen in.\n\nTwo tempting non-fixes. Taking the site down for the migration works and is a real option for a small internal tool, but it treats a routine change as an event, and the same reasoning would apply to every future one. Making the deploy faster narrows the window without closing it — a single in-flight request is enough to error, and a rollback would then break the *new* code the same way."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "expand-contract",
+            "textMarkdown": "Old instances were still serving traffic against the renamed column; the change should have been split into add-and-dual-write, migrate reads, then drop in a later release.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Every step of expand-and-contract is safe in both deploy orders, which is what a rolling deploy requires."
+          },
+          {
+            "id": "faster-deploy",
+            "textMarkdown": "The rolling deploy was too slow; replacing all instances at once would have avoided the errors.",
+            "correct": false,
+            "explanationMarkdown": "It narrows the window rather than closing it — one in-flight request still fails — and it makes rollback dangerous, since reverting to old code would break against the new schema."
+          },
+          {
+            "id": "maintenance",
+            "textMarkdown": "Migrations that rename columns require a maintenance window with the application stopped.",
+            "correct": false,
+            "explanationMarkdown": "It would work, and is a legitimate choice for some systems, but it makes an ordinary change into an outage. Expand-and-contract achieves the same safety with no downtime."
+          },
+          {
+            "id": "migration-order",
+            "textMarkdown": "The migration should have run after the new code was deployed rather than before.",
+            "correct": false,
+            "explanationMarkdown": "That reverses the failure rather than removing it: new code would then be selecting `description` from a schema that still had `note`. A change that is only safe in one order is the problem."
+          }
+        ]
+      },
+      "primaryConceptId": "api.schema-change-safety",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e026",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Order the migration steps",
+      "conceptIds": [
+        "api.schema-change-safety"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Expand-and-contract as a function: given the steps, put them in a safe order.",
+      "lessonId": "v2-l09",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "Implement `planRelease(steps)`.\n\n`steps` is an array of `{ id, phase }` where `phase` is one of `'add-column'`, `'backfill'`, `'dual-write'`, `'read-new'`, `'drop-column'`.\n\nReturn `{ order, unsafe }`:\n\n- `order` is the step ids sorted into the safe sequence: `add-column`, `dual-write`, `backfill`, `read-new`, `drop-column`. Steps sharing a phase keep their **input order** relative to each other.\n- `unsafe` is an array of strings, built by scanning `order` and reporting:\n  - `` `drop before read-new: <id>` `` for a `drop-column` step when no `read-new` step exists anywhere in `steps`\n  - `` `backfill before column exists: <id>` `` for a `backfill` step when no `add-column` step exists anywhere in `steps`\n  - Report these in the order the offending steps appear in `order`.\n\nRules:\n\n- An unknown phase is dropped from `order` and reported as `` `unknown phase: <id>` `` — these come **after** all other messages in `unsafe`, in input order.\n- Do not modify `steps`.",
+      "hints": [
+        "A stable sort by a phase rank gives you `order`. What is the rank of a phase you do not recognise?",
+        "The two safety checks do not depend on position in the output — they ask whether a required phase is present in the input at all.",
+        "Rank the known phases 0..4, filter out and remember the unknown ones, sort stably by rank, then scan the sorted list for the two conditions before appending the unknown-phase messages."
+      ],
+      "solution": {
+        "code": "function planRelease(steps) {\n  const RANK = {\n    'add-column': 0,\n    'dual-write': 1,\n    'backfill': 2,\n    'read-new': 3,\n    'drop-column': 4,\n  };\n  const known = [];\n  const unknown = [];\n  let hasReadNew = false;\n  let hasAddColumn = false;\n  for (let i = 0; i < steps.length; i += 1) {\n    const s = steps[i];\n    if (!Object.prototype.hasOwnProperty.call(RANK, s.phase)) {\n      unknown.push('unknown phase: ' + s.id);\n      continue;\n    }\n    if (s.phase === 'read-new') hasReadNew = true;\n    if (s.phase === 'add-column') hasAddColumn = true;\n    known.push({ id: s.id, phase: s.phase, at: i });\n  }\n  known.sort(function (a, b) {\n    if (RANK[a.phase] !== RANK[b.phase]) return RANK[a.phase] - RANK[b.phase];\n    return a.at - b.at;\n  });\n  const order = [];\n  const unsafe = [];\n  for (let i = 0; i < known.length; i += 1) {\n    const s = known[i];\n    order.push(s.id);\n    if (s.phase === 'drop-column' && !hasReadNew) {\n      unsafe.push('drop before read-new: ' + s.id);\n    }\n    if (s.phase === 'backfill' && !hasAddColumn) {\n      unsafe.push('backfill before column exists: ' + s.id);\n    }\n  }\n  for (let i = 0; i < unknown.length; i += 1) {\n    unsafe.push(unknown[i]);\n  }\n  return { order: order, unsafe: unsafe };\n}",
+        "explanationMarkdown": "The rank table *is* the expand-and-contract rule, written down once. Encoding it as data rather than as a chain of comparisons is what makes it reviewable — someone can look at five lines and check the order against the lesson.\n\nCarrying the original index `at` and using it as the tie-break is what makes the sort stable. It matters here because two steps in the same phase are usually ordered deliberately — adding two columns in a specific sequence, say — and a sort that reshuffles them would silently discard that intent. JavaScript's `sort` is required to be stable in modern engines, but making the tie-break explicit means the function does not depend on that.\n\nThe two safety checks are about *presence*, not position, which is the real risk: a plan that drops a column when nothing ever moved the reads across is broken no matter how it is ordered."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "planRelease",
+        "starterCode": "function planRelease(steps) {\n  // Keeps the author's order and never questions it.\n  const order = [];\n  for (let i = 0; i < steps.length; i += 1) {\n    order.push(steps[i].id);\n  }\n  return { order: order, unsafe: [] };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "sorts-into-safe-order",
+            "args": [
+              [
+                {
+                  "id": "s1",
+                  "phase": "drop-column"
+                },
+                {
+                  "id": "s2",
+                  "phase": "add-column"
+                },
+                {
+                  "id": "s3",
+                  "phase": "read-new"
+                },
+                {
+                  "id": "s4",
+                  "phase": "backfill"
+                },
+                {
+                  "id": "s5",
+                  "phase": "dual-write"
+                }
+              ]
+            ],
+            "expected": {
+              "order": [
+                "s2",
+                "s5",
+                "s4",
+                "s3",
+                "s1"
+              ],
+              "unsafe": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "already-in-order",
+            "args": [
+              [
+                {
+                  "id": "a",
+                  "phase": "add-column"
+                },
+                {
+                  "id": "b",
+                  "phase": "dual-write"
+                }
+              ]
+            ],
+            "expected": {
+              "order": [
+                "a",
+                "b"
+              ],
+              "unsafe": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "drop-without-read-new",
+            "args": [
+              [
+                {
+                  "id": "a",
+                  "phase": "add-column"
+                },
+                {
+                  "id": "z",
+                  "phase": "drop-column"
+                }
+              ]
+            ],
+            "expected": {
+              "order": [
+                "a",
+                "z"
+              ],
+              "unsafe": [
+                "drop before read-new: z"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "backfill-without-add-column",
+            "args": [
+              [
+                {
+                  "id": "b",
+                  "phase": "backfill"
+                },
+                {
+                  "id": "r",
+                  "phase": "read-new"
+                }
+              ]
+            ],
+            "expected": {
+              "order": [
+                "b",
+                "r"
+              ],
+              "unsafe": [
+                "backfill before column exists: b"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "stable-within-a-phase",
+            "args": [
+              [
+                {
+                  "id": "first",
+                  "phase": "add-column"
+                },
+                {
+                  "id": "second",
+                  "phase": "add-column"
+                },
+                {
+                  "id": "third",
+                  "phase": "add-column"
+                }
+              ]
+            ],
+            "expected": {
+              "order": [
+                "first",
+                "second",
+                "third"
+              ],
+              "unsafe": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "unknown-phase-dropped-and-reported-last",
+            "args": [
+              [
+                {
+                  "id": "x",
+                  "phase": "rename-column"
+                },
+                {
+                  "id": "a",
+                  "phase": "add-column"
+                },
+                {
+                  "id": "z",
+                  "phase": "drop-column"
+                }
+              ]
+            ],
+            "expected": {
+              "order": [
+                "a",
+                "z"
+              ],
+              "unsafe": [
+                "drop before read-new: z",
+                "unknown phase: x"
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "dual-write-listed-before-add-column",
+            "args": [
+              [
+                {
+                  "id": "dw",
+                  "phase": "dual-write"
+                },
+                {
+                  "id": "ac",
+                  "phase": "add-column"
+                }
+              ]
+            ],
+            "expected": {
+              "order": [
+                "ac",
+                "dw"
+              ],
+              "unsafe": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "empty-plan",
+            "args": [
+              []
+            ],
+            "expected": {
+              "order": [],
+              "unsafe": []
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "api.schema-change-safety",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e027",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the migration for lock hazards",
+      "conceptIds": [
+        "api.schema-change-safety"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Four statements in one migration. Identify the one that stalls the application.",
+      "lessonId": "v2-l09",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "This migration is about to run against a `jobs` table holding 40 million rows on a busy system:\n\n```sql\n-- 1\nALTER TABLE jobs ADD COLUMN description text;\n-- 2\nCREATE INDEX jobs_depot_sched ON jobs (depot_id, scheduled_for);\n-- 3\nALTER TABLE jobs ALTER COLUMN description SET NOT NULL;\n-- 4\nALTER TABLE jobs ADD COLUMN archived boolean NOT NULL DEFAULT false;\n```\n\nWhich statement is most likely to stall the application, and why?",
+      "hints": [
+        "Two of these touch every row. One of them can also never succeed on this table.",
+        "Consider statement 3 against a column added moments earlier by statement 1. What value do all 40 million existing rows hold?",
+        "Setting NOT NULL scans the whole table under an exclusive lock — and here every existing row is NULL, so it scans and then fails."
+      ],
+      "solution": {
+        "modelAnswer": "not-null-scan",
+        "explanationMarkdown": "Statement 3 is the worst of the four. `SET NOT NULL` takes an ACCESS EXCLUSIVE lock and scans all 40 million rows to prove none is NULL — during which every other query against `jobs` queues behind it. And because statement 1 added the column moments earlier with no default, *every* existing row is NULL, so the scan finishes by raising an error and rolling back. The application is stalled for the duration and nothing is achieved.\n\nThe correct sequence is to add the column, backfill it in batches, and only then add the constraint — ideally as `NOT VALID` followed by `VALIDATE CONSTRAINT`, which takes a weaker lock for the scan.\n\nStatement 2 is the other hazard and is easily missed: a plain `CREATE INDEX` blocks writes to the table for the whole build, which on 40 million rows is minutes. `CREATE INDEX CONCURRENTLY` avoids that, at the cost of not running inside a transaction. Statement 4 looks alarming and is fine on modern PostgreSQL: a *constant* default is stored as metadata rather than rewriting every row. Statement 1 is instantaneous."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "not-null-scan",
+            "textMarkdown": "Statement 3 — `SET NOT NULL` scans all 40 million rows under an exclusive lock, and since the column was just added with no default, every row is NULL so it fails after the stall.",
+            "correct": true,
+            "explanationMarkdown": "Correct on both counts: the lock stalls the application, and the statement cannot succeed against a freshly added, unpopulated column. Backfill first, then add the constraint."
+          },
+          {
+            "id": "index",
+            "textMarkdown": "Statement 2 — a plain CREATE INDEX blocks writes for the whole build.",
+            "correct": false,
+            "explanationMarkdown": "A real hazard and worth fixing with CONCURRENTLY — but it does at least succeed. Statement 3 stalls the application and then fails, which is strictly worse."
+          },
+          {
+            "id": "default-column",
+            "textMarkdown": "Statement 4 — adding a NOT NULL column with a default rewrites all 40 million rows.",
+            "correct": false,
+            "explanationMarkdown": "This was true on older PostgreSQL and is the most commonly repeated stale advice in this area. A constant default is now stored as metadata, so the operation is fast."
+          },
+          {
+            "id": "add-column",
+            "textMarkdown": "Statement 1 — adding a column requires a table rewrite.",
+            "correct": false,
+            "explanationMarkdown": "Adding a nullable column with no default is a catalogue change only: near-instant, and safe to run at any time."
+          }
+        ]
+      },
+      "primaryConceptId": "api.schema-change-safety",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c017",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why can't you rename a column in one step?",
+      "conceptIds": [
+        "api.schema-change-safety"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the reason behind the three-release rule.",
+      "lessonId": "v2-l09",
+      "type": "recall",
+      "promptMarkdown": "A rename is atomic and instantaneous. Why is it still unsafe to ship in one release?",
+      "answerMarkdown": "Because old code is still running when it commits. During a rolling deploy some instances continue serving traffic with the old build, and they immediately start failing with 'column does not exist'. A rename is effectively a drop plus an add, and dropping something old code still reads breaks it.",
+      "explanationMarkdown": "The atomicity of the statement is exactly what misleads: it is atomic with respect to the *database*, not with respect to the *fleet*. The deploy window where both versions are live is unavoidable with rolling deploys, and it is also what makes rollback possible — a schema only the new code can tolerate means you cannot go back. Expand-and-contract keeps every intermediate state readable by both versions.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "api.schema-change-safety"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c018",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which step is the irreversible one?",
+      "conceptIds": [
+        "api.schema-change-safety",
+        "ops.deployment-recovery"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the risk assessment to release planning.",
+      "lessonId": "v2-l09",
+      "type": "transfer",
+      "promptMarkdown": "In an expand-migrate-contract sequence, which step should ship on its own, and why does that matter for rollback?",
+      "answerMarkdown": "The contract step — dropping the old column. Adding a column, dual-writing and moving reads are all reversible by redeploying the previous build, but a dropped column containing data cannot be restored by a code rollback. Shipping it alone means that if anything goes wrong in the same release, the revert is a single clean change rather than a change entangled with an irreversible one.",
+      "explanationMarkdown": "Ordering releases by reversibility is a habit worth generalising: put the steps you can undo first, get them running in production, and let the irreversible step ride alone once the rest is proven. It also changes what rollback *means* at each stage — before the contract step a rollback is a redeploy, and after it a rollback is a restore, which is a different operation with real data loss.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "api.schema-change-safety"
+    },
+    {
+      "kind": "assessment",
+      "id": "v2-a15",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "API evolution placement",
+      "conceptIds": [
+        "api.filtering",
+        "api.versioning",
+        "api.pagination-compatibility",
+        "api.schema-change-safety"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five questions on filtering, compatibility, cursors and schema change. Pass four, including both critical items, to place out of this chapter.",
+      "chapterId": "v2-ch15",
+      "items": [
+        {
+          "id": "v2-a15-i1",
+          "objectiveIds": [
+            "api.filtering"
+          ],
+          "critical": true,
+          "promptMarkdown": "A list endpoint copies every unrecognised query parameter into its database filter. Besides the obvious performance risk, what is the security consequence?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "inference",
+                "textMarkdown": "A caller can filter on columns the API never returns and infer their values from which rows come back.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Filtering is a read primitive: `?internalNotes.contains=fraud` reveals whether such a note exists even though the field is never in the response."
+              },
+              {
+                "id": "sql-injection",
+                "textMarkdown": "It permits SQL injection through the parameter values.",
+                "correct": false,
+                "explanationMarkdown": "Values are still parameterised by the query builder. The exposure is the field *names* becoming a query surface, not the values escaping quoting."
+              },
+              {
+                "id": "none",
+                "textMarkdown": "None — if a field is not returned, filtering on it reveals nothing.",
+                "correct": false,
+                "explanationMarkdown": "The response is not the only channel. The *set of rows returned* is itself information, and a caller can binary-search a hidden value by filtering on it repeatedly."
+              },
+              {
+                "id": "csrf",
+                "textMarkdown": "It enables cross-site request forgery against the list endpoint.",
+                "correct": false,
+                "explanationMarkdown": "CSRF concerns state-changing requests and is addressed by tokens and origin checks; a read filter surface is a different class of problem."
+              }
+            ]
+          },
+          "explanationMarkdown": "Treating a filter surface as a read capability, rather than as a convenience, is what makes the allow-list feel necessary rather than bureaucratic."
+        },
+        {
+          "id": "v2-a15-i2",
+          "objectiveIds": [
+            "api.versioning"
+          ],
+          "critical": false,
+          "promptMarkdown": "An endpoint returns `status` as one of `open`, `scheduled`, `done`. You want to add a fourth value, `deferred`. Is this compatible?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "depends",
+                "textMarkdown": "It depends on what clients do with the value: safe if they display it, breaking if they switch on it and have a default branch that mishandles the unknown case.",
+                "correct": true,
+                "explanationMarkdown": "Correct. This is the classic deceptive change — compatible by the schema, potentially breaking in behaviour, and only knowable by looking at how consumers use the field."
+              },
+              {
+                "id": "always-safe",
+                "textMarkdown": "Always compatible: adding a value never removes anything.",
+                "correct": false,
+                "explanationMarkdown": "Nothing is removed from the schema, but a client whose `switch` falls through to a default of 'treat as done' will now act wrongly on deferred jobs, silently."
+              },
+              {
+                "id": "always-breaking",
+                "textMarkdown": "Always breaking: any change to an enum requires a new version.",
+                "correct": false,
+                "explanationMarkdown": "Too strict. For a client that renders the value as text, a new enum member is genuinely harmless, and treating every such change as a version bump makes the API impossible to evolve."
+              },
+              {
+                "id": "safe-if-documented",
+                "textMarkdown": "Compatible as long as the new value is documented in advance.",
+                "correct": false,
+                "explanationMarkdown": "Documentation does not redeploy the integration you cannot reach. Compatibility is a property of what deployed code does, not of what the docs say."
+              }
+            ]
+          },
+          "explanationMarkdown": "The honest answer to 'is this compatible?' is often 'it depends on the consumers', which is why knowing who they are is part of owning an API."
+        },
+        {
+          "id": "v2-a15-i3",
+          "objectiveIds": [
+            "api.schema-change-safety"
+          ],
+          "critical": true,
+          "promptMarkdown": "You need to drop a column that the current release stopped reading. When is it safe to ship the DROP?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "after-rollout",
+                "textMarkdown": "In a later release, once the build that stopped reading it is fully rolled out everywhere and you no longer intend to roll back past it.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Until the old build is gone the column is still being read, and after the drop a rollback to that build would fail. Both conditions have to hold."
+              },
+              {
+                "id": "same-release",
+                "textMarkdown": "In the same release, since the new code no longer references the column.",
+                "correct": false,
+                "explanationMarkdown": "During a rolling deploy the old build is still serving traffic and still selecting that column, so it breaks for the length of the rollout."
+              },
+              {
+                "id": "immediately",
+                "textMarkdown": "Immediately after the deploy completes, since no instance references it any more.",
+                "correct": false,
+                "explanationMarkdown": "Closer, but it forecloses rollback: the moment the column is gone, redeploying the previous build fails. Leave a window during which reverting is still possible."
+              },
+              {
+                "id": "never",
+                "textMarkdown": "Never — leave unused columns in place indefinitely.",
+                "correct": false,
+                "explanationMarkdown": "Defensible for a while, and genuinely cheap, but permanently accumulating dead columns has its own costs in confusion and in every future migration. Drop it deliberately, later."
+              }
+            ]
+          },
+          "explanationMarkdown": "The drop is the one irreversible step, so the question is never just 'is anything reading it' but also 'am I still willing to lose the ability to roll back'."
+        },
+        {
+          "id": "v2-a15-i4",
+          "objectiveIds": [
+            "api.pagination-compatibility"
+          ],
+          "critical": false,
+          "promptMarkdown": "You are changing the cursor encoding. Clients hold tokens issued by the old code. What single property must the token have for this to be safe?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "self-describing",
+                "textMarkdown": "It must identify its own format, for example with a version prefix, so old and new tokens can be told apart with certainty.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Without that, distinguishing them means guessing from the decoded payload, and a wrong guess returns a plausible but incorrect page rather than an error."
+              },
+              {
+                "id": "signed",
+                "textMarkdown": "It must be cryptographically signed.",
+                "correct": false,
+                "explanationMarkdown": "Signing is worth doing — it stops clients forging tokens — but it does not help you interpret a token issued under a previous encoding."
+              },
+              {
+                "id": "short",
+                "textMarkdown": "It must be short enough to fit in a query string.",
+                "correct": false,
+                "explanationMarkdown": "A practical constraint, unrelated to migrating between encodings."
+              },
+              {
+                "id": "human-readable",
+                "textMarkdown": "It must be human-readable so support staff can debug it.",
+                "correct": false,
+                "explanationMarkdown": "The opposite: a readable token invites clients to parse and construct them, which makes the encoding part of your contract and removes your freedom to change it."
+              }
+            ]
+          },
+          "explanationMarkdown": "Self-describing data is the general principle; the cursor is just the place it bites soonest, because clients hand the value straight back to you."
+        },
+        {
+          "id": "v2-a15-i5",
+          "objectiveIds": [
+            "api.filtering",
+            "api.versioning"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which of these are compatible changes to a live endpoint? Select all that apply.",
+          "grading": {
+            "kind": "choice",
+            "mode": "multiple",
+            "options": [
+              {
+                "id": "new-optional-param",
+                "textMarkdown": "Adding an optional request parameter whose default preserves the current behaviour.",
+                "correct": true,
+                "explanationMarkdown": "Compatible. Existing callers omit it and get exactly what they got before."
+              },
+              {
+                "id": "widen-accept",
+                "textMarkdown": "Accepting an additional value for an existing request parameter.",
+                "correct": true,
+                "explanationMarkdown": "Compatible. Widening what you accept cannot invalidate a request that was already valid."
+              },
+              {
+                "id": "tighten-validation",
+                "textMarkdown": "Rejecting a request shape that was previously accepted but undocumented.",
+                "correct": false,
+                "explanationMarkdown": "Breaking in practice. Callers depend on what the system does, not on what the documentation says it does, and something undocumented is usually in use somewhere."
+              },
+              {
+                "id": "reorder-array",
+                "textMarkdown": "Changing the order of items in a returned array that has no documented ordering.",
+                "correct": false,
+                "explanationMarkdown": "Also breaking in practice. Undocumented order is still observed order, and clients will have come to rely on it — the same reasoning as an unstable sort in pagination."
+              }
+            ]
+          },
+          "explanationMarkdown": "The two false options are both cases where 'undocumented' is doing work it cannot do: compatibility is judged against deployed client behaviour, not against the spec you wish they had read."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

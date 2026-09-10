@@ -1,0 +1,1608 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v2-ch18",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Integration testing",
+      "conceptIds": [
+        "test.database-backed",
+        "test.contract-tests",
+        "test.failure-injection",
+        "test.third-party-mocks"
+      ],
+      "prerequisiteIds": [
+        "test.boundary-cases",
+        "sql.transactions"
+      ],
+      "bodyMarkdown": "A unit test tells you a function does what its author expected. That is worth having and it is not the same as knowing the system works.\n\nThe bugs that reach production are mostly bugs of *connection*: a constraint the code never expected to fire, a transaction that did not cover what it appeared to, a third-party response shaped differently from the fixture, a timeout nobody had ever caused on purpose. None of those are visible to a test that replaces the database and the network with objects that always agree with the caller.\n\nThis chapter is about tests that exercise the seams: a real database, an honest stand-in for someone else's API, and deliberate failure. The recurring idea is that a test double is a claim about the world, and a claim nobody checks is just a comfortable assumption written in code.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v2-l16",
+        "v2-l17",
+        "v2-l18"
+      ],
+      "assessmentId": "v2-a18",
+      "objectiveIds": [
+        "test.database-backed",
+        "test.contract-tests",
+        "test.failure-injection",
+        "test.third-party-mocks"
+      ],
+      "missionIds": [],
+      "sortOrder": 17
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l16",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Tests that use the real database",
+      "conceptIds": [
+        "test.database-backed"
+      ],
+      "prerequisiteIds": [
+        "sql.transactions",
+        "test.testable-functions"
+      ],
+      "bodyMarkdown": "Replacing the database with a mock makes tests fast and makes them test the mock. Every rule the database enforces - uniqueness, foreign keys, null constraints, transaction boundaries, the actual behaviour of `ON DELETE` - is absent from a stubbed repository, and those rules are where a surprising share of real defects live.\n\nA database-backed test runs against a real engine, applies the real migrations, and exercises the real query. It costs seconds instead of milliseconds, and it can catch a class of bug that no amount of mocking will.\n\n**Isolation is the design problem.** Tests that share a database interfere: one truncates a table another is reading, two insert the same unique value, an ordering assertion depends on rows a neighbouring test happened to leave. There are three common strategies.\n\n*Transaction rollback.* Begin a transaction before each test, roll it back afterwards. Fast and thorough, with one catch: if the code under test manages its own transactions, you are now nesting, and the thing you most wanted to verify - that the commit boundary is correct - is the thing you have obscured.\n\n*Truncate between tests.* Simple and honest, and it composes with code that commits. The detail people meet the hard way is ordering: with foreign keys in place, tables must be emptied children-first, or the delete is refused.\n\n*A database per worker.* The only approach that lets suites run in parallel. It costs setup and it removes an entire category of confusing failure, because there is no shared state to race over.\n\n**Fixtures should be minimal and explicit.** A shared fixture that every test reuses becomes a small application nobody can change: adding a row to satisfy one test breaks an assertion in another, and eventually the fixture is load-bearing. Prefer each test creating exactly what it needs, named for what it is: `openTicketOwnedBySomeoneElse` says what matters; `ticket3` does not.\n\n**Determinism has to be engineered.** Two rows inserted in the same millisecond have the same `createdAt`, so a query ordered by it alone returns them in whichever order the engine chose today - and the test fails once a fortnight for no reason anyone can reproduce. Order by a tiebreaker. Control the clock. Never assert on a sequence-generated id.",
+      "chapterId": "v2-ch18",
+      "sortOrder": 0,
+      "objectives": [
+        "Explain what a database-backed test can catch that a mocked repository cannot.",
+        "Choose an isolation strategy and state its specific cost.",
+        "Identify the sources of non-determinism that make an integration suite flaky."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "Two tests of the same behaviour. Only one of them can fail for the right reason.\n\n```js\n// Mocked: asserts that the code called the thing it calls.\ntest('rejects a duplicate reference', async () => {\n  const repo = { create: vi.fn().mockRejectedValue(new Error('duplicate')) };\n  await expect(createTicket(repo, { reference: 'ASH-1' })).rejects.toThrow('duplicate');\n});\n```\n\nThis passes whether or not a unique constraint exists. It asserts that when `create` rejects, `createTicket` propagates the rejection - a fact about the mock. Drop the unique index in a migration tomorrow and this test still passes, cheerfully, forever.\n\n```js\n// Database-backed: asserts the rule actually exists.\ntest('rejects a duplicate reference', async () => {\n  await createTicket(db, { reference: 'ASH-1' });\n  await expect(createTicket(db, { reference: 'ASH-1' })).rejects.toThrow();\n  expect(await db.ticket.count()).toBe(1);\n});\n```\n\nThis one fails if the constraint is missing, if it is defined on the wrong column, or if the failed insert left a partial row behind. The count assertion is the part that is easy to omit and worth keeping: it distinguishes *the second insert was refused* from *the second insert was refused after writing something*.\n\nThe truncation helper for this suite has one non-obvious requirement:\n\n```sql\n-- comments references tickets; tickets references users\nTRUNCATE comments, tickets, users;\n```\n\nChildren first. `TRUNCATE users` alone is refused while any ticket still references a user, and the error message names a constraint rather than explaining that your cleanup is in the wrong order.",
+      "commonMistakes": [
+        "Mocking the repository, so the test verifies that the code calls the mock rather than that the database rule exists.",
+        "Sharing one database between test files that run in parallel, so tests truncate rows their neighbours are still reading.",
+        "Truncating tables parent-first, which foreign keys refuse.",
+        "Wrapping the test in a transaction when the code under test manages its own, which hides the commit boundary the test was written to check.",
+        "Building one large shared fixture, which becomes impossible to change because every test depends on a different part of it.",
+        "Ordering by a timestamp alone, so rows created in the same millisecond come back in an arbitrary order and the suite fails intermittently.",
+        "Asserting on sequence-generated ids, which change the moment another test inserts a row first."
+      ],
+      "summaryMarkdown": "Use a real database when the behaviour under test belongs to the database: constraints, transactions, cascades, real query semantics. Pick an isolation strategy deliberately - rollback is fast but hides commit boundaries, truncation is honest but must run children-first, a database per worker is the only one that parallelises. Keep fixtures small and named for their meaning, and engineer determinism rather than hoping for it.",
+      "exerciseIds": [
+        "v2-e18-01",
+        "v2-e18-02",
+        "v2-e18-03"
+      ],
+      "reviewCardIds": [
+        "v2-c18-01",
+        "v2-c18-02"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: TRUNCATE",
+          "url": "https://www.postgresql.org/docs/current/sql-truncate.html"
+        },
+        {
+          "label": "Vitest: test context and setup files",
+          "url": "https://vitest.dev/guide/test-context"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e18-01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the test that proves the mock works",
+      "conceptIds": [
+        "test.database-backed"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A green test, a real constraint, and no relationship between the two.",
+      "lessonId": "v2-l16",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "Ashgrove's `tickets.reference` column has a unique index. This test is offered as proof.\n\n```js\ntest('a duplicate reference is rejected', async () => {\n  const repo = {\n    findByReference: vi.fn().mockResolvedValue({ id: 't-1' }),\n    create: vi.fn(),\n  };\n\n  await expect(createTicket(repo, { reference: 'ASH-1' }))\n    .rejects.toThrow('reference already used');\n  expect(repo.create).not.toHaveBeenCalled();\n});\n```\n\nA migration is then merged that drops the unique index, because it 'duplicated an application check'. What does this test do?",
+      "hints": [
+        "Ask which of the two mechanisms - the application's pre-check or the database constraint - this test actually exercises.",
+        "`findByReference` is a mock that always reports an existing ticket. The test proves `createTicket` handles that answer; it never reaches a database.",
+        "Now consider two requests arriving at the same moment, both finding no existing ticket, both proceeding to insert."
+      ],
+      "solution": {
+        "modelAnswer": "It keeps passing, and it never protected the constraint it appears to be about.",
+        "explanationMarkdown": "The test exercises one branch of application logic: given a repository that reports an existing ticket, `createTicket` throws and does not insert. That is worth asserting. It is not evidence that duplicates are impossible, and it is entirely unaffected by dropping the index - so the migration merges with a green suite.\n\nThe application pre-check and the unique constraint are not duplicates of each other. The pre-check produces a good error message; the constraint is what makes the rule true. Two concurrent requests can both pass a `findByReference` check and both proceed to insert, and only the constraint decides what happens next. That is a race the mocked test cannot express, because there is no shared state to race over.\n\nA database-backed test - insert twice, expect the second to be refused, assert the row count is still one - fails the moment the index disappears, which is precisely when someone needs to be told."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "keeps-passing",
+            "textMarkdown": "It keeps passing, and always would have: it tests the application pre-check against a mock, not the database constraint.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Nothing in this test touches a database, so dropping the index cannot affect it. The suite stays green while the rule it appears to protect is gone."
+          },
+          {
+            "id": "fails-clearly",
+            "textMarkdown": "It fails immediately, which is how the team learns the index mattered.",
+            "correct": false,
+            "explanationMarkdown": "Nothing here reaches the database, so there is nothing for the missing index to break. A test that would fail is exactly what is missing."
+          },
+          {
+            "id": "flaky",
+            "textMarkdown": "It becomes flaky, passing or failing depending on whether the mock resolves before the insert.",
+            "correct": false,
+            "explanationMarkdown": "The mock is deterministic and there is no concurrency in the test. Flakiness is not the failure mode; silent irrelevance is."
+          },
+          {
+            "id": "still-valid",
+            "textMarkdown": "It remains fully valid, because the application check is the real protection and the index was genuinely redundant.",
+            "correct": false,
+            "explanationMarkdown": "The application check cannot survive concurrency: two simultaneous requests can both find nothing and both insert. The constraint is what makes the rule hold, and the check is what makes the error readable."
+          }
+        ]
+      },
+      "primaryConceptId": "test.database-backed"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e18-02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Order the truncation so foreign keys allow it",
+      "conceptIds": [
+        "test.database-backed"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Cleanup between tests, in the only order the database will accept.",
+      "lessonId": "v2-l16",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 18,
+      "promptMarkdown": "Implement `truncationOrder(tables)` for Ashgrove's integration-test helper.\n\n`tables` is an array of `{ name, dependsOn }`, where `dependsOn` lists the tables this table holds foreign keys **to**. A table must be emptied **before** any table it depends on, because a parent row cannot be removed while a child still references it.\n\nReturn an array of table names in a safe truncation order.\n\n- When several tables are ready at the same time, take them in **alphabetical** order, so the helper is deterministic and its output can be asserted.\n- If a dependency cycle makes progress impossible, append every remaining table in alphabetical order and stop. (The caller disables constraint checks for that case; the helper must still return a complete list rather than looping.)\n\nDo not modify the input.",
+      "hints": [
+        "A table is safe to empty once nothing that still needs emptying points at it. Work out, for each table, how many not-yet-emitted tables depend on it.",
+        "Count dependants rather than dependencies: `orders` listing `customers` in `dependsOn` means `customers` has a dependant, so `customers` is not ready while `orders` is waiting.",
+        "Repeatedly take every ready table in alphabetical order, emit it, then decrement the counts of the tables it depended on. If a pass finds nothing ready and tables remain, that is the cycle case."
+      ],
+      "solution": {
+        "code": "function truncationOrder(tables) {\n  const names = [];\n  const dependsOn = {};\n  const dependantCount = {};\n  for (const table of tables) {\n    names.push(table.name);\n    dependsOn[table.name] = table.dependsOn.slice();\n    dependantCount[table.name] = 0;\n  }\n  for (const name of names) {\n    for (const parent of dependsOn[name]) {\n      if (dependantCount[parent] !== undefined) {\n        dependantCount[parent] += 1;\n      }\n    }\n  }\n\n  const order = [];\n  const emitted = {};\n  let progress = true;\n  while (order.length !== names.length && progress) {\n    const ready = [];\n    for (const name of names) {\n      if (!emitted[name] && dependantCount[name] === 0) {\n        ready.push(name);\n      }\n    }\n    ready.sort();\n    progress = ready.length > 0;\n    for (const name of ready) {\n      emitted[name] = true;\n      order.push(name);\n      for (const parent of dependsOn[name]) {\n        if (dependantCount[parent] !== undefined) {\n          dependantCount[parent] -= 1;\n        }\n      }\n    }\n  }\n\n  const remaining = [];\n  for (const name of names) {\n    if (!emitted[name]) {\n      remaining.push(name);\n    }\n  }\n  remaining.sort();\n  return order.concat(remaining);\n}",
+        "explanationMarkdown": "This is a topological sort, with the edges pointed the way the problem actually runs. The instinct is to count each table's dependencies; the useful count is the opposite one - how many *dependants* a table still has. `comments` depending on `tickets` means `tickets` is blocked until `comments` is gone, so the count that matters lives on `tickets`.\n\nCollecting all ready tables into a batch, sorting the batch, then emitting it is what makes the output deterministic. Emitting the first ready table found would produce an order that depends on input order, and a helper whose output shifts when someone reorders a list is a helper nobody can write an assertion against.\n\nThe `progress` flag turns a potential infinite loop into a defined outcome. A cycle - two tables referencing each other, which real schemas do have - leaves both with a non-zero count forever. Detecting that no pass emitted anything, then appending the remainder alphabetically, keeps the helper total: it always returns every table, and the caller can decide to disable constraint checks. A `while (order.length < names.length)` without the flag would hang the test suite instead, which is a considerably worse way to learn that a cycle exists."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "truncationOrder",
+        "starterCode": "function truncationOrder(tables) {\n  // Emits the tables as supplied, ignoring foreign keys entirely.\n  const order = [];\n  for (const table of tables) {\n    order.push(table.name);\n  }\n  return order;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "single-table",
+            "args": [
+              [
+                {
+                  "name": "users",
+                  "dependsOn": []
+                }
+              ]
+            ],
+            "expected": [
+              "users"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "child-before-parent",
+            "args": [
+              [
+                {
+                  "name": "users",
+                  "dependsOn": []
+                },
+                {
+                  "name": "tickets",
+                  "dependsOn": [
+                    "users"
+                  ]
+                }
+              ]
+            ],
+            "expected": [
+              "tickets",
+              "users"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "three-level-chain",
+            "args": [
+              [
+                {
+                  "name": "users",
+                  "dependsOn": []
+                },
+                {
+                  "name": "tickets",
+                  "dependsOn": [
+                    "users"
+                  ]
+                },
+                {
+                  "name": "comments",
+                  "dependsOn": [
+                    "tickets"
+                  ]
+                }
+              ]
+            ],
+            "expected": [
+              "comments",
+              "tickets",
+              "users"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "alphabetical-tiebreak",
+            "args": [
+              [
+                {
+                  "name": "zebras",
+                  "dependsOn": []
+                },
+                {
+                  "name": "apples",
+                  "dependsOn": []
+                }
+              ]
+            ],
+            "expected": [
+              "apples",
+              "zebras"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "diamond",
+            "args": [
+              [
+                {
+                  "name": "users",
+                  "dependsOn": []
+                },
+                {
+                  "name": "tickets",
+                  "dependsOn": [
+                    "users"
+                  ]
+                },
+                {
+                  "name": "invoices",
+                  "dependsOn": [
+                    "users"
+                  ]
+                },
+                {
+                  "name": "lines",
+                  "dependsOn": [
+                    "invoices",
+                    "tickets"
+                  ]
+                }
+              ]
+            ],
+            "expected": [
+              "lines",
+              "invoices",
+              "tickets",
+              "users"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "already-safe-order-is-preserved",
+            "args": [
+              [
+                {
+                  "name": "comments",
+                  "dependsOn": [
+                    "tickets"
+                  ]
+                },
+                {
+                  "name": "tickets",
+                  "dependsOn": []
+                }
+              ]
+            ],
+            "expected": [
+              "comments",
+              "tickets"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "cycle-falls-back-to-alphabetical",
+            "args": [
+              [
+                {
+                  "name": "b",
+                  "dependsOn": [
+                    "a"
+                  ]
+                },
+                {
+                  "name": "a",
+                  "dependsOn": [
+                    "b"
+                  ]
+                }
+              ]
+            ],
+            "expected": [
+              "a",
+              "b"
+            ],
+            "hidden": true
+          },
+          {
+            "id": "unknown-parent-is-ignored",
+            "args": [
+              [
+                {
+                  "name": "tickets",
+                  "dependsOn": [
+                    "archived_users"
+                  ]
+                }
+              ]
+            ],
+            "expected": [
+              "tickets"
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "test.database-backed"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e18-03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose an isolation strategy and defend the cost",
+      "conceptIds": [
+        "test.database-backed"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Three strategies, one suite, and a constraint that rules one of them out.",
+      "lessonId": "v2-l16",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "Ashgrove's integration suite takes eleven minutes and fails intermittently about once a day. It currently shares one database across all test files and truncates every table in a `beforeEach`.\n\nThe team wants to run test files in parallel. One engineer proposes wrapping each test in a transaction and rolling back instead. Another proposes a database per worker.\n\nAshgrove's order-submission code opens its own transaction and depends on committing.\n\nWrite a recommendation. Say which strategy you would adopt and why; explain specifically what the rollback approach would do to the order-submission tests; and name what the intermittent failures most likely are, given the current setup.",
+      "hints": [
+        "Take the rollback proposal and trace what happens when the code under test opens its own transaction inside the test's transaction.",
+        "The order-submission tests exist to prove a commit boundary is correct. Ask whether a test that can never really commit can prove that.",
+        "For the intermittent failures, the current setup already gives you the answer: what happens when two files sharing one database both run `beforeEach` truncation while the other is mid-test?"
+      ],
+      "solution": {
+        "modelAnswer": "I would adopt a database per worker.\n\nIt is the only one of the three that actually delivers the goal. Parallelism is the requirement, and both other strategies keep a single shared database, so running files concurrently means one file's cleanup runs while another file's test is mid-flight. A database per worker removes the shared state entirely rather than coordinating access to it.\n\nThe rollback proposal is specifically wrong for this codebase. Order submission opens its own transaction and depends on committing. Wrapped in an outer test transaction, that becomes a nested transaction, and the inner commit no longer means what it means in production - it resolves to a savepoint release, with the outer rollback discarding everything afterwards. The test would pass while proving nothing about the commit boundary, which is the single thing those tests exist to verify. It would also hide any behaviour that depends on data being visible after commit.\n\nThe intermittent failures are almost certainly cross-file interference: files sharing one database, one truncating tables while another reads them. The tell is that they are irreproducible in isolation and cluster on a loaded machine. A second, smaller contributor is likely ordering by `createdAt` without a tiebreaker, which flips when two rows land in the same millisecond - more likely, not less, once the suite runs in parallel and everything gets faster.\n\nThe cost I am accepting is setup: creating and migrating N databases, and wiring the worker id into the connection string. That is a one-off engineering cost against a daily irreproducible failure, and it is the trade I would make.",
+        "explanationMarkdown": "The decisive reasoning is that rollback is not merely slower or less thorough here - it is *disqualified* by a specific property of this codebase. Recognising that a test transaction wrapping self-managing code turns a commit into a savepoint, and that this destroys the assertion the test was written to make, is the mark of a real answer.\n\nThe second discriminator is noticing that neither rollback nor truncation solves the stated goal, because both leave one shared database. It is easy to compare the two proposals on speed and miss that only one of the three addresses parallelism at all.\n\nA good answer also names a concrete, checkable cause for the flakiness rather than calling it 'flaky tests'."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Recommends a database per worker and connects it to the stated goal of parallelism, not merely to speed.",
+          "Explains that wrapping self-managing transactional code in a test transaction produces nesting, so the inner commit becomes a savepoint release and the commit boundary is no longer under test.",
+          "Notes that both rollback and truncation leave a single shared database, so neither addresses running files in parallel.",
+          "Attributes the intermittent failures to cross-file interference over shared state, with a plausible secondary cause such as ordering without a tiebreaker.",
+          "States the accepted cost of the chosen strategy rather than presenting it as free."
+        ],
+        "modelAnswerMarkdown": "See the model answer: a database per worker, because rollback is disqualified by self-managing transactions and neither alternative removes the shared state that is causing the daily failures."
+      },
+      "primaryConceptId": "test.database-backed"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c18-01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What a mocked repository cannot tell you",
+      "conceptIds": [
+        "test.database-backed"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the category of defect a stubbed database hides.",
+      "lessonId": "v2-l16",
+      "type": "recall",
+      "promptMarkdown": "Name three things a test with a mocked repository cannot verify, and say what it verifies instead.",
+      "answerMarkdown": "It cannot verify that a constraint exists (uniqueness, foreign keys, null rules), that a transaction boundary covers what it appears to, or that a query returns what the real engine returns - including ordering and cascade behaviour. What it verifies is that the code under test calls the mock in the expected way and handles the answer the mock was told to give.",
+      "explanationMarkdown": "The trap is that both tests read as though they assert the same thing. The difference only appears when the underlying rule changes: dropping a unique index leaves the mocked test green, because nothing in it ever depended on the index existing.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "test.database-backed"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c18-02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Debug: the suite that fails once a fortnight",
+      "conceptIds": [
+        "test.database-backed"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply determinism reasoning to an irreproducible failure.",
+      "lessonId": "v2-l16",
+      "type": "debugging",
+      "promptMarkdown": "An integration test asserting that a list returns `[newest, oldest]` fails roughly once a fortnight and always passes when re-run alone. The query orders by `createdAt DESC`. What is the likely cause and the fix?",
+      "answerMarkdown": "The two fixture rows are being created in the same millisecond, so their `createdAt` values are equal and the engine is free to return them in either order. The fix is a deterministic tiebreaker - `ORDER BY createdAt DESC, id DESC` - and, in the fixture, setting explicitly different timestamps rather than relying on insertion time.",
+      "explanationMarkdown": "Equal sort keys are the most common source of a test that is 'flaky for no reason'. It gets worse on faster machines and in parallel suites, because more work lands inside the same millisecond - so the failure rate rises exactly when the team speeds the suite up.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "test.database-backed"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l17",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Contract tests and honest stand-ins",
+      "conceptIds": [
+        "test.contract-tests",
+        "test.third-party-mocks"
+      ],
+      "prerequisiteIds": [
+        "http.status-codes",
+        "node.runtime-validation"
+      ],
+      "bodyMarkdown": "Ashgrove sends refunds to a payment provider. Nobody wants the test suite calling a real payment API: it is slow, it costs money, it needs credentials, and it is somebody else's uptime. So the provider is replaced with a stand-in, and from that moment the suite is testing a story you wrote about the provider rather than the provider.\n\nThat is a reasonable trade, and it has a specific failure mode. **The stand-in drifts.** The provider adds a field, renames one, starts returning a string where it used to return a number, or begins issuing a 202 in a case that used to be a 200. Your fixture keeps describing last year's API. The suite is green and production is broken, and the green suite is actively misleading - it is the reason nobody looked.\n\n**A contract test is the check on the stand-in.** It runs against the real provider - in a sandbox, on a schedule, outside the main suite - and asserts only the parts you actually depend on: this field exists, it has this type, this status code means this. Not the whole response. The subset you rely on is the contract, and when the contract test fails, the fixtures are wrong.\n\nThis separation is the useful bit. Fast tests use fixtures and stay hermetic. A slow, separate job answers 'are the fixtures still true?'. Conflating the two gives you a suite that is either slow and flaky or fast and untrue.\n\n**Validate at the boundary anyway.** A third-party response is untrusted input in exactly the way a user request is. Parsing it into a known shape at the edge means a provider change produces a clear error naming the field, instead of `undefined` propagating three layers in and surfacing as a total of `NaN` on an invoice.\n\n**Record what you depend on.** The reason fixtures rot quietly is that nothing states which fields matter. A stand-in that returns forty fields when the code reads three implies a dependency on forty. Narrow the fixture to what is used, and the contract becomes small enough to check.",
+      "chapterId": "v2-ch18",
+      "sortOrder": 1,
+      "objectives": [
+        "Explain why a stand-in for a third-party API needs a separate contract test.",
+        "Express a contract as the subset of a response the code actually depends on.",
+        "Decide which checks belong in the fast suite and which belong in a scheduled job."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "The fixture, the drift, and the check that catches it.\n\n```js\n// The stand-in, written in March.\nconst refundResponse = {\n  id: 'rf_123',\n  status: 'succeeded',\n  amount_cents: 2500,\n  created: 1710000000,\n};\n```\n\nIn September the provider ships a change: `amount_cents` becomes `amount`, an object with `value` and `currency`. Every Ashgrove test still passes, because every Ashgrove test asks this object, not the provider. Production starts recording refunds of `undefined`, which becomes `NaN` in a total, which appears on a finance report a fortnight later.\n\n```js\n// The contract test, run nightly against the sandbox.\ntest('refund response still matches our contract', async () => {\n  const body = await provider.refunds.create({ amount: 100, currency: 'gbp' });\n\n  // Only what we actually read.\n  expect(typeof body.id).toBe('string');\n  expect(['succeeded', 'pending', 'failed']).toContain(body.status);\n  expect(typeof body.amount_cents).toBe('number');\n});\n```\n\nThis fails in September, names the field, and does so before finance does. Note what it does *not* do: it does not snapshot the whole response. A full-body assertion would fail every time the provider adds an unrelated field, and a test that cries wolf monthly gets muted, which leaves you exactly where you started.\n\nThe same contract, applied at the runtime boundary, turns the drift into a clear failure instead of a silent one:\n\n```js\nconst refund = refundSchema.parse(await provider.refunds.create(input));\n```\n\nNow the September change raises 'expected number at amount_cents' at the edge, naming the field, rather than producing `NaN` three layers away.",
+      "commonMistakes": [
+        "Treating a hand-written fixture as evidence about the provider, when it is only evidence about the fixture.",
+        "Running contract checks inside the fast suite, which makes it slow and dependent on somebody else uptime.",
+        "Asserting the entire third-party response, so unrelated additions fail the test until the team mutes it.",
+        "Consuming a third-party response without parsing it, so a changed field surfaces as `NaN` or `undefined` far from its cause.",
+        "Writing fixtures with every field the provider returns, which implies a dependency on all of them and makes the real contract impossible to see.",
+        "Updating a fixture to match a failing test rather than asking whether the provider actually changed."
+      ],
+      "summaryMarkdown": "A stand-in makes tests fast and turns them into assertions about your fixture. A contract test restores the link to reality by checking - separately, and on a schedule - just the subset of the response you depend on. Parse third-party responses at the boundary so drift fails loudly and locally, and keep fixtures narrow so the contract stays small enough to verify.",
+      "exerciseIds": [
+        "v2-e18-04",
+        "v2-e18-05",
+        "v2-e18-06"
+      ],
+      "reviewCardIds": [
+        "v2-c18-03",
+        "v2-c18-04"
+      ],
+      "references": [
+        {
+          "label": "Martin Fowler: Contract Test",
+          "url": "https://martinfowler.com/bliki/ContractTest.html"
+        },
+        {
+          "label": "MDN: HTTP response status codes",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e18-04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Check a response against the contract you depend on",
+      "conceptIds": [
+        "test.contract-tests"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The subset that matters, and a report that names what changed.",
+      "lessonId": "v2-l17",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 17,
+      "promptMarkdown": "Implement `contractViolations(response, contract)` for Ashgrove's nightly provider check.\n\n`contract` maps a field name to the type it must have: `'string'`, `'number'` or `'boolean'`.\n\nReturn an array of violation strings, sorted alphabetically:\n\n- `'missing:<field>'` when the field is absent from `response`;\n- `'type:<field>'` when the field is present but has the wrong type.\n\nRules that keep this honest:\n\n- A field present in `response` but **not** in the contract is ignored. The provider adding a field is not a breach of your contract, and failing on it is how a check gets muted.\n- `null` counts as **present with the wrong type**, never as missing - `null` is a value the provider deliberately sent.\n\nReturn an empty array when the contract holds. Do not modify either argument.",
+      "hints": [
+        "Walk the contract, not the response. The fields you do not depend on must not be able to produce a violation.",
+        "For each contracted field, the two failures are different questions: is the key there at all, and if so does `typeof` match. Answer them in that order.",
+        "`typeof null` is `'object'`, so a null value naturally fails the type test - but only if you have already decided that a present-but-null key is not 'missing'. Use a presence check that distinguishes the two."
+      ],
+      "solution": {
+        "code": "function contractViolations(response, contract) {\n  const violations = [];\n  for (const field of Object.keys(contract)) {\n    if (!Object.prototype.hasOwnProperty.call(response, field)) {\n      violations.push('missing:' + field);\n    } else if (typeof response[field] !== contract[field]) {\n      violations.push('type:' + field);\n    }\n  }\n  violations.sort();\n  return violations;\n}",
+        "explanationMarkdown": "Iterating the contract rather than the response is the design decision that makes this check survivable. A provider that adds `settlement_date` next month has not broken anything you depend on, and a check that fails for it will be muted within two months - after which it protects nothing. Narrow contracts stay trusted.\n\nSeparating 'missing' from 'wrong type' matters because the two mean different things to whoever reads the failure. A missing field usually means a rename or a removal; a wrong type usually means a reshaping, like `amount_cents: 2500` becoming `amount: { value: 25 }`. Reporting both as 'invalid' throws away the part of the message that points at the cause.\n\n`hasOwnProperty` before `typeof` is what keeps `null` in the right bucket. `typeof null` is `'object'`, so a null value fails the type comparison naturally - but only once presence has been established separately. A truthiness check would report `null`, `0`, `''` and `false` all as missing, and three of those are legitimate values a provider might send."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "contractViolations",
+        "starterCode": "function contractViolations(response, contract) {\n  // Walks the response, so any new provider field looks like a violation.\n  const violations = [];\n  for (const field of Object.keys(response)) {\n    if (typeof response[field] !== contract[field]) {\n      violations.push('type:' + field);\n    }\n  }\n  return violations;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "contract-holds",
+            "args": [
+              {
+                "id": "rf_1",
+                "status": "succeeded",
+                "amount_cents": 2500
+              },
+              {
+                "id": "string",
+                "status": "string",
+                "amount_cents": "number"
+              }
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "extra-provider-field-is-ignored",
+            "args": [
+              {
+                "id": "rf_1",
+                "status": "succeeded",
+                "amount_cents": 2500,
+                "settlement_date": "2026-09-01"
+              },
+              {
+                "id": "string",
+                "status": "string",
+                "amount_cents": "number"
+              }
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "renamed-field-is-missing",
+            "args": [
+              {
+                "id": "rf_1",
+                "status": "succeeded",
+                "amount": {
+                  "value": 25
+                }
+              },
+              {
+                "id": "string",
+                "status": "string",
+                "amount_cents": "number"
+              }
+            ],
+            "expected": [
+              "missing:amount_cents"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "reshaped-field-is-a-type-error",
+            "args": [
+              {
+                "id": "rf_1",
+                "status": "succeeded",
+                "amount_cents": "2500"
+              },
+              {
+                "id": "string",
+                "status": "string",
+                "amount_cents": "number"
+              }
+            ],
+            "expected": [
+              "type:amount_cents"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "violations-are-sorted",
+            "args": [
+              {
+                "status": 42
+              },
+              {
+                "id": "string",
+                "status": "string",
+                "amount_cents": "number"
+              }
+            ],
+            "expected": [
+              "missing:amount_cents",
+              "missing:id",
+              "type:status"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "null-is-present-with-wrong-type",
+            "args": [
+              {
+                "id": "rf_1",
+                "status": null,
+                "amount_cents": 2500
+              },
+              {
+                "id": "string",
+                "status": "string",
+                "amount_cents": "number"
+              }
+            ],
+            "expected": [
+              "type:status"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "zero-and-false-are-valid-values",
+            "args": [
+              {
+                "id": "",
+                "status": "failed",
+                "amount_cents": 0,
+                "captured": false
+              },
+              {
+                "id": "string",
+                "status": "string",
+                "amount_cents": "number",
+                "captured": "boolean"
+              }
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "empty-contract-passes-anything",
+            "args": [
+              {
+                "anything": 1
+              },
+              {}
+            ],
+            "expected": [],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "test.contract-tests"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e18-05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the green suite and the broken refund",
+      "conceptIds": [
+        "test.third-party-mocks"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Nothing failed, and refunds have been recording zero for eleven days.",
+      "lessonId": "v2-l17",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "Ashgrove's refund total has been wrong for eleven days. The integration suite is green and has been throughout.\n\n```js\n// tests/support/provider-stub.js  (written in March)\nexport const refundStub = {\n  create: async () => ({ id: 'rf_123', status: 'succeeded', amount_cents: 2500 }),\n};\n\n// src/refunds.js\nconst body = await provider.refunds.create(input);\nawait refunds.insert({ providerId: body.id, amountCents: body.amount_cents });\n```\n\nThe provider's changelog shows that in September `amount_cents` was replaced by `amount: { value, currency }`.\n\nSelect every statement that correctly describes this situation.",
+      "hints": [
+        "Ask what the suite is actually asserting about the provider, and where that assertion came from.",
+        "The stub is a hand-written object. It changes when someone edits it, not when the provider changes - so its agreement with production is a fact about March.",
+        "Consider what `body.amount_cents` evaluates to in September, and what that value does as it travels into the database."
+      ],
+      "solution": {
+        "modelAnswer": "The stub cannot drift automatically; the value became undefined and was never validated.",
+        "explanationMarkdown": "The suite was green because it was asking the stub, and the stub still describes March. A hand-written fixture has no mechanism for noticing a provider change - that is precisely what a contract test run against the real sandbox exists to supply.\n\nIn September `body.amount_cents` is `undefined`. Nothing rejects it: it flows into `insert` and lands in the column as null or zero depending on the schema, which is why the symptom surfaced eleven days later on a total rather than immediately as an error. Parsing the response at the boundary would have raised 'expected number at amount_cents' on the first September refund, naming the field.\n\nAdding the new shape to the stub is the repair everyone reaches for, and it fixes this instance while leaving the mechanism intact: the next provider change will be discovered the same way, by a finance report."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "stub-cannot-drift",
+            "textMarkdown": "The suite stayed green because the stub is hand-written and changes only when someone edits it, so it still describes the March API.",
+            "correct": true,
+            "explanationMarkdown": "Correct, and this is the core of it: the tests assert agreement with the fixture, and the fixture agrees with itself indefinitely."
+          },
+          {
+            "id": "undefined-propagates",
+            "textMarkdown": "`body.amount_cents` became `undefined` and was stored without validation, which is why the symptom appeared as a wrong total rather than an error.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Unparsed third-party input turns a provider change into a silent data problem, discovered far from its cause."
+          },
+          {
+            "id": "contract-test",
+            "textMarkdown": "A scheduled contract test asserting the fields Ashgrove reads would have failed in September and named the field.",
+            "correct": true,
+            "explanationMarkdown": "Correct. That is exactly the job a contract test does, and why it belongs outside the fast suite but inside the pipeline."
+          },
+          {
+            "id": "snapshot",
+            "textMarkdown": "The fix is to snapshot the provider's entire response in the stub, so any change to any field fails the suite.",
+            "correct": false,
+            "explanationMarkdown": "Whole-response assertions fail on every unrelated addition. A check that raises false alarms monthly gets muted, after which it protects nothing - the contract should cover only the fields actually used."
+          }
+        ]
+      },
+      "primaryConceptId": "test.third-party-mocks"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e18-06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Match a request to its stubbed response",
+      "conceptIds": [
+        "test.third-party-mocks"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The routing a fake HTTP dependency needs before it can be honest about anything.",
+      "lessonId": "v2-l17",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Ashgrove's test double answers HTTP calls from a list of stubs. Implement `stubFor(request, stubs)`.\n\n`request` is `{ method, path }`. Each stub is `{ method, path, response }`, where the stub `path` may contain parameter segments beginning with `':'`, such as `/tickets/:id/comments`.\n\nReturn the `response` of the **first** stub that matches, or `null` when none does.\n\nA stub matches when:\n\n- the `method` values are equal;\n- the two paths have the **same number** of segments;\n- each stub segment either begins with `':'` (matching any single non-empty segment) or is exactly equal to the request segment.\n\nFirst match wins, so a more specific stub listed earlier takes precedence. Do not modify either argument.",
+      "hints": [
+        "Split both paths into segments and compare them position by position. A parameter matches one segment, never several.",
+        "Compare the segment counts before comparing anything else: `/tickets/7` must not match `/tickets/:id/comments`, and a length check settles that immediately.",
+        "Return as soon as a stub matches, so ordering decides precedence. Collecting all matches and picking one afterwards is a different rule than the one specified."
+      ],
+      "solution": {
+        "code": "function stubFor(request, stubs) {\n  function segmentsOf(path) {\n    const parts = [];\n    for (const part of path.split('/')) {\n      if (part !== '') {\n        parts.push(part);\n      }\n    }\n    return parts;\n  }\n\n  const requestParts = segmentsOf(request.path);\n  for (const stub of stubs) {\n    if (stub.method !== request.method) {\n      continue;\n    }\n    const stubParts = segmentsOf(stub.path);\n    if (stubParts.length !== requestParts.length) {\n      continue;\n    }\n    let matched = true;\n    for (let i = 0; i < stubParts.length; i += 1) {\n      const expected = stubParts[i];\n      if (expected.charAt(0) === ':') {\n        continue;\n      }\n      if (expected !== requestParts[i]) {\n        matched = false;\n        break;\n      }\n    }\n    if (matched) {\n      return stub.response;\n    }\n  }\n  return null;\n}",
+        "explanationMarkdown": "Dropping empty segments makes `/tickets/7` and `tickets/7/` behave the same, which removes a whole category of confusing test failure caused by a trailing slash somebody typed in a fixture.\n\nThe length comparison is doing real work. Without it, a naive position-by-position loop over the shorter path would let `/tickets/7` match `/tickets/:id/comments`, and the double would return a comment list where the caller expected a ticket. Requiring equal segment counts encodes that a parameter stands for exactly one segment.\n\nReturning on the first match, rather than gathering matches and choosing, is what gives the ordering rule its meaning: a specific stub placed above a general one wins, which is how a test says 'this particular id behaves differently'. Any other selection rule would make the list order decorative and quietly change which response a test receives."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "stubFor",
+        "starterCode": "function stubFor(request, stubs) {\n  // Exact string match only: parameter stubs never match anything.\n  for (const stub of stubs) {\n    if (stub.method === request.method && stub.path === request.path) {\n      return stub.response;\n    }\n  }\n  return null;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "exact-path",
+            "args": [
+              {
+                "method": "GET",
+                "path": "/tickets"
+              },
+              [
+                {
+                  "method": "GET",
+                  "path": "/tickets",
+                  "response": {
+                    "ok": "list"
+                  }
+                }
+              ]
+            ],
+            "expected": {
+              "ok": "list"
+            },
+            "hidden": false
+          },
+          {
+            "id": "parameter-segment",
+            "args": [
+              {
+                "method": "GET",
+                "path": "/tickets/7"
+              },
+              [
+                {
+                  "method": "GET",
+                  "path": "/tickets/:id",
+                  "response": {
+                    "ok": "one"
+                  }
+                }
+              ]
+            ],
+            "expected": {
+              "ok": "one"
+            },
+            "hidden": false
+          },
+          {
+            "id": "method-must-match",
+            "args": [
+              {
+                "method": "POST",
+                "path": "/tickets/7"
+              },
+              [
+                {
+                  "method": "GET",
+                  "path": "/tickets/:id",
+                  "response": {
+                    "ok": "one"
+                  }
+                }
+              ]
+            ],
+            "expected": null,
+            "hidden": false
+          },
+          {
+            "id": "segment-count-must-match",
+            "args": [
+              {
+                "method": "GET",
+                "path": "/tickets/7"
+              },
+              [
+                {
+                  "method": "GET",
+                  "path": "/tickets/:id/comments",
+                  "response": {
+                    "ok": "comments"
+                  }
+                }
+              ]
+            ],
+            "expected": null,
+            "hidden": false
+          },
+          {
+            "id": "first-match-wins",
+            "args": [
+              {
+                "method": "GET",
+                "path": "/tickets/7"
+              },
+              [
+                {
+                  "method": "GET",
+                  "path": "/tickets/7",
+                  "response": {
+                    "ok": "specific"
+                  }
+                },
+                {
+                  "method": "GET",
+                  "path": "/tickets/:id",
+                  "response": {
+                    "ok": "general"
+                  }
+                }
+              ]
+            ],
+            "expected": {
+              "ok": "specific"
+            },
+            "hidden": false
+          },
+          {
+            "id": "general-stub-listed-first-wins",
+            "args": [
+              {
+                "method": "GET",
+                "path": "/tickets/7"
+              },
+              [
+                {
+                  "method": "GET",
+                  "path": "/tickets/:id",
+                  "response": {
+                    "ok": "general"
+                  }
+                },
+                {
+                  "method": "GET",
+                  "path": "/tickets/7",
+                  "response": {
+                    "ok": "specific"
+                  }
+                }
+              ]
+            ],
+            "expected": {
+              "ok": "general"
+            },
+            "hidden": false
+          },
+          {
+            "id": "no-stub-matches",
+            "args": [
+              {
+                "method": "GET",
+                "path": "/invoices"
+              },
+              [
+                {
+                  "method": "GET",
+                  "path": "/tickets/:id",
+                  "response": {
+                    "ok": "one"
+                  }
+                }
+              ]
+            ],
+            "expected": null,
+            "hidden": false
+          },
+          {
+            "id": "trailing-slash-is-ignored",
+            "args": [
+              {
+                "method": "GET",
+                "path": "/tickets/7/"
+              },
+              [
+                {
+                  "method": "GET",
+                  "path": "/tickets/:id",
+                  "response": {
+                    "ok": "one"
+                  }
+                }
+              ]
+            ],
+            "expected": {
+              "ok": "one"
+            },
+            "hidden": true
+          },
+          {
+            "id": "multi-parameter-path",
+            "args": [
+              {
+                "method": "GET",
+                "path": "/teams/3/tickets/9"
+              },
+              [
+                {
+                  "method": "GET",
+                  "path": "/teams/:team/tickets/:id",
+                  "response": {
+                    "ok": "nested"
+                  }
+                }
+              ]
+            ],
+            "expected": {
+              "ok": "nested"
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "test.third-party-mocks"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c18-03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What a contract test asserts",
+      "conceptIds": [
+        "test.contract-tests"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the scope of a contract test and where it runs.",
+      "lessonId": "v2-l17",
+      "type": "recall",
+      "promptMarkdown": "What should a contract test assert about a third-party response, what should it not assert, and why does it run outside the fast suite?",
+      "answerMarkdown": "It should assert only the subset the code actually depends on - these fields exist, with these types, and this status code means this. It should not assert the whole response body, because unrelated additions by the provider would fail it. It runs separately and on a schedule because it calls a real sandbox: slow, credentialed, and dependent on someone else's uptime, none of which belongs in the suite developers run on every change.",
+      "explanationMarkdown": "The scope rule is what keeps the check trusted. A contract test that fails whenever the provider adds a field gets muted within a couple of months, and a muted check is worse than none because everyone believes it is still watching.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "test.contract-tests"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c18-04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer: which suite does this check belong in?",
+      "conceptIds": [
+        "test.third-party-mocks",
+        "test.contract-tests"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the fast-versus-scheduled split to a new check.",
+      "lessonId": "v2-l17",
+      "type": "transfer",
+      "promptMarkdown": "Ashgrove adds a check that the payment provider's webhook signature algorithm still validates a known payload. Does it belong in the fast suite, the scheduled contract job, or both - and what would each version use?",
+      "answerMarkdown": "Both, testing different things. The fast suite verifies your own verification code against a locally computed signature and a fixed key - pure, hermetic, no network. The scheduled job verifies that the provider still signs the way you expect, using a real sandbox delivery. The first protects your implementation; the second protects the assumption your implementation is built on.",
+      "explanationMarkdown": "This is the general shape: hermetic tests protect your code, scheduled contract checks protect your beliefs about someone else's. Asking which of the two a check is really about usually settles where it goes.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "test.third-party-mocks"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l18",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Failure injection",
+      "conceptIds": [
+        "test.failure-injection"
+      ],
+      "prerequisiteIds": [
+        "http.retryable-failure",
+        "ui.stale-response"
+      ],
+      "bodyMarkdown": "Every system has error-handling code, and most of it has never run. It was written by imagining a failure, and it is exercised for the first time during the incident it was supposed to handle - which is how you discover that the retry has no limit, the fallback throws, or the timeout is longer than the caller's patience.\n\nFailure injection is the practice of causing those failures on purpose, in a test, so the handling runs before it matters.\n\n**Inject at the boundary you own.** The realistic seam is the client you wrote around someone else's service: make it time out, return a 500, return a 200 with a malformed body, or deliver the same webhook twice. You do not need to break the network to test what your code does when the network breaks.\n\n**Script the sequence, not just the failure.** The interesting behaviour is almost never one failure - it is *fail, fail, succeed*, because that is what exercises the retry path and its limit. A double is far more useful when it can be told 'time out twice, then succeed' than when it can only be told 'always fail'.\n\n**Assert the observable outcome, not the mechanism.** The valuable assertion is that exactly one refund exists after three deliveries of the same webhook, or that the order is still consistent after a mid-transaction failure. Asserting that a retry function was called three times pins the implementation and tells you nothing about correctness - a system that retried three times and duplicated the charge would pass it.\n\n**A test that cannot fail proves nothing.** This is the trap worth naming twice. Injecting a failure that the code never encounters - stubbing a method nobody calls, aborting a request the test does not make, throwing after the assertion has already run - produces a green test that certifies untested behaviour. Before trusting an injection test, make it fail on purpose once: remove the error handling and confirm it goes red. If it stays green, the injection is not reaching the code.\n\nThe failures worth scripting are the mundane ones: a timeout, a 500, a malformed body, a duplicate delivery, a slow response that arrives after the caller gave up. Between them they cover most of what actually goes wrong.",
+      "chapterId": "v2-ch18",
+      "sortOrder": 2,
+      "objectives": [
+        "Script a sequence of failures rather than a single one, so retry paths and their limits execute.",
+        "Assert the observable outcome of an injected failure instead of the number of internal calls.",
+        "Prove that an injection test can fail before trusting that it passes."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "A test double that can only always-fail, and one that can tell a story.\n\n```js\n// Always fails: exercises the first attempt and nothing else.\nconst provider = { charge: async () => { throw new TimeoutError(); } };\n```\n\nWith this, a retry loop is only ever observed exhausting itself. The case that matters most - the transient failure that succeeds on the third attempt, leaving exactly one charge - cannot be expressed at all.\n\n```js\n// Scripted: 'time out twice, then succeed'.\nfunction scriptedProvider(script) {\n  let call = 0;\n  return {\n    charge: async () => {\n      const outcome = script[Math.min(call, script.length - 1)];\n      call += 1;\n      if (outcome === 'timeout') throw new TimeoutError();\n      if (outcome === 'malformed') return { unexpected: true };\n      return { id: 'ch_1', status: 'succeeded' };\n    },\n  };\n}\n```\n\nNow a test can say `scriptedProvider(['timeout', 'timeout', 'ok'])` and assert the thing worth asserting:\n\n```js\nawait submitOrder(deps, order);\nexpect(await charges.count()).toBe(1);\n```\n\nOne charge. Not 'retry was called three times' - a system that retried three times and created three charges would satisfy that assertion perfectly, and it is the bug the test exists to catch.\n\nRepeating the last outcome once the script runs out is a small decision that removes a lot of friction: a test that only cares about a permanent failure writes `['timeout']` rather than counting how many attempts the retry policy will make, so the test does not have to be edited when the policy changes from three attempts to five.",
+      "commonMistakes": [
+        "Writing a double that can only fail permanently, so the transient-then-succeeds path is never executed.",
+        "Asserting how many times an internal function was called, which passes even when the retries duplicated the effect.",
+        "Trusting a green injection test without ever confirming it can go red, so a failure that never reaches the code reads as proof.",
+        "Injecting only transport errors and never a 200 carrying a malformed body, which is the failure most likely to corrupt data rather than raise an exception.",
+        "Forgetting duplicate delivery, so a webhook received twice is discovered in production rather than in a test.",
+        "Making the injected failure permanent when the retry limit is what needs testing, so the limit is never reached deliberately."
+      ],
+      "summaryMarkdown": "Cause failures on purpose so the handling runs before an incident. Inject at the client boundary you own; script sequences so retry paths and limits execute; assert observable outcomes such as 'exactly one charge exists' rather than internal call counts. Confirm every injection test can actually fail, because an injection that misses the code produces a green test that certifies nothing.",
+      "exerciseIds": [
+        "v2-e18-07",
+        "v2-e18-08",
+        "v2-e18-09"
+      ],
+      "reviewCardIds": [
+        "v2-c18-05",
+        "v2-c18-06"
+      ],
+      "references": [
+        {
+          "label": "MDN: AbortController",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+        },
+        {
+          "label": "Google SRE Book: Testing for Reliability",
+          "url": "https://sre.google/sre-book/testing-reliability/"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e18-07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the injection test that cannot go red",
+      "conceptIds": [
+        "test.failure-injection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The failure is injected somewhere the code never looks.",
+      "lessonId": "v2-l18",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "This test is offered as evidence that Ashgrove handles a provider timeout.\n\n```js\ntest('a provider timeout does not create a refund', async () => {\n  const provider = {\n    refunds: { create: async () => ({ id: 'rf_1', status: 'succeeded' }) },\n    charges: { create: async () => { throw new TimeoutError(); } },\n  };\n\n  await expect(issueRefund(provider, { ticketId: 't-1' })).resolves.toBeDefined();\n  expect(await refunds.count()).toBe(1);\n});\n```\n\n`issueRefund` calls only `provider.refunds.create`. What is the problem, and what would you do before trusting any test like this?",
+      "hints": [
+        "Follow the code path the test exercises and check whether it ever reaches the thing that was made to fail.",
+        "`issueRefund` calls `refunds.create`, which is stubbed to succeed. The timeout is on `charges.create`, which this path never touches.",
+        "The assertions describe the happy path - it resolves, one refund exists - so the test would read identically if no failure had been injected at all."
+      ],
+      "solution": {
+        "modelAnswer": "The failure is injected on a method the code never calls, so the test exercises the success path.",
+        "explanationMarkdown": "`issueRefund` only calls `provider.refunds.create`, and that stub succeeds. The `TimeoutError` sits on `charges.create`, which this code path never reaches, so nothing about a timeout is exercised. The assertions confirm it: they describe a successful refund, which is what would happen with no injection at all.\n\nThis is the failure mode from the lesson, in its most common form - the test looks like a failure test, is named like one, and is green for the same reason the happy-path test is green. It certifies behaviour nobody has checked, which is worse than having no test, because its presence stops anyone from writing the real one.\n\nThe discipline that catches it costs a minute: make the test fail on purpose. Delete the error handling in `issueRefund`, or point the injection at the method actually called, and confirm the test goes red. A test that stays green when the behaviour it names is removed is not testing that behaviour."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "wrong-method",
+            "textMarkdown": "The timeout is injected on `charges.create`, which `issueRefund` never calls, so the test exercises the success path and would pass with no injection at all.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The injection never reaches the code under test, and the assertions describe the happy path - both signs that the test cannot go red."
+          },
+          {
+            "id": "async-race",
+            "textMarkdown": "The `await` is missing on the count assertion, so the test finishes before the refund is written.",
+            "correct": false,
+            "explanationMarkdown": "`await refunds.count()` is present and awaited. Timing is not the flaw; the injected failure simply is not on the path being executed."
+          },
+          {
+            "id": "wrong-matcher",
+            "textMarkdown": "It uses `resolves.toBeDefined()` where it should use `rejects.toThrow()`, but the injection itself is correct.",
+            "correct": false,
+            "explanationMarkdown": "The matcher does describe the success path, which is a symptom worth noticing - but changing it alone would make the test fail for the wrong reason, since no timeout is reaching the code."
+          },
+          {
+            "id": "needs-real-network",
+            "textMarkdown": "Timeouts cannot be tested with a stub; the test needs a real network with an artificial delay.",
+            "correct": false,
+            "explanationMarkdown": "Injecting at the client boundary you own is the standard and sufficient technique. The problem here is where the injection was placed, not that stubbing was used."
+          }
+        ]
+      },
+      "primaryConceptId": "test.failure-injection"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e18-08",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Script a sequence of injected outcomes",
+      "conceptIds": [
+        "test.failure-injection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The double that can say 'time out twice, then succeed'.",
+      "lessonId": "v2-l18",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "Implement `scriptedOutcome(script, callIndex)`, the core of Ashgrove's scriptable test double.\n\n`script` is an array of `{ outcome, times }` entries, read in order. Each entry supplies its `outcome` for `times` consecutive calls.\n\n`callIndex` is the zero-based number of the call being answered.\n\nReturn the `outcome` string for that call.\n\n- Once the script is exhausted, keep returning the **last** entry's outcome, so a test does not have to know how many attempts a retry policy will make.\n- An entry with `times` of `0` or less is skipped entirely.\n- If the script is empty, or every entry is skipped, return `'ok'`.\n\nDo not modify the input.",
+      "hints": [
+        "Walk the entries in order, keeping a running total of how many calls the script has accounted for so far.",
+        "For each entry, the calls it answers are the ones from the running total up to the total plus its `times`. Ask whether `callIndex` falls inside that span.",
+        "The exhausted case needs the last entry that actually contributed calls - which is not necessarily the last element of the array, because a trailing entry may have been skipped for having `times` of `0`."
+      ],
+      "solution": {
+        "code": "function scriptedOutcome(script, callIndex) {\n  let consumed = 0;\n  let lastOutcome = 'ok';\n  let sawEntry = false;\n  for (const step of script) {\n    if (step.times <= 0) {\n      continue;\n    }\n    sawEntry = true;\n    lastOutcome = step.outcome;\n    if (callIndex < consumed + step.times) {\n      return step.outcome;\n    }\n    consumed += step.times;\n  }\n  return sawEntry ? lastOutcome : 'ok';\n}",
+        "explanationMarkdown": "The running total is what turns a list of spans into an index lookup. Each entry owns the calls from `consumed` up to `consumed + times`, and the first entry whose span contains `callIndex` answers the call. Returning immediately on that match is what makes the loop stop at the right place.\n\nTracking `lastOutcome` as we go, rather than reading `script[script.length - 1]` at the end, handles the skipped-entry case correctly. A script ending in `{ outcome: 'timeout', times: 0 }` should repeat the last outcome that actually contributed calls, not the one that contributed none - and reading the final element would return an outcome the double never produced.\n\nRepeating the last outcome instead of running out is a deliberate ergonomic choice. It lets a test write `[{ outcome: 'timeout', times: 1 }]` to mean 'this dependency is down' without encoding how many attempts the retry policy makes, so a policy change from three attempts to five does not require editing tests that were never about the attempt count."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "scriptedOutcome",
+        "starterCode": "function scriptedOutcome(script, callIndex) {\n  // Treats each entry as exactly one call and ignores `times`.\n  const step = script[callIndex];\n  return step ? step.outcome : 'ok';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "first-call-of-first-entry",
+            "args": [
+              [
+                {
+                  "outcome": "timeout",
+                  "times": 2
+                },
+                {
+                  "outcome": "ok",
+                  "times": 1
+                }
+              ],
+              0
+            ],
+            "expected": "timeout",
+            "hidden": false
+          },
+          {
+            "id": "second-call-still-first-entry",
+            "args": [
+              [
+                {
+                  "outcome": "timeout",
+                  "times": 2
+                },
+                {
+                  "outcome": "ok",
+                  "times": 1
+                }
+              ],
+              1
+            ],
+            "expected": "timeout",
+            "hidden": false
+          },
+          {
+            "id": "third-call-moves-to-second-entry",
+            "args": [
+              [
+                {
+                  "outcome": "timeout",
+                  "times": 2
+                },
+                {
+                  "outcome": "ok",
+                  "times": 1
+                }
+              ],
+              2
+            ],
+            "expected": "ok",
+            "hidden": false
+          },
+          {
+            "id": "exhausted-repeats-last",
+            "args": [
+              [
+                {
+                  "outcome": "timeout",
+                  "times": 2
+                },
+                {
+                  "outcome": "ok",
+                  "times": 1
+                }
+              ],
+              9
+            ],
+            "expected": "ok",
+            "hidden": false
+          },
+          {
+            "id": "permanent-failure-from-one-entry",
+            "args": [
+              [
+                {
+                  "outcome": "timeout",
+                  "times": 1
+                }
+              ],
+              7
+            ],
+            "expected": "timeout",
+            "hidden": false
+          },
+          {
+            "id": "empty-script-is-ok",
+            "args": [
+              [],
+              0
+            ],
+            "expected": "ok",
+            "hidden": false
+          },
+          {
+            "id": "zero-times-entry-is-skipped",
+            "args": [
+              [
+                {
+                  "outcome": "malformed",
+                  "times": 0
+                },
+                {
+                  "outcome": "ok",
+                  "times": 1
+                }
+              ],
+              0
+            ],
+            "expected": "ok",
+            "hidden": false
+          },
+          {
+            "id": "all-entries-skipped-is-ok",
+            "args": [
+              [
+                {
+                  "outcome": "timeout",
+                  "times": 0
+                }
+              ],
+              0
+            ],
+            "expected": "ok",
+            "hidden": true
+          },
+          {
+            "id": "trailing-skipped-entry-does-not-become-the-repeat",
+            "args": [
+              [
+                {
+                  "outcome": "malformed",
+                  "times": 1
+                },
+                {
+                  "outcome": "timeout",
+                  "times": 0
+                }
+              ],
+              5
+            ],
+            "expected": "malformed",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "test.failure-injection"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e18-09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Design the injection plan for a refund flow",
+      "conceptIds": [
+        "test.failure-injection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Which failures to cause on purpose, and what to assert for each.",
+      "lessonId": "v2-l18",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Ashgrove issues a refund by calling a payment provider and then recording the result. The provider also sends a webhook confirming the refund, which Ashgrove processes.\n\nWrite an injection plan. Name **four** distinct failures you would cause deliberately, and for each one state the observable outcome you would assert. Then explain how you would confirm each test is capable of failing.\n\nAssertions about internal call counts do not count as observable outcomes.",
+      "hints": [
+        "Think about the ways a call can go wrong beyond 'it threw': a slow answer, a successful answer with the wrong content, and the same message arriving twice.",
+        "For each failure, ask what a user or an auditor could see afterwards - how many refunds exist, what the ticket shows, whether the amounts reconcile.",
+        "For the can-it-fail check, the reliable move is to remove the handling the test is meant to exercise and confirm the test goes red."
+      ],
+      "solution": {
+        "modelAnswer": "**1. Provider times out.** Assert that no refund row exists afterwards and the ticket is not marked refunded - the operation either completed or left nothing behind. A partial state, where the ticket says refunded and no refund exists, is the thing being ruled out.\n\n**2. Provider returns 500, then succeeds on retry.** Assert that exactly one refund row exists and its provider id matches the successful response. This is the case that catches a retry which duplicates the effect, and it needs a scripted sequence rather than a permanent failure.\n\n**3. Provider returns 200 with a malformed body** - a renamed or missing amount field. Assert that the operation fails loudly and stores nothing, rather than recording a refund of `undefined`. This is the failure most likely to corrupt data quietly, because nothing throws on its own.\n\n**4. The confirmation webhook is delivered twice.** Assert that the refund is recorded once and the ticket state is identical after the second delivery. Duplicate delivery is normal provider behaviour, not an anomaly, so this is a correctness requirement rather than an edge case.\n\nTo confirm each test can fail, I would break the specific handling it targets and check it goes red: remove the transactional boundary for the timeout test, remove the idempotency key for the duplicate-webhook test, remove response parsing for the malformed-body test, and make the retry create a new request each time for the retry test. If a test stays green after the handling is removed, the injection is not reaching the code and the test is certifying nothing - that check costs a minute and is the only thing separating a real failure test from a decorative one.",
+        "explanationMarkdown": "A strong plan includes at least one failure that is *not* an exception. Timeouts and 500s are the ones everyone lists; the malformed 200 and the duplicate webhook are where real data corruption comes from, precisely because nothing raises on its own.\n\nThe assertions must be observable state - how many refunds exist, what the ticket shows - rather than call counts. 'Retry was called three times' is satisfied by an implementation that retried three times and created three refunds, which is the bug.\n\nThe can-it-fail step is what separates this from a plausible-sounding list. Naming the specific handling to remove for each test shows the candidate knows which mechanism each injection is actually aimed at."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Names four genuinely distinct failures, including at least one that is not an exception - a malformed success response or a duplicate delivery.",
+          "States an observable outcome for each, expressed as system state such as row counts or ticket status rather than internal call counts.",
+          "Uses a scripted fail-then-succeed sequence for the retry case rather than a permanent failure.",
+          "Describes confirming each test can go red, by removing the specific handling that test targets.",
+          "Treats duplicate webhook delivery as expected provider behaviour requiring idempotency, not as an anomaly."
+        ],
+        "modelAnswerMarkdown": "See the model answer: timeout, transient 500 with retry, malformed 200, duplicate webhook - each with a state-based assertion, and each verified by removing the handling it targets and confirming the test fails."
+      },
+      "primaryConceptId": "test.failure-injection"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c18-05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why assert outcomes rather than call counts",
+      "conceptIds": [
+        "test.failure-injection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what makes an injection assertion meaningful.",
+      "lessonId": "v2-l18",
+      "type": "recall",
+      "promptMarkdown": "Why is `expect(retry).toHaveBeenCalledTimes(3)` a weak assertion for a retry test, and what should be asserted instead?",
+      "answerMarkdown": "It describes the mechanism rather than the result, so an implementation that retried three times and created three charges satisfies it perfectly - which is exactly the bug a retry test should catch. Assert the observable outcome instead: exactly one charge exists after the sequence completes.",
+      "explanationMarkdown": "Call-count assertions also pin the implementation, so a change from three attempts to five breaks tests that were never about the attempt count. Outcome assertions survive that change and still catch duplication.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "test.failure-injection"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c18-06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Debug: is this injection reaching the code?",
+      "conceptIds": [
+        "test.failure-injection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the can-it-fail check to a suspicious green test.",
+      "lessonId": "v2-l18",
+      "type": "debugging",
+      "promptMarkdown": "A colleague shows you a green test named 'handles provider timeout'. In ten seconds, what do you do to decide whether to believe it?",
+      "answerMarkdown": "Make it fail on purpose: delete or disable the timeout handling the test claims to exercise and re-run it. If it goes red, the injection reaches the code and the test is real. If it stays green, the injected failure is not on the executed path - a stub on a method nobody calls, or an assertion that describes the happy path - and the test is certifying behaviour nobody has checked.",
+      "explanationMarkdown": "This check is cheap and decisive, and it is the only reliable way to distinguish a failure test from a test that merely mentions failure in its name. Three separate defects in this build were found exactly this way.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "test.failure-injection"
+    },
+    {
+      "kind": "assessment",
+      "id": "v2-a18",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Integration testing placement check",
+      "conceptIds": [
+        "test.database-backed",
+        "test.contract-tests",
+        "test.failure-injection",
+        "test.third-party-mocks"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five questions on database-backed tests, contract tests, honest stand-ins and deliberate failure. No hints and no solutions are shown until you submit.",
+      "chapterId": "v2-ch18",
+      "items": [
+        {
+          "id": "v2-a18-i1",
+          "objectiveIds": [
+            "test.database-backed"
+          ],
+          "critical": true,
+          "promptMarkdown": "A suite mocks the repository layer. A migration drops a unique index that the application also checks for in code.\n\nWhat does the suite do, and what does that tell you?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a18-1-green",
+                "textMarkdown": "It stays green, because no test ever depended on the index existing - the mocked tests assert how the code responds to the mock.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The suite can only observe the fixture's behaviour, so a change in the database is invisible to it."
+              },
+              {
+                "id": "a18-1-red",
+                "textMarkdown": "It goes red on the tests that assert duplicate rejection, which is the intended safety net.",
+                "correct": false,
+                "explanationMarkdown": "Those tests reject duplicates because the mock was told to. Nothing in them reaches a database."
+              },
+              {
+                "id": "a18-1-flaky",
+                "textMarkdown": "It becomes intermittently red, depending on test ordering.",
+                "correct": false,
+                "explanationMarkdown": "Mocked tests are deterministic here; there is no shared state to order. Silence, not flakiness, is the failure."
+              },
+              {
+                "id": "a18-1-safe",
+                "textMarkdown": "It stays green and that is correct, since the application check makes the index redundant.",
+                "correct": false,
+                "explanationMarkdown": "An application check cannot survive two concurrent requests both finding nothing and both inserting. The constraint is what makes the rule hold."
+              }
+            ]
+          },
+          "explanationMarkdown": "Mocked tests assert agreement with the mock. Only a database-backed test can notice that a database rule disappeared."
+        },
+        {
+          "id": "v2-a18-i2",
+          "objectiveIds": [
+            "test.database-backed"
+          ],
+          "critical": false,
+          "promptMarkdown": "An integration helper truncates `users`, then `tickets`, then `comments`, where `comments` references `tickets` and `tickets` references `users`.\n\nWhat happens?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a18-2-refused",
+                "textMarkdown": "The first truncation is refused, because rows in `tickets` still reference `users`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Foreign keys require children to be emptied first; the correct order here is comments, tickets, users."
+              },
+              {
+                "id": "a18-2-cascade",
+                "textMarkdown": "It succeeds and silently cascades, deleting the dependent rows.",
+                "correct": false,
+                "explanationMarkdown": "Cascade is not the default and must be requested explicitly. Without it the statement is refused."
+              },
+              {
+                "id": "a18-2-order",
+                "textMarkdown": "It succeeds, because truncation ignores foreign keys entirely.",
+                "correct": false,
+                "explanationMarkdown": "Truncation respects referential integrity; that is precisely why the ordering problem exists."
+              },
+              {
+                "id": "a18-2-slow",
+                "textMarkdown": "It succeeds but is slow, because each truncation rechecks every constraint.",
+                "correct": false,
+                "explanationMarkdown": "Speed is not the issue. The statement does not complete at all."
+              }
+            ]
+          },
+          "explanationMarkdown": "Children before parents. The error names a constraint rather than explaining that the cleanup order is wrong, which is why this is usually learned the hard way."
+        },
+        {
+          "id": "v2-a18-i3",
+          "objectiveIds": [
+            "test.contract-tests",
+            "test.third-party-mocks"
+          ],
+          "critical": true,
+          "promptMarkdown": "A team stubs a payment provider and asserts the entire stubbed response body in their fast suite. They have no scheduled checks against the real sandbox.\n\nSelect every accurate statement.",
+          "grading": {
+            "kind": "choice",
+            "mode": "multiple",
+            "options": [
+              {
+                "id": "a18-3-drift",
+                "textMarkdown": "A provider change cannot make the suite fail, because the suite only ever consults the stub.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A hand-written fixture agrees with itself indefinitely; only a check against the real service can notice drift."
+              },
+              {
+                "id": "a18-3-whole-body",
+                "textMarkdown": "Asserting the whole response body would cause failures on unrelated provider additions, and such a check tends to get muted.",
+                "correct": true,
+                "explanationMarkdown": "Correct, and a muted check is worse than none because everyone believes it is still watching."
+              },
+              {
+                "id": "a18-3-contract",
+                "textMarkdown": "A scheduled contract test asserting only the fields they read would catch a rename before production does.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Narrow scope is what keeps the check trustworthy and actionable."
+              },
+              {
+                "id": "a18-3-slow",
+                "textMarkdown": "Moving the contract check into the fast suite would give the earliest possible warning at no cost.",
+                "correct": false,
+                "explanationMarkdown": "It would make every developer run depend on a third party's uptime, latency and credentials - which is why the check belongs in a separate scheduled job."
+              }
+            ]
+          },
+          "explanationMarkdown": "Stand-ins make tests fast and make them assertions about the fixture. A separate, narrow contract check is what re-links them to reality."
+        },
+        {
+          "id": "v2-a18-i4",
+          "objectiveIds": [
+            "test.failure-injection"
+          ],
+          "critical": true,
+          "promptMarkdown": "A test named 'survives a provider timeout' passes. Inspection shows the timeout is thrown by a stub method the code under test never calls.\n\nWhat is the fastest way to establish whether any such test is real?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a18-4-break",
+                "textMarkdown": "Remove the handling the test claims to exercise and confirm the test goes red.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A test that stays green when the behaviour it names is deleted is not testing that behaviour."
+              },
+              {
+                "id": "a18-4-coverage",
+                "textMarkdown": "Check that line coverage includes the error-handling branch.",
+                "correct": false,
+                "explanationMarkdown": "Coverage shows a line executed, not that an assertion depended on it. A line can run and influence nothing the test checks."
+              },
+              {
+                "id": "a18-4-rerun",
+                "textMarkdown": "Re-run the test several times to confirm it is not flaky.",
+                "correct": false,
+                "explanationMarkdown": "Consistency is not the question. This test is reliably green and reliably meaningless."
+              },
+              {
+                "id": "a18-4-review",
+                "textMarkdown": "Have a second reviewer read the test and confirm the intent matches the name.",
+                "correct": false,
+                "explanationMarkdown": "Review is valuable and is what found the problem here, but it is slower and less conclusive than making the test fail on demand."
+              }
+            ]
+          },
+          "explanationMarkdown": "Deliberately breaking the target is the only cheap check that distinguishes a real failure test from a decorative one."
+        },
+        {
+          "id": "v2-a18-i5",
+          "objectiveIds": [
+            "test.failure-injection"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which assertion best demonstrates that a retry implementation is correct after a scripted `fail, fail, succeed` sequence?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a18-5-count-rows",
+                "textMarkdown": "Exactly one charge row exists after the operation completes.",
+                "correct": true,
+                "explanationMarkdown": "Correct. It is observable state, and it fails for the bug that matters: a retry that duplicates the effect."
+              },
+              {
+                "id": "a18-5-call-count",
+                "textMarkdown": "The provider client was called exactly three times.",
+                "correct": false,
+                "explanationMarkdown": "Satisfied equally by an implementation that created three charges. It describes the mechanism, not the result."
+              },
+              {
+                "id": "a18-5-no-throw",
+                "textMarkdown": "The operation did not throw.",
+                "correct": false,
+                "explanationMarkdown": "Necessary but far too weak: an implementation that swallowed the failures and recorded nothing also does not throw."
+              },
+              {
+                "id": "a18-5-duration",
+                "textMarkdown": "The operation took at least as long as two backoff intervals.",
+                "correct": false,
+                "explanationMarkdown": "This asserts timing behaviour, is inherently flaky, and says nothing about whether the effect was applied once."
+              }
+            ]
+          },
+          "explanationMarkdown": "Observable outcomes distinguish correct retries from duplicating ones; call counts and absence of exceptions do not."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,1543 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v2-ch17",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Security depth",
+      "conceptIds": [
+        "authz.resource-scoped-permissions",
+        "security.input-output-boundaries",
+        "security.dependency-management",
+        "security.secret-handling"
+      ],
+      "prerequisiteIds": [
+        "auth.resource-ownership",
+        "auth.identity-vs-access"
+      ],
+      "bodyMarkdown": "V1 established that a request must be scoped to its owner. That is the floor, not the ceiling. Real systems have more than one kind of actor, more than one action per resource, and data that is legitimately readable by one caller and confidential to the next.\n\nThis chapter moves the access decision into the resource itself, then looks outward at the two boundaries an application controls: what it accepts and what it emits. It ends with the parts of the attack surface you do not write yourself - the dependencies you install and the secrets you configure.\n\nThe through-line is that a security control has to live somewhere a mistake cannot skip. A check in a handler protects that handler. A check in the query protects every caller of the query.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v2-l13",
+        "v2-l14",
+        "v2-l15"
+      ],
+      "assessmentId": "v2-a17",
+      "objectiveIds": [
+        "authz.resource-scoped-permissions",
+        "security.input-output-boundaries",
+        "security.dependency-management",
+        "security.secret-handling"
+      ],
+      "missionIds": [],
+      "sortOrder": 16
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l13",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Permissions that belong to the resource",
+      "conceptIds": [
+        "authz.resource-scoped-permissions"
+      ],
+      "prerequisiteIds": [
+        "auth.resource-ownership"
+      ],
+      "bodyMarkdown": "Ashgrove started with one rule: you may read your own tickets. Then support agents arrived, and agents work in teams. Then team leads needed to reassign work. Each new rule was added where it was first needed - one in a route handler, one in a React component, one in a database query - and the result is a system where nobody can answer 'who can edit this ticket?' without reading four files.\n\nThe fix is not a bigger `if`. It is deciding *where the decision lives*.\n\n**Role-only checks are the first thing to outgrow.** `if (actor.role === 'agent')` answers 'what kind of user is this?' when the question is 'may this user do this thing to this record?'. Those differ the moment two agents work on different teams. A role is an input to the decision, never the decision itself.\n\n**A permission is a function of three things**: the actor, the resource, and the action. Drop any one and the rule stops being expressible. `canEdit(user)` cannot know whether the ticket is closed. `canEdit(ticket)` cannot know who is asking. Write the policy as `permit(actor, resource, action)` and it stays honest.\n\n**Then put it where it cannot be skipped.** A policy function is only as good as the number of call sites that remember to call it. Two placements survive contact with a growing codebase:\n\n1. **Scope the query.** `findFirst({ where: { id, ownerId: actor.id } })` cannot return a record the actor may not see. There is no ordering in which the check is forgotten, because there is no separate check.\n2. **Decide once, centrally.** When a rule is too rich for a where-clause, a single policy module that every path consults is the next best thing - and it is testable in isolation, which a scattered `if` is not.\n\nThe failure mode this prevents has a name worth knowing: an **insecure direct object reference**, where supplying someone else's id is enough to read their data. It is consistently near the top of the OWASP list not because it is subtle, but because it is easy to fix in the place you are looking at and easy to miss in the place you are not.",
+      "chapterId": "v2-ch17",
+      "sortOrder": 0,
+      "objectives": [
+        "Express an access rule as a function of actor, resource and action rather than role alone.",
+        "Choose between scoping the query and consulting a central policy, and say why.",
+        "Identify the call site a scattered permission check will eventually miss."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "Ashgrove's rule set, written out in full:\n\n- an administrator may do anything;\n- an agent may view and comment on any ticket belonging to their own team;\n- an agent may edit a ticket only when it is assigned to them;\n- a customer may view and comment on their own tickets, and may never edit;\n- nobody except an administrator may change a closed ticket.\n\nWritten as scattered checks, that becomes five `if` statements in four files. Written as one policy it becomes one readable function:\n\n```js\nfunction permit(actor, ticket, action) {\n  if (actor.role === 'admin') return true;\n\n  // A closed ticket is read-only for everyone else, whatever their role.\n  if (ticket.status === 'closed' && action !== 'view') return false;\n\n  if (actor.role === 'agent') {\n    if (actor.teamId !== ticket.teamId) return false;\n    return action === 'edit' ? ticket.assigneeId === actor.id : true;\n  }\n\n  if (actor.role === 'customer') {\n    if (ticket.ownerId !== actor.id) return false;\n    return action !== 'edit';\n  }\n\n  return false;\n}\n```\n\nThree details carry most of the value.\n\nThe **closed-ticket rule is stated once**, above the role branches, because it applies across roles. Pushed down into each branch it would be repeated three times and eventually updated in two of them.\n\nThe function **ends in `return false`**. An actor whose role is not recognised - a new role added next quarter, or a malformed record - is denied. A policy that ends in `return true` fails open, and a rule that fails open is worse than no rule, because it reads as if it were protecting something.\n\nIt **takes the ticket, not a ticket id**. The caller has already loaded the record, so the policy cannot accidentally authorise against a different row than the one that gets returned. That gap - check one record, return another - is a real class of bug.",
+      "commonMistakes": [
+        "Branching on role alone, so two agents on different teams get identical access to every ticket.",
+        "Writing `canEdit(user)` with no resource argument, which makes a per-record rule impossible to express without a global.",
+        "Ending the policy with a permissive default, so an unrecognised role is silently allowed.",
+        "Checking permission in the route handler while a second path - a bulk endpoint, a background job, an export - reaches the same data without asking.",
+        "Authorising against an id and then loading the record separately, so the check and the fetch can disagree.",
+        "Enforcing the rule only in the interface, leaving the API open to anyone who calls it directly."
+      ],
+      "summaryMarkdown": "A permission is a function of actor, resource and action. Roles are one input, never the whole answer. Prefer a scoped query, which cannot be bypassed by forgetting a call; fall back to a single policy module when the rule is richer than a where-clause. Default to denial, and authorise the record you actually return.",
+      "exerciseIds": [
+        "v2-e17-01",
+        "v2-e17-02",
+        "v2-e17-03"
+      ],
+      "reviewCardIds": [
+        "v2-c17-01",
+        "v2-c17-02"
+      ],
+      "references": [
+        {
+          "label": "OWASP: Broken Access Control",
+          "url": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+        },
+        {
+          "label": "OWASP: Authorization Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e17-01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the permission check that trusts the role",
+      "conceptIds": [
+        "authz.resource-scoped-permissions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A change that looks like a small tidy-up removes the only thing keeping two teams apart.",
+      "lessonId": "v2-l13",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "A pull request simplifies Ashgrove's ticket handler. The stated goal is 'remove duplication'.\n\n```js\n// before\nconst ticket = await tickets.findFirst({\n  where: { id: params.id, teamId: actor.teamId },\n});\nif (!ticket) return reply.status(404).send({ error: notFound });\n\n// after\nconst ticket = await tickets.findUnique({ where: { id: params.id } });\nif (!ticket) return reply.status(404).send({ error: notFound });\nif (actor.role !== 'agent') return reply.status(403).send({ error: forbidden });\n```\n\nThe author notes that every caller of this endpoint is an authenticated agent, and that the tests still pass. What is the most serious problem with the change?",
+      "hints": [
+        "Compare what each version can possibly return, not what the current callers happen to ask for.",
+        "The first version filters by `teamId` inside the query. The second version's only check is on `actor.role`, which every agent satisfies equally.",
+        "Ask what an agent on the billing team now receives when they request a ticket id belonging to the payments team."
+      ],
+      "solution": {
+        "modelAnswer": "The after version lets any agent read any team's ticket.",
+        "explanationMarkdown": "The before version could not return a foreign ticket at all: `teamId: actor.teamId` is part of the query, so a ticket from another team simply is not found, and the handler answers 404 without a separate check.\n\nThe after version loads the ticket first and then asks only 'is this caller an agent?'. Every agent passes that test, so every agent can now read every team's tickets by supplying an id. The role check looks like a security control and enforces nothing about *this record*.\n\nThe tests passing is not evidence. A test suite that only ever authenticates as an agent who owns the fixture data cannot distinguish the two versions - which is exactly why a regression test for cross-team access is worth writing before the refactor, not after the incident."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "cross-team",
+            "textMarkdown": "Any agent can now read any team's ticket, because the only remaining check is the role, which every agent passes.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The query lost its `teamId` filter and the replacement check does not mention the record at all, so the endpoint is scoped to \"is an agent\" rather than \"is this agent's team\"."
+          },
+          {
+            "id": "status-code",
+            "textMarkdown": "It returns 403 where it used to return 404, revealing that the ticket exists.",
+            "correct": false,
+            "explanationMarkdown": "This is a real and worthwhile observation - the status change does leak existence - but it is secondary. The larger problem is that the caller now receives the ticket body itself, not merely a hint that it exists."
+          },
+          {
+            "id": "perf",
+            "textMarkdown": "It is slower, because `findUnique` cannot use the composite index that `findFirst` used.",
+            "correct": false,
+            "explanationMarkdown": "Performance is not the issue here, and `findUnique` on a primary key is if anything the cheaper lookup. The change altered who can see the data, which matters more than how quickly they see it."
+          },
+          {
+            "id": "nothing",
+            "textMarkdown": "Nothing serious: the endpoint requires authentication, so only trusted agents reach it.",
+            "correct": false,
+            "explanationMarkdown": "Authentication establishes who someone is; it does not establish what they may see. Treating every authenticated user as equally entitled is precisely the failure this lesson is about."
+          }
+        ]
+      },
+      "primaryConceptId": "authz.resource-scoped-permissions"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e17-02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Implement the ticket permission policy",
+      "conceptIds": [
+        "authz.resource-scoped-permissions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The whole rule set in one pure function, including the parts that cut across roles.",
+      "lessonId": "v2-l13",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `permitTicket(actor, ticket, action)` for Ashgrove. Return `true` when the action is allowed and `false` otherwise.\n\n`actor` has `id`, `role` (`'admin'`, `'agent'` or `'customer'`) and `teamId`.\n`ticket` has `ownerId`, `teamId`, `assigneeId` and `status`.\n`action` is `'view'`, `'edit'` or `'comment'`.\n\nThe rules, in the order the business states them:\n\n- an administrator may do anything;\n- otherwise, a ticket whose `status` is `'closed'` allows only `'view'`;\n- an agent may act on tickets belonging to their own team, but may `'edit'` only a ticket whose `assigneeId` is their own id;\n- a customer may act on tickets they own, and may never `'edit'`;\n- anything else is denied.\n\nDo not modify either argument.",
+      "hints": [
+        "Deal with the rules that cut across every role before you branch on the role itself - one of them applies to administrators and one does not.",
+        "The closed-ticket rule sits above the role branches but below the administrator check, because an administrator is exempt from it and an agent is not.",
+        "Each role branch has the same shape: first decide whether this actor is connected to this ticket at all, then decide whether the specific action is allowed."
+      ],
+      "solution": {
+        "code": "function permitTicket(actor, ticket, action) {\n  if (actor.role === 'admin') {\n    return true;\n  }\n  if (ticket.status === 'closed' && action !== 'view') {\n    return false;\n  }\n  if (actor.role === 'agent') {\n    if (actor.teamId !== ticket.teamId) {\n      return false;\n    }\n    if (action === 'edit') {\n      return ticket.assigneeId === actor.id;\n    }\n    return true;\n  }\n  if (actor.role === 'customer') {\n    if (ticket.ownerId !== actor.id) {\n      return false;\n    }\n    return action !== 'edit';\n  }\n  return false;\n}",
+        "explanationMarkdown": "The ordering is the substance of this exercise. The administrator check goes first because administrators are exempt from the closed-ticket rule; the closed-ticket rule goes second because it applies to agents and customers alike and would otherwise be duplicated into both branches - and duplicated rules drift.\n\nEach role branch separates two questions that are easy to conflate: *is this actor connected to this ticket at all* (same team, or owns it), and *is this particular action permitted*. Answering them separately is what lets an agent comment on a teammate's ticket while still being blocked from editing it.\n\nThe final `return false` is the part to keep. When a new role appears - `'contractor'`, say - this function denies it until someone deliberately writes the rule. A policy that ended with `return true` would silently hand the new role full access on the day it was introduced, and no test would fail."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "permitTicket",
+        "starterCode": "function permitTicket(actor, ticket, action) {\n  // Roles alone are not enough: the ticket and the action both matter.\n  return actor.role === 'admin';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "admin-edits-closed",
+            "args": [
+              {
+                "id": "u-admin",
+                "role": "admin",
+                "teamId": "t-1"
+              },
+              {
+                "ownerId": "u-cust",
+                "teamId": "t-2",
+                "assigneeId": "u-other",
+                "status": "closed"
+              },
+              "edit"
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "agent-views-own-team",
+            "args": [
+              {
+                "id": "u-agent",
+                "role": "agent",
+                "teamId": "t-1"
+              },
+              {
+                "ownerId": "u-cust",
+                "teamId": "t-1",
+                "assigneeId": "u-other",
+                "status": "open"
+              },
+              "view"
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "agent-blocked-other-team",
+            "args": [
+              {
+                "id": "u-agent",
+                "role": "agent",
+                "teamId": "t-1"
+              },
+              {
+                "ownerId": "u-cust",
+                "teamId": "t-2",
+                "assigneeId": "u-agent",
+                "status": "open"
+              },
+              "view"
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "agent-edits-only-when-assigned",
+            "args": [
+              {
+                "id": "u-agent",
+                "role": "agent",
+                "teamId": "t-1"
+              },
+              {
+                "ownerId": "u-cust",
+                "teamId": "t-1",
+                "assigneeId": "u-other",
+                "status": "open"
+              },
+              "edit"
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "agent-edits-assigned-ticket",
+            "args": [
+              {
+                "id": "u-agent",
+                "role": "agent",
+                "teamId": "t-1"
+              },
+              {
+                "ownerId": "u-cust",
+                "teamId": "t-1",
+                "assigneeId": "u-agent",
+                "status": "open"
+              },
+              "edit"
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "agent-cannot-edit-closed",
+            "args": [
+              {
+                "id": "u-agent",
+                "role": "agent",
+                "teamId": "t-1"
+              },
+              {
+                "ownerId": "u-cust",
+                "teamId": "t-1",
+                "assigneeId": "u-agent",
+                "status": "closed"
+              },
+              "edit"
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "agent-views-closed",
+            "args": [
+              {
+                "id": "u-agent",
+                "role": "agent",
+                "teamId": "t-1"
+              },
+              {
+                "ownerId": "u-cust",
+                "teamId": "t-1",
+                "assigneeId": "u-agent",
+                "status": "closed"
+              },
+              "view"
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "customer-comments-own",
+            "args": [
+              {
+                "id": "u-cust",
+                "role": "customer",
+                "teamId": null
+              },
+              {
+                "ownerId": "u-cust",
+                "teamId": "t-1",
+                "assigneeId": "u-agent",
+                "status": "open"
+              },
+              "comment"
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "customer-never-edits",
+            "args": [
+              {
+                "id": "u-cust",
+                "role": "customer",
+                "teamId": null
+              },
+              {
+                "ownerId": "u-cust",
+                "teamId": "t-1",
+                "assigneeId": "u-agent",
+                "status": "open"
+              },
+              "edit"
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "customer-blocked-foreign-ticket",
+            "args": [
+              {
+                "id": "u-cust",
+                "role": "customer",
+                "teamId": null
+              },
+              {
+                "ownerId": "u-someone-else",
+                "teamId": "t-1",
+                "assigneeId": "u-agent",
+                "status": "open"
+              },
+              "view"
+            ],
+            "expected": false,
+            "hidden": true
+          },
+          {
+            "id": "unknown-role-denied",
+            "args": [
+              {
+                "id": "u-bot",
+                "role": "contractor",
+                "teamId": "t-1"
+              },
+              {
+                "ownerId": "u-bot",
+                "teamId": "t-1",
+                "assigneeId": "u-bot",
+                "status": "open"
+              },
+              "view"
+            ],
+            "expected": false,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "authz.resource-scoped-permissions"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e17-03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Argue for the placement of an access rule",
+      "conceptIds": [
+        "authz.resource-scoped-permissions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Two defensible placements, and the argument that decides between them.",
+      "lessonId": "v2-l13",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Ashgrove needs one more rule: a team lead may reassign any ticket in their own team.\n\nTwo engineers propose different placements.\n\n**A** adds `assigneeId` scoping to the reassign query, so the update statement itself can only touch a row in the lead's team.\n\n**B** adds a `permitTicket` branch for the `'reassign'` action, called from the reassign handler.\n\nWrite a short recommendation. Say which you would choose for this rule and why; name the specific failure each placement is vulnerable to; and describe what would have to be true about a *future* rule for you to switch to the other placement.",
+      "hints": [
+        "Ask what happens to each option when a second code path - a bulk reassign, an import, a scheduled job - starts updating the same column next quarter.",
+        "A query-scoped rule cannot be forgotten, because there is no separate step to forget. A policy function can be forgotten by any new call site, but it can express rules a where-clause cannot.",
+        "The deciding question is usually how much of the rule fits in a where-clause. `teamId = :leadTeam` fits. 'only during business hours, unless escalated' does not."
+      ],
+      "solution": {
+        "modelAnswer": "I would scope the query (A) for this rule, and keep the policy function for rules that do not fit in a where-clause.\n\nThis rule is entirely expressible as a filter: the lead's team id is a column comparison. Putting it in the update statement means there is no ordering of operations in which the check is skipped - a bulk reassign endpoint written next year inherits the constraint if it reuses the query, and produces zero affected rows rather than a cross-team write if it does not.\n\nEach option has a distinct vulnerability. A's is silence: an update that matches no rows looks identical to an update that was not permitted, so the handler must inspect the affected-row count and answer deliberately, or the caller receives a cheerful 200 for a write that never happened. B's is omission: the rule protects exactly the call sites that remember to call it, and nothing fails loudly when a new one does not.\n\nI would switch to B when the rule stops being a column comparison - for example 'a lead may reassign only tickets that are not under escalation, and only while the ticket is unresolved, unless the actor is also the assignee'. Once the condition needs several records or non-database state, forcing it into a where-clause produces a query nobody can read, and a tested policy function that every path consults is the better trade.",
+        "explanationMarkdown": "A strong answer commits to one placement rather than describing both neutrally, and it names the *specific* weakness of each: a scoped query fails silently, a policy function fails by omission. Weak answers assert that one is 'more secure' without saying what it is secure against.\n\nThe switch condition is the part that shows real judgement. The boundary is not 'complex versus simple' but whether the rule can be stated as a filter over the row being written. That is a testable distinction rather than a matter of taste."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Commits to one placement for this rule and gives a reason tied to how the rule is shaped, not to a general preference.",
+          "Names the specific failure mode of a query-scoped rule: a permitted-but-unmatched update is indistinguishable from a forbidden one unless the affected-row count is checked.",
+          "Names the specific failure mode of a policy function: it protects only the call sites that remember to invoke it.",
+          "States a concrete condition under which the other placement becomes the better choice, rather than saying \"it depends\".",
+          "Mentions that a new code path - bulk endpoint, import, background job - is the realistic way the weaker placement fails."
+        ],
+        "modelAnswerMarkdown": "See the model answer: choose the scoped query while the rule is a column comparison, move to a central policy once the rule needs state a where-clause cannot reach, and account for the affected-row count either way."
+      },
+      "primaryConceptId": "authz.resource-scoped-permissions"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c17-01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The three inputs to a permission",
+      "conceptIds": [
+        "authz.resource-scoped-permissions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the shape of an access rule and what each part contributes.",
+      "lessonId": "v2-l13",
+      "type": "recall",
+      "promptMarkdown": "What three things does an access decision need, and what specifically goes wrong when the resource is left out?",
+      "answerMarkdown": "The actor, the resource, and the action. Without the resource the rule collapses into a role check: it can say 'this user is an agent' but not 'this ticket belongs to this agent\\'s team', so every actor of a given role gets identical access to every record.",
+      "explanationMarkdown": "Dropping the resource is the most common of the three omissions because `canEdit(user)` still compiles and still reads like a permission check. It is the shape that produces insecure direct object references: supplying someone else's id is enough, because the id was never part of the decision.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "authz.resource-scoped-permissions"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c17-02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer: where would this rule be skipped?",
+      "conceptIds": [
+        "authz.resource-scoped-permissions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the placement argument to a path nobody thought about.",
+      "lessonId": "v2-l13",
+      "type": "transfer",
+      "promptMarkdown": "Ashgrove enforces `permitTicket` in its ticket handler. A nightly job now exports all tickets updated in the last day to a CSV for reporting. What is the risk, and which placement would have prevented it?",
+      "answerMarkdown": "The export job reaches the ticket table without going through the handler, so it never calls `permitTicket` and can emit every team's tickets into one file. Scoping the access rule into the query - or into a shared repository function the job also uses - would have carried the restriction with the data instead of leaving it in the HTTP layer.",
+      "explanationMarkdown": "This is the failure by omission in its most typical form: the rule was correct and enforced everywhere anyone was looking. Background jobs, admin tools, bulk endpoints and exports are where handler-level checks are lost, which is why 'can this be expressed in the query?' is worth asking first.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "authz.resource-scoped-permissions"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l14",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Input and output boundaries",
+      "conceptIds": [
+        "security.input-output-boundaries"
+      ],
+      "prerequisiteIds": [
+        "node.runtime-validation",
+        "auth.sensitive-logging"
+      ],
+      "bodyMarkdown": "An application controls two boundaries: what it accepts, and what it emits. V1 covered the first one - validate at the edge, because TypeScript types vanish at runtime. This lesson takes the input boundary further and then turns to the boundary that is far more often forgotten.\n\n**Input: validate shape, then bound magnitude.** A schema that accepts `limit: number` is only half a check. `limit: 5000000` is a number. Every input that reaches a query, a loop or an allocation needs a range, not just a type - a maximum page size, a maximum body length, a maximum array length. Reject rather than silently truncate where the difference is visible to the caller, and where you do clamp, clamp somewhere the caller can observe.\n\nAllow-lists beat deny-lists. A sort parameter checked against `['createdAt', 'status']` is safe by construction. A sort parameter with the dangerous words filtered out is a guessing game against an attacker who has more time than you do.\n\n**Output: decide what leaves, per audience.** The boundary nobody writes a schema for is the response. A handler that loads a user row and returns it wholesale ships whatever columns exist - `passwordHash`, `internalNotes`, `riskScore` - and it ships the ones added next year too, because `res.json(user)` has no opinion about columns it has never seen. That is the important property: an output allow-list fails safe as the schema grows, and an output deny-list fails open.\n\nErrors are output. A stack trace tells a caller your framework, your file layout and sometimes your query. A validation error that echoes the submitted value back can reflect one user's data to another in a shared context. Return a stable, minimal shape and put the detail in the log, joined to the response by a request id.\n\nThe asymmetry is worth stating plainly: an input mistake usually produces a visible error, so it gets fixed. An output mistake produces a perfectly successful response containing something it should not, and nothing at all goes wrong until someone notices.",
+      "chapterId": "v2-ch17",
+      "sortOrder": 1,
+      "objectives": [
+        "Bound the magnitude of an accepted input, not only its type, and choose between rejecting and clamping.",
+        "Build a response from an explicit field allow-list so new columns are private by default.",
+        "Explain why an output boundary failure is quieter than an input boundary failure."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "Two handlers from the same Ashgrove file. One validates carefully and is still wrong.\n\n```js\n// Input: validated shape, unbounded magnitude.\nconst query = listSchema.parse(request.query);   // { limit: number }\nconst rows = await tickets.findMany({ take: query.limit });\n```\n\n`limit` is certainly a number. `limit=2000000` is also a number, and this endpoint will now attempt to load two million rows, serialise them, and hold the result in memory. The schema answered 'is it the right type?' and nobody asked 'is it a reasonable size?'. The fix is a bound in the schema itself - `z.coerce.number().int().min(1).max(100).default(20)` - so the constraint lives with the definition rather than in whichever handler remembers it.\n\n```js\n// Output: no boundary at all.\nconst user = await users.findUnique({ where: { id } });\nreturn reply.send(user);\n```\n\nToday that returns the columns that exist today. The bug is scheduled rather than present: the moment somebody adds `passwordResetToken` or `internalRiskNote` to the table, this endpoint publishes it, and the change that broke it is a migration in a different pull request that touched no handler.\n\n```js\n// Output: an explicit allow-list.\nfunction publicUser(user) {\n  return { id: user.id, displayName: user.displayName, createdAt: user.createdAt };\n}\n```\n\nNow a new column is private until someone deliberately adds it here. The reviewer of that migration does not have to remember which endpoints return this table - the default carried the decision for them.\n\nNote what makes this work: the allow-list is *positive*. `delete user.passwordHash` before sending is the deny-list version, and it protects exactly the one column somebody thought of.",
+      "commonMistakes": [
+        "Validating that a value is a number without bounding it, so a pagination parameter becomes a way to exhaust memory.",
+        "Returning a database row directly, which publishes every column the table gains in future.",
+        "Removing sensitive fields with `delete` instead of building a response from an allow-list, so the protection covers only the fields already thought of.",
+        "Echoing the submitted value back in a validation error, which can reflect data across users in a shared context.",
+        "Returning a stack trace or a database error message to the caller instead of logging it against a request id.",
+        "Filtering a sort or filter parameter against a list of forbidden words rather than checking it against a list of permitted ones."
+      ],
+      "summaryMarkdown": "Validate shape and bound magnitude on the way in; build responses from an explicit allow-list on the way out. Allow-lists fail safe as the schema grows, deny-lists fail open. Errors are output too: return a stable minimal shape and keep the detail in the log, joined by a request id. Output mistakes are quieter than input mistakes, which is exactly why they survive longer.",
+      "exerciseIds": [
+        "v2-e17-04",
+        "v2-e17-05",
+        "v2-e17-06"
+      ],
+      "reviewCardIds": [
+        "v2-c17-03",
+        "v2-c17-04"
+      ],
+      "references": [
+        {
+          "label": "OWASP: Input Validation Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html"
+        },
+        {
+          "label": "OWASP: Error Handling Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e17-04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Build the response from an allow-list",
+      "conceptIds": [
+        "security.input-output-boundaries"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The projection that decides what leaves the system, including for a column that does not exist yet.",
+      "lessonId": "v2-l14",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Ashgrove returns ticket data to three audiences. Implement `publicTicket(ticket, audience)`.\n\n`audience` is `'customer'`, `'agent'` or `'admin'`.\n\nReturn a **new** object containing only the permitted fields, in this order of generosity:\n\n- a customer sees `id`, `subject`, `status` and `createdAt`;\n- an agent sees everything a customer sees, plus `assigneeId` and `internalNotes`;\n- an administrator sees everything an agent sees, plus `riskScore`.\n\nTwo rules that make this an allow-list rather than a filter:\n\n- a field that is permitted but **absent** from `ticket` must be omitted from the result, not included as `undefined`;\n- a field present on `ticket` that is not permitted must never appear, **including fields this exercise has never heard of**.\n\nAn unrecognised audience gets an empty object. Do not modify the input.",
+      "hints": [
+        "Start from the list of permitted names for the audience, not from the keys of the ticket. That single choice is what makes an unknown column private by default.",
+        "Layer the lists so each audience extends the one below it, rather than repeating the customer fields three times - repeated lists drift apart when a field is added.",
+        "Use a presence test that distinguishes 'absent' from 'present and falsy', so a `status` of `''` or a `riskScore` of `0` still appears in the result."
+      ],
+      "solution": {
+        "code": "function publicTicket(ticket, audience) {\n  const customerFields = ['id', 'subject', 'status', 'createdAt'];\n  const agentFields = customerFields.concat(['assigneeId', 'internalNotes']);\n  const adminFields = agentFields.concat(['riskScore']);\n\n  let permitted;\n  if (audience === 'customer') {\n    permitted = customerFields;\n  } else if (audience === 'agent') {\n    permitted = agentFields;\n  } else if (audience === 'admin') {\n    permitted = adminFields;\n  } else {\n    permitted = [];\n  }\n\n  const result = {};\n  for (const field of permitted) {\n    if (Object.prototype.hasOwnProperty.call(ticket, field)) {\n      result[field] = ticket[field];\n    }\n  }\n  return result;\n}",
+        "explanationMarkdown": "Iterating the permitted list rather than the ticket's own keys is the whole point. A column added to the tickets table next quarter - `paymentReference`, `escalationReason` - is absent from every one of these lists, so it is private the day it appears, without anyone editing this function. The deny-list version, which copies the ticket and deletes known-sensitive keys, would publish that new column immediately.\n\n`hasOwnProperty` rather than a truthiness test matters for the same reason it did in V1's configuration exercise: `status: ''` and `riskScore: 0` are real values. `if (ticket[field])` would silently drop them and produce a response that is missing a field the caller expects, which usually surfaces as a confusing rendering bug rather than as an error.\n\nLayering the arrays with `concat` keeps the relationship between audiences explicit. Writing three independent literal lists would work today and quietly diverge the first time someone adds a field to two of them."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "publicTicket",
+        "starterCode": "function publicTicket(ticket, audience) {\n  // Copying the record and removing what you remember is a deny-list.\n  const result = Object.assign({}, ticket);\n  delete result.riskScore;\n  return result;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "customer-sees-four-fields",
+            "args": [
+              {
+                "id": "t-1",
+                "subject": "Card declined",
+                "status": "open",
+                "createdAt": "2026-03-01T09:00:00.000Z",
+                "assigneeId": "u-a",
+                "internalNotes": "chase billing",
+                "riskScore": 4
+              },
+              "customer"
+            ],
+            "expected": {
+              "id": "t-1",
+              "subject": "Card declined",
+              "status": "open",
+              "createdAt": "2026-03-01T09:00:00.000Z"
+            },
+            "hidden": false
+          },
+          {
+            "id": "agent-adds-two-fields",
+            "args": [
+              {
+                "id": "t-1",
+                "subject": "Card declined",
+                "status": "open",
+                "createdAt": "2026-03-01T09:00:00.000Z",
+                "assigneeId": "u-a",
+                "internalNotes": "chase billing",
+                "riskScore": 4
+              },
+              "agent"
+            ],
+            "expected": {
+              "id": "t-1",
+              "subject": "Card declined",
+              "status": "open",
+              "createdAt": "2026-03-01T09:00:00.000Z",
+              "assigneeId": "u-a",
+              "internalNotes": "chase billing"
+            },
+            "hidden": false
+          },
+          {
+            "id": "admin-sees-risk-score",
+            "args": [
+              {
+                "id": "t-1",
+                "subject": "Card declined",
+                "status": "open",
+                "createdAt": "2026-03-01T09:00:00.000Z",
+                "assigneeId": "u-a",
+                "internalNotes": "chase billing",
+                "riskScore": 4
+              },
+              "admin"
+            ],
+            "expected": {
+              "id": "t-1",
+              "subject": "Card declined",
+              "status": "open",
+              "createdAt": "2026-03-01T09:00:00.000Z",
+              "assigneeId": "u-a",
+              "internalNotes": "chase billing",
+              "riskScore": 4
+            },
+            "hidden": false
+          },
+          {
+            "id": "unknown-column-stays-private",
+            "args": [
+              {
+                "id": "t-2",
+                "subject": "Refund",
+                "status": "closed",
+                "createdAt": "2026-03-02T09:00:00.000Z",
+                "paymentReference": "pay_live_9931",
+                "customerEmail": "a@example.test"
+              },
+              "agent"
+            ],
+            "expected": {
+              "id": "t-2",
+              "subject": "Refund",
+              "status": "closed",
+              "createdAt": "2026-03-02T09:00:00.000Z"
+            },
+            "hidden": false
+          },
+          {
+            "id": "absent-permitted-field-is-omitted",
+            "args": [
+              {
+                "id": "t-3",
+                "subject": "Login help",
+                "status": "open",
+                "createdAt": "2026-03-03T09:00:00.000Z"
+              },
+              "agent"
+            ],
+            "expected": {
+              "id": "t-3",
+              "subject": "Login help",
+              "status": "open",
+              "createdAt": "2026-03-03T09:00:00.000Z"
+            },
+            "hidden": false
+          },
+          {
+            "id": "zero-and-empty-string-survive",
+            "args": [
+              {
+                "id": "t-4",
+                "subject": "",
+                "status": "open",
+                "createdAt": "2026-03-04T09:00:00.000Z",
+                "assigneeId": "u-b",
+                "internalNotes": "",
+                "riskScore": 0
+              },
+              "admin"
+            ],
+            "expected": {
+              "id": "t-4",
+              "subject": "",
+              "status": "open",
+              "createdAt": "2026-03-04T09:00:00.000Z",
+              "assigneeId": "u-b",
+              "internalNotes": "",
+              "riskScore": 0
+            },
+            "hidden": false
+          },
+          {
+            "id": "unknown-audience-gets-nothing",
+            "args": [
+              {
+                "id": "t-5",
+                "subject": "Anything",
+                "status": "open",
+                "createdAt": "2026-03-05T09:00:00.000Z",
+                "riskScore": 9
+              },
+              "partner"
+            ],
+            "expected": {},
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "security.input-output-boundaries"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e17-05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the endpoint that validates input and leaks output",
+      "conceptIds": [
+        "security.input-output-boundaries"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A handler with a careful schema and an expensive habit.",
+      "lessonId": "v2-l14",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "This Ashgrove endpoint was reviewed and approved on the strength of its input validation.\n\n```js\nconst searchSchema = z.object({\n  q: z.string().min(1).max(200),\n  limit: z.coerce.number().int(),\n});\n\napp.get('/tickets/search', async (request, reply) => {\n  const { q, limit } = searchSchema.parse(request.query);\n  const rows = await tickets.findMany({\n    where: { ownerId: request.owner.id, subject: { contains: q } },\n    take: limit,\n  });\n  return reply.send(rows);\n});\n```\n\nOwnership scoping is correct and the search term is bounded. Which pair of problems would you raise in review?",
+      "hints": [
+        "Two boundaries exist here. Check them separately: what the handler accepts, and what it emits.",
+        "`z.coerce.number().int()` constrains the type of `limit` and says nothing about its size. Separately, ask which columns `rows` contains.",
+        "Consider `?limit=5000000`, and then consider what happens to this response the week someone adds an `internalNotes` column to the tickets table."
+      ],
+      "solution": {
+        "modelAnswer": "limit is unbounded, and the rows are returned without a field allow-list.",
+        "explanationMarkdown": "The input problem is magnitude, not type. `limit` is validated as an integer and nothing more, so `?limit=5000000` is accepted and the handler asks the database for five million rows. The schema should carry the bound - `.min(1).max(100).default(20)` - so every caller of the schema inherits it.\n\nThe output problem is that `rows` are sent as loaded. Today that may be harmless. It is a scheduled leak: the next migration that adds a column to `tickets` publishes it through this endpoint, and the pull request that causes it will not touch this file. A `publicTicket` projection makes new columns private by default.\n\nOwnership scoping being correct is what makes this worth reviewing carefully. The endpoint gets the hard, obvious control right, which is exactly why the two quieter ones survive."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "unbounded-limit",
+            "textMarkdown": "`limit` is validated as an integer but not bounded, so a caller can request an arbitrarily large page.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Type validation is not magnitude validation; the bound belongs in the schema so every caller inherits it."
+          },
+          {
+            "id": "no-projection",
+            "textMarkdown": "The rows are sent exactly as loaded, so any column added to the table in future is published automatically.",
+            "correct": true,
+            "explanationMarkdown": "Correct, and this is the quieter of the two: it produces a successful response containing something it should not, and the change that causes it happens in a different file."
+          },
+          {
+            "id": "missing-ownership",
+            "textMarkdown": "The query is missing an ownership filter, so a caller can search other people's tickets.",
+            "correct": false,
+            "explanationMarkdown": "The query does filter on `ownerId: request.owner.id`. This endpoint gets the access-control part right - which is part of why the other two problems slipped through review."
+          },
+          {
+            "id": "injection",
+            "textMarkdown": "The `q` parameter is interpolated into SQL and allows injection.",
+            "correct": false,
+            "explanationMarkdown": "`contains` is a parameterised query-builder operation, not string interpolation. The search term is also length-bounded, which is the input control this endpoint does apply."
+          }
+        ]
+      },
+      "primaryConceptId": "security.input-output-boundaries"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e17-06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Repair the list-query parser that trusts its caller",
+      "conceptIds": [
+        "security.input-output-boundaries"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Bounding a paging parameter, and choosing deliberately between rejecting and clamping.",
+      "lessonId": "v2-l14",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "`parseListQuery(raw)` turns Ashgrove's raw query string values into safe arguments. The current implementation trusts too much. Repair it.\n\nReturn an object `{ limit, status, sort }`.\n\n- `limit`: from `raw.limit`, which arrives as a **string**. Parse it as a base-10 integer. Clamp it into the range 1 to 100. When it is absent, empty, or not a valid integer, use `20`.\n- `status`: from `raw.status`. Permitted values are `'open'`, `'pending'` and `'closed'`; anything else, including absent, becomes `null` (meaning no filter).\n- `sort`: from `raw.sort`. Permitted values are `'createdAt'` and `'status'`; anything else, including absent, becomes `'createdAt'`.\n\nUse allow-lists for `status` and `sort` - never a check for known-bad values. Do not modify the input.",
+      "hints": [
+        "Handle the three inputs independently; each has its own rule and its own default, and sharing one branch between them is what produced the current bug.",
+        "`Number.parseInt` returns `NaN` for an unparseable string, and `NaN` fails every comparison - so test for it explicitly rather than relying on a clamp to reject it.",
+        "For the two string parameters, ask whether the supplied value is a member of the permitted list. That is a different question from asking whether it looks dangerous."
+      ],
+      "solution": {
+        "code": "function parseListQuery(raw) {\n  const allowedStatus = ['open', 'pending', 'closed'];\n  const allowedSort = ['createdAt', 'status'];\n\n  const parsed = Number.parseInt(raw.limit, 10);\n  const limit = Number.isNaN(parsed) ? 20 : Math.min(Math.max(parsed, 1), 100);\n\n  const status = allowedStatus.includes(raw.status) ? raw.status : null;\n  const sort = allowedSort.includes(raw.sort) ? raw.sort : 'createdAt';\n\n  return { limit: limit, status: status, sort: sort };\n}",
+        "explanationMarkdown": "Three separate decisions, three separate rules. The starter's mistake is treating a missing value and an invalid value as the same thing while treating a bounded value as unbounded.\n\n`Number.parseInt` on `undefined` or `'abc'` yields `NaN`, and `NaN` survives clamping: `Math.max(NaN, 1)` is `NaN`, and so is `Math.min(NaN, 100)`. A clamp written with comparisons fares no better, because `NaN > 100` and `NaN < 1` are both false. Testing `Number.isNaN` **before** clamping is what turns an unparseable value into the documented default of 20 rather than passing `NaN` into `take`.\n\n`Math.min(Math.max(parsed, 1), 100)` is the clamp itself: raise to the floor, then lower to the ceiling. Order does not matter here because the bounds do not cross.\n\n`includes` against a permitted list is the allow-list. The deny-list version - stripping semicolons, rejecting anything containing `DROP` - is a guessing game, and it fails the moment someone finds an input nobody guessed. An allow-list has no such failure mode: an unrecognised sort column is simply not one of the two strings, whatever it contains.\n\nClamping rather than rejecting is a deliberate choice for `limit` here, and it is worth noticing that it is a choice: an API that returns 100 rows for `limit=5000` is easier to use and slightly dishonest, so the response should report the page size it actually applied."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "parseListQuery",
+        "starterCode": "function parseListQuery(raw) {\n  // Trusts the caller: no bound, no allow-list.\n  return {\n    limit: Number.parseInt(raw.limit, 10),\n    status: raw.status,\n    sort: raw.sort,\n  };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "defaults-when-empty",
+            "args": [
+              {}
+            ],
+            "expected": {
+              "limit": 20,
+              "status": null,
+              "sort": "createdAt"
+            },
+            "hidden": false
+          },
+          {
+            "id": "valid-values-pass-through",
+            "args": [
+              {
+                "limit": "50",
+                "status": "pending",
+                "sort": "status"
+              }
+            ],
+            "expected": {
+              "limit": 50,
+              "status": "pending",
+              "sort": "status"
+            },
+            "hidden": false
+          },
+          {
+            "id": "huge-limit-is-clamped",
+            "args": [
+              {
+                "limit": "5000000"
+              }
+            ],
+            "expected": {
+              "limit": 100,
+              "status": null,
+              "sort": "createdAt"
+            },
+            "hidden": false
+          },
+          {
+            "id": "zero-limit-clamps-up",
+            "args": [
+              {
+                "limit": "0"
+              }
+            ],
+            "expected": {
+              "limit": 1,
+              "status": null,
+              "sort": "createdAt"
+            },
+            "hidden": false
+          },
+          {
+            "id": "negative-limit-clamps-up",
+            "args": [
+              {
+                "limit": "-40"
+              }
+            ],
+            "expected": {
+              "limit": 1,
+              "status": null,
+              "sort": "createdAt"
+            },
+            "hidden": false
+          },
+          {
+            "id": "unparseable-limit-uses-default",
+            "args": [
+              {
+                "limit": "abc"
+              }
+            ],
+            "expected": {
+              "limit": 20,
+              "status": null,
+              "sort": "createdAt"
+            },
+            "hidden": false
+          },
+          {
+            "id": "unknown-status-is-dropped",
+            "args": [
+              {
+                "status": "deleted"
+              }
+            ],
+            "expected": {
+              "limit": 20,
+              "status": null,
+              "sort": "createdAt"
+            },
+            "hidden": false
+          },
+          {
+            "id": "injection-flavoured-sort-is-rejected",
+            "args": [
+              {
+                "sort": "createdAt; DROP TABLE tickets"
+              }
+            ],
+            "expected": {
+              "limit": 20,
+              "status": null,
+              "sort": "createdAt"
+            },
+            "hidden": false
+          },
+          {
+            "id": "boundary-100-is-kept",
+            "args": [
+              {
+                "limit": "100"
+              }
+            ],
+            "expected": {
+              "limit": 100,
+              "status": null,
+              "sort": "createdAt"
+            },
+            "hidden": true
+          },
+          {
+            "id": "boundary-1-is-kept",
+            "args": [
+              {
+                "limit": "1"
+              }
+            ],
+            "expected": {
+              "limit": 1,
+              "status": null,
+              "sort": "createdAt"
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "security.input-output-boundaries"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c17-03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why an allow-list survives a migration",
+      "conceptIds": [
+        "security.input-output-boundaries"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the asymmetry between the two ways of filtering a response.",
+      "lessonId": "v2-l14",
+      "type": "recall",
+      "promptMarkdown": "Why does building a response from a field allow-list behave differently from deleting sensitive fields, once someone adds a new column to the table?",
+      "answerMarkdown": "An allow-list only emits fields somebody deliberately listed, so a new column is private the day it appears. A deny-list emits everything except the fields already thought of, so a new column is published immediately - and the change that leaked it was a migration in a different pull request, which touched no handler and needed no review of this code.",
+      "explanationMarkdown": "This is why the choice is structural rather than stylistic. Both versions look identical in review today and behave identically in every existing test; they differ only in what happens to code nobody is looking at yet.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "security.input-output-boundaries"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c17-04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Debug: the successful response that should not be",
+      "conceptIds": [
+        "security.input-output-boundaries"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the output-boundary idea to a report of no visible problem.",
+      "lessonId": "v2-l14",
+      "type": "debugging",
+      "promptMarkdown": "A colleague says an endpoint 'cannot have a security problem, because it returns 200 for every request and no error has ever been logged'. Why is that reasoning backwards for an output boundary, and what would you look at instead?",
+      "answerMarkdown": "A successful response is precisely what an output leak looks like: the caller asked for something they were allowed to ask for, and received more than they were entitled to. No exception is thrown and nothing is logged, because from the application's point of view nothing went wrong. Look at the shape of what is returned - which columns, for which audience - rather than at status codes or error rates.",
+      "explanationMarkdown": "Input failures are loud because the request is rejected and someone complains. Output failures are silent because both sides are satisfied. That asymmetry is the reason output boundaries are the ones that survive years of review.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "security.input-output-boundaries"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l15",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Dependencies and secrets",
+      "conceptIds": [
+        "security.dependency-management",
+        "security.secret-handling"
+      ],
+      "prerequisiteIds": [
+        "ops.configuration",
+        "npm.scripts"
+      ],
+      "bodyMarkdown": "Most of the code in a deployed application was written by strangers, and most of the credentials it uses were created by someone who has since moved on. These are the two parts of the attack surface that are easiest to ignore because neither shows up in a code review of your own work.\n\n**Dependencies are code you have decided to trust.** A package runs with the same privileges as the application: the same environment variables, the same network, the same filesystem. Three habits carry most of the benefit.\n\n*Pin what you install.* A committed lockfile means the build that ships is the build that was tested. Without it, a fresh install can resolve a different transitive version than the one your tests ran against, and 'works on my machine' becomes literally true.\n\n*Know what runs at install time.* Install scripts execute on developer laptops and CI runners, often with credentials in the environment. That is a meaningfully different risk from a library you merely call.\n\n*Update deliberately and on a schedule.* The dangerous posture is not 'out of date', it is 'unable to update' - a project that has drifted so far behind that a security patch means a week of migration work will delay that week until it becomes an incident.\n\n**Secrets are configuration with one extra rule: they are never printed.** They enter through the environment or a secret store; they never enter through the repository. Two properties matter more than the storage mechanism.\n\n*A secret that has ever been committed is compromised, permanently.* Removing it in a later commit does not remove it from history, from anyone's existing clone, or from whatever scraped the repository in between. The only remediation that means anything is rotating the credential.\n\n*A secret that cannot be rotated quickly will not be rotated.* If revoking a key requires an unknown number of teams to redeploy in an unknown order, the honest response to a suspected exposure becomes hesitation. Rotation is a capability to build before it is needed, not a procedure to write down.\n\nThe everyday leak is neither exotic: a config object logged at start-up 'to confirm it loaded', an error handler that serialises the whole request including headers, a client bundle built with a server-side variable inlined into it.",
+      "chapterId": "v2-ch17",
+      "sortOrder": 2,
+      "objectives": [
+        "Justify a lockfile, install-script awareness and scheduled updates as distinct dependency controls.",
+        "Redact secret material from a structured log entry without relying on a fixed list of key names.",
+        "Explain why rotation, not removal, is the remediation for a committed credential."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "The three most common ways a credential reaches a log, and what each needs.\n\n```js\n// 1. The reassuring start-up line.\nlogger.info({ config }, 'configuration loaded');\n```\n\nThis prints `DATABASE_URL`, which contains the database password, into the log store - where it is retained, indexed, and readable by everyone with log access, which is a much larger group than everyone with production database access. Log the *names* of the settings that loaded, or nothing at all.\n\n```js\n// 2. The helpful error handler.\nlogger.error({ req: request }, 'request failed');\n```\n\nA serialised request carries its headers, and the headers carry `authorization` and `cookie`. This is why logging libraries ship redaction configuration and why the request serialiser should be an allow-list of fields - method, path, request id - rather than the whole object.\n\n```js\n// 3. The build-time inline.\nconst key = import.meta.env.VITE_STRIPE_SECRET;\n```\n\nAnything the bundler is allowed to inline ends up in a file served to every visitor. The prefix convention exists precisely to make the boundary visible: a server-side secret must never acquire the public prefix, however convenient it would be.\n\nRedaction itself has a subtlety worth internalising. Matching on key names catches `password` and `apiKey`, and misses `dbConnection: 'postgres://user:hunter2@host/db'`, where the secret is inside a value that has an innocuous key. Robust redaction looks at shape as well as name - and even then it is a safety net, not a substitute for not passing the secret to the logger in the first place.",
+      "commonMistakes": [
+        "Leaving a lockfile out of version control, so the tested build and the shipped build can differ in transitive versions.",
+        "Treating an install script as equivalent in risk to a library you call, when it executes on CI runners that hold credentials.",
+        "Deferring updates until the project cannot be updated without a migration project, which guarantees the security patch arrives late.",
+        "Logging the loaded configuration object at start-up to confirm it worked, writing the database password into the log store.",
+        "Serialising a whole request in an error handler, which records the authorization header and cookies.",
+        "Deleting a committed secret in a follow-up commit and considering it resolved, when only rotation resolves it.",
+        "Giving a server-side secret the bundler-public prefix, which inlines it into a file served to every visitor."
+      ],
+      "summaryMarkdown": "Dependencies run with your privileges: pin them with a committed lockfile, know what runs at install time, and update on a schedule so you never become unable to. Secrets enter through the environment and never through the repository; a committed secret is compromised until it is rotated, and rotation must be a capability you already have. Redact by shape as well as by key name, and treat redaction as a net rather than a plan.",
+      "exerciseIds": [
+        "v2-e17-07",
+        "v2-e17-08",
+        "v2-e17-09"
+      ],
+      "reviewCardIds": [
+        "v2-c17-05",
+        "v2-c17-06"
+      ],
+      "references": [
+        {
+          "label": "OWASP: Secrets Management Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"
+        },
+        {
+          "label": "npm: package-lock.json",
+          "url": "https://docs.npmjs.com/cli/v10/configuring-npm/package-lock-json"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e17-07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the dependency policy that sounds responsible",
+      "conceptIds": [
+        "security.dependency-management"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Four statements about dependencies, two of which do not survive contact with how installs work.",
+      "lessonId": "v2-l15",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "A team writes its first dependency policy. Which statements are sound as written?\n\n1. 'We commit the lockfile, and CI installs from it rather than re-resolving, so the build we test is the build we ship.'\n2. 'We pin only direct dependencies; transitive versions can float, since we do not call them directly.'\n3. 'We treat a package that runs an install script as a higher risk than one we merely import, because it executes on CI runners that hold credentials.'\n4. 'We delay upgrades until a vulnerability is announced, so we spend effort only where it is justified.'\n\nSelect every statement that is sound.",
+      "hints": [
+        "For each statement, ask what it actually causes to happen during an install or a deploy, rather than whether it sounds prudent.",
+        "Transitive dependencies execute in the same process and with the same privileges as direct ones. Ask whether 'we do not call them directly' changes what they can do.",
+        "Consider a team that has deferred upgrades for two years and then receives a critical advisory. How long does the patch take to apply, and what does that imply about the policy?"
+      ],
+      "solution": {
+        "modelAnswer": "Statements 1 and 3 are sound; 2 and 4 are not.",
+        "explanationMarkdown": "Statements 1 and 3 describe controls that change what can happen. A committed lockfile plus an install that honours it makes the tested artefact and the shipped artefact the same thing. Treating install scripts as a distinct risk reflects that they run at a different time, in a different environment, with access to whatever the CI runner holds.\n\nStatement 2 misunderstands where the risk lives. A transitive dependency is loaded into the same process with the same privileges; not calling it yourself changes nothing about what it can reach. Floating transitive versions is exactly how a build that passed yesterday ships different code today.\n\nStatement 4 sounds like discipline and produces the opposite. A project that only ever upgrades under pressure accumulates distance from current versions, so when the advisory arrives the patch is not a version bump but a migration - and the remediation is slowest precisely when it needs to be fastest."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "lockfile",
+            "textMarkdown": "Statement 1 - commit the lockfile and install from it.",
+            "correct": true,
+            "explanationMarkdown": "Sound. This is what makes the tested build and the shipped build the same artefact; without it a fresh resolve can pick different transitive versions."
+          },
+          {
+            "id": "transitive",
+            "textMarkdown": "Statement 2 - pin direct dependencies only and let transitive versions float.",
+            "correct": false,
+            "explanationMarkdown": "Not sound. A transitive package runs in the same process with the same privileges as a direct one; whether your code imports it by name is irrelevant to what it can do."
+          },
+          {
+            "id": "install-scripts",
+            "textMarkdown": "Statement 3 - treat install scripts as a higher risk than imported code.",
+            "correct": true,
+            "explanationMarkdown": "Sound. Install scripts execute at a different moment, on developer machines and CI runners, frequently with credentials present in the environment."
+          },
+          {
+            "id": "defer-upgrades",
+            "textMarkdown": "Statement 4 - delay upgrades until a vulnerability is announced.",
+            "correct": false,
+            "explanationMarkdown": "Not sound. It optimises for effort now and produces a project that cannot patch quickly later; the dangerous state is being unable to update, not being out of date."
+          }
+        ]
+      },
+      "primaryConceptId": "security.dependency-management"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e17-08",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Redact a log entry by name and by shape",
+      "conceptIds": [
+        "security.secret-handling"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A safety net that catches the secret with the innocuous key, not just the obvious one.",
+      "lessonId": "v2-l15",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `redactEntry(entry)` for Ashgrove's logger. Return a **new** flat object in which unsafe values are replaced by the string `'[redacted]'`.\n\nA value is unsafe when **either** rule matches:\n\n- **By name**: the key, lowercased, contains `'password'`, `'secret'`, `'token'` or `'authorization'`.\n- **By shape**: the value is a string containing `'://'` and `'@'`, with the `'://'` appearing before the `'@'` - a connection string with embedded credentials, such as `postgres://app:hunter2@db.internal/ashgrove`.\n\nEverything else is copied unchanged, including numbers, booleans and `null`. Keys are never renamed or dropped. Do not modify the input.",
+      "hints": [
+        "Two independent tests decide one outcome. Write each as its own small predicate and combine them, rather than trying to express both in a single condition.",
+        "Lowercase the key once before testing the four name fragments; `Authorization` and `apiToken` must both match, and comparing against the raw key will miss them.",
+        "For the shape test, guard that the value is a string first, then look for `'@'` starting from the position of `'://'` - a bare email address has an at-sign and no scheme, and must not be redacted."
+      ],
+      "solution": {
+        "code": "function redactEntry(entry) {\n  const nameFragments = ['password', 'secret', 'token', 'authorization'];\n\n  function unsafeName(key) {\n    const lower = key.toLowerCase();\n    for (const fragment of nameFragments) {\n      if (lower.includes(fragment)) {\n        return true;\n      }\n    }\n    return false;\n  }\n\n  function unsafeShape(value) {\n    if (typeof value !== 'string') {\n      return false;\n    }\n    const scheme = value.indexOf('://');\n    if (scheme === -1) {\n      return false;\n    }\n    return value.indexOf('@', scheme) !== -1;\n  }\n\n  const result = {};\n  for (const key of Object.keys(entry)) {\n    const value = entry[key];\n    result[key] = unsafeName(key) || unsafeShape(value) ? '[redacted]' : value;\n  }\n  return result;\n}",
+        "explanationMarkdown": "The two rules exist because each catches what the other misses. Name matching handles `apiToken` and `Authorization`, where the key announces the sensitivity. Shape matching handles `dbConnection: 'postgres://app:hunter2@db.internal/ashgrove'`, where the key is entirely innocuous and only the value gives it away - and that is the case a name-based redactor silently passes through.\n\nThe ordering guard in the shape test is what keeps it from over-matching. Searching for `'@'` **from the scheme onwards** - `value.indexOf('@', scheme)` - asks the precise question: is there an at-sign inside the URL? `'a@example.test'` has no `'://'` at all and is left alone. A plain `value.includes('@')` would redact every log line that happened to mention an email address, and over-redaction destroys the diagnostic value the log exists for.\n\nKeys are preserved rather than dropped so the log still shows that a field was present and deliberately withheld. A missing key is indistinguishable from a field that was never set, which makes an incident harder to reconstruct.\n\nWorth repeating from the lesson: this is a net, not a plan. The reliable fix is not passing the credential to the logger at all."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "redactEntry",
+        "starterCode": "function redactEntry(entry) {\n  // Only catches the exact key 'password'.\n  const result = Object.assign({}, entry);\n  if ('password' in result) {\n    result.password = '[redacted]';\n  }\n  return result;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "nothing-sensitive",
+            "args": [
+              {
+                "requestId": "7f3c9a",
+                "route": "/tickets",
+                "status": 200
+              }
+            ],
+            "expected": {
+              "requestId": "7f3c9a",
+              "route": "/tickets",
+              "status": 200
+            },
+            "hidden": false
+          },
+          {
+            "id": "plain-password-key",
+            "args": [
+              {
+                "user": "ana",
+                "password": "hunter2"
+              }
+            ],
+            "expected": {
+              "user": "ana",
+              "password": "[redacted]"
+            },
+            "hidden": false
+          },
+          {
+            "id": "mixed-case-and-embedded-name",
+            "args": [
+              {
+                "Authorization": "Bearer abc.def",
+                "apiToken": "t-99",
+                "route": "/x"
+              }
+            ],
+            "expected": {
+              "Authorization": "[redacted]",
+              "apiToken": "[redacted]",
+              "route": "/x"
+            },
+            "hidden": false
+          },
+          {
+            "id": "connection-string-with-innocuous-key",
+            "args": [
+              {
+                "dbConnection": "postgres://app:hunter2@db.internal/ashgrove",
+                "pool": 10
+              }
+            ],
+            "expected": {
+              "dbConnection": "[redacted]",
+              "pool": 10
+            },
+            "hidden": false
+          },
+          {
+            "id": "email-is-not-a-credential",
+            "args": [
+              {
+                "reportedBy": "ana@example.test",
+                "subject": "Cannot sign in"
+              }
+            ],
+            "expected": {
+              "reportedBy": "ana@example.test",
+              "subject": "Cannot sign in"
+            },
+            "hidden": false
+          },
+          {
+            "id": "url-without-credentials-is-kept",
+            "args": [
+              {
+                "endpoint": "https://api.example.test/v1/charges",
+                "attempt": 2
+              }
+            ],
+            "expected": {
+              "endpoint": "https://api.example.test/v1/charges",
+              "attempt": 2
+            },
+            "hidden": false
+          },
+          {
+            "id": "non-string-values-survive",
+            "args": [
+              {
+                "retries": 0,
+                "ok": false,
+                "cursor": null
+              }
+            ],
+            "expected": {
+              "retries": 0,
+              "ok": false,
+              "cursor": null
+            },
+            "hidden": false
+          },
+          {
+            "id": "secret-fragment-anywhere-in-key",
+            "args": [
+              {
+                "clientSecretRef": "ref-1",
+                "note": "fine"
+              }
+            ],
+            "expected": {
+              "clientSecretRef": "[redacted]",
+              "note": "fine"
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "security.secret-handling"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e17-09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Respond to a committed credential",
+      "conceptIds": [
+        "security.secret-handling"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The first hour after a key turns up in git history.",
+      "lessonId": "v2-l15",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "A developer notices that `config/production.json`, committed to Ashgrove's repository eight months ago and removed three weeks later, contained a live database password. The repository is private. The password is still in use.\n\nWrite the response you would send to the team. Cover: what you would do first and why; whether the removal three weeks later helped; what the private repository does and does not change; and one change you would make so the next occurrence is less likely and less costly.",
+      "hints": [
+        "Start from what an attacker would need to do to use this credential, and work back to which action actually removes that possibility.",
+        "Rewriting history does not reach existing clones, forks, CI caches, or anything that read the repository during those three weeks. Ask what that leaves as the only effective remediation.",
+        "For the prevention half, distinguish controls that stop the commit from happening at all from controls that reduce the damage when one gets through."
+      ],
+      "solution": {
+        "modelAnswer": "Rotate the password first, before anything else. Until the credential is changed, every other step is documentation rather than remediation - the secret is still valid, and the only question is who holds it.\n\nThe removal three weeks later did not help in the way people usually assume. The value stayed in the object history, in every clone taken during that period, in any fork, and in CI caches. Anyone who read the repository between the two commits kept a working credential, and nothing we do to the repository now takes it back. History rewriting is worth doing to prevent re-exposure, but it is cleanup after the fact, not the fix.\n\nThe repository being private narrows the exposed population; it does not make the exposure empty. Everyone with read access for eight months had it, including anyone whose account or laptop was compromised in that window and any integration granted repository scope. 'Private' is a reason to be somewhat calmer, not a reason to skip rotation.\n\nAfter rotation I would check whether the old credential was used from anywhere unexpected while it was valid, and confirm the new one is delivered through the environment rather than a file in the tree.\n\nFor prevention I would add automated secret scanning that blocks the push, since a control that runs before the commit exists is the only one that prevents the problem rather than reporting it. Alongside that, I would make rotation genuinely routine - a documented, rehearsed, single-operator procedure - because the reason teams hesitate to rotate is that they are not sure what will break, and that hesitation is what turns a small exposure into a long one.",
+        "explanationMarkdown": "The single most important judgement is putting rotation first and saying why: until the credential is invalid, nothing else has changed the attacker's position. Answers that lead with rewriting history or auditing access have inverted the order.\n\nThe second is refusing the comfort of 'it was removed' and 'it was private'. Both are true and neither is remediation; a good answer states what each does change - a narrower exposed population - without letting it substitute for the fix.\n\nThe prevention half separates a preventive control (blocking the push) from a mitigating one (rehearsed rotation). Naming rotation *capability* as the thing to build is the more mature answer, because it addresses why teams delay."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Puts rotation first and explains that until the credential changes, nothing else alters the attacker's position.",
+          "States that removal in a later commit leaves the value in history, existing clones, forks and caches, so it is cleanup rather than remediation.",
+          "Acknowledges that a private repository narrows the exposed population without making the exposure empty.",
+          "Proposes a preventive control that acts before the commit exists, such as scanning that blocks the push.",
+          "Identifies rehearsed, low-friction rotation as a capability to build, and connects hesitation to rotate with prolonged exposure."
+        ],
+        "modelAnswerMarkdown": "See the model answer: rotate immediately; treat the later removal and the private repository as mitigating context rather than fixes; review use of the old credential; and invest in both push-blocking secret scanning and a rotation procedure routine enough that nobody hesitates."
+      },
+      "primaryConceptId": "security.secret-handling"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c17-05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What a lockfile actually guarantees",
+      "conceptIds": [
+        "security.dependency-management"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the specific property a committed lockfile provides.",
+      "lessonId": "v2-l15",
+      "type": "recall",
+      "promptMarkdown": "What does committing a lockfile and installing from it guarantee, and which risk does it not address?",
+      "answerMarkdown": "It guarantees that the dependency tree which was tested is the dependency tree that ships, including transitive versions - a fresh install cannot silently resolve something different. It does not make those versions safe: a pinned dependency with a vulnerability stays pinned to the vulnerable version until someone updates it deliberately.",
+      "explanationMarkdown": "The two controls are complementary and often confused. Pinning gives reproducibility; scheduled updating gives currency. A project with a lockfile and no update habit ships exactly the same known-vulnerable code every time, very reliably.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "security.dependency-management"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c17-06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer: the start-up line that leaks",
+      "conceptIds": [
+        "security.secret-handling"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply secret hygiene to a line that looks like good operational practice.",
+      "lessonId": "v2-l15",
+      "type": "transfer",
+      "promptMarkdown": "A service logs `logger.info({ config }, 'configuration loaded')` at start-up so operators can confirm it read the right environment. What is wrong with it, and what would you log instead?",
+      "answerMarkdown": "The config object contains `DATABASE_URL` and any API keys, so this writes live credentials into the log store - which is retained, indexed, and readable by a much wider group than the people with production database access. Log the setting *names* that were found, or a count, or nothing: the operator's real question is 'did required configuration load?', which a list of names answers without printing any values.",
+      "explanationMarkdown": "This is the everyday leak rather than the exotic one. It is added for a good reason, it survives review because it looks like diligence, and it is discovered when someone searches the logs for something else entirely.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "security.secret-handling"
+    },
+    {
+      "kind": "assessment",
+      "id": "v2-a17",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Security depth placement check",
+      "conceptIds": [
+        "authz.resource-scoped-permissions",
+        "security.input-output-boundaries",
+        "security.dependency-management",
+        "security.secret-handling"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five questions covering resource-scoped permissions, the input and output boundaries, dependency handling and secret hygiene. No hints and no solutions are shown until you submit.",
+      "chapterId": "v2-ch17",
+      "items": [
+        {
+          "id": "v2-a17-i1",
+          "objectiveIds": [
+            "authz.resource-scoped-permissions"
+          ],
+          "critical": true,
+          "promptMarkdown": "A reviewer suggests replacing `orders.findFirst({ where: { id, customerId: actor.id } })` with `orders.findUnique({ where: { id } })` followed by `if (order.customerId !== actor.id) throw forbidden()`.\n\nBoth versions deny access to another customer's order. What is the strongest argument for keeping the first version?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a1-cannot-forget",
+                "textMarkdown": "The scoped query has no separate step that a future code path can omit, so the restriction travels with the query rather than with the handler.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The two are equivalent today; they differ in what happens when a bulk endpoint, export or background job reuses the fetch and not the check."
+              },
+              {
+                "id": "a1-faster",
+                "textMarkdown": "It is faster, because a single query is cheaper than a query plus a comparison.",
+                "correct": false,
+                "explanationMarkdown": "The comparison is free relative to the query. Arguing on performance concedes the security argument, which is the one that actually holds."
+              },
+              {
+                "id": "a1-status",
+                "textMarkdown": "It returns 404 rather than 403, which is always the correct status for an authorization failure.",
+                "correct": false,
+                "explanationMarkdown": "It does tend to produce 404, and that has a real benefit in not confirming existence - but \"always correct\" overstates it, and this is a side effect rather than the main argument."
+              },
+              {
+                "id": "a1-types",
+                "textMarkdown": "It is more type-safe, because `findFirst` returns a nullable record and forces the caller to handle absence.",
+                "correct": false,
+                "explanationMarkdown": "`findUnique` is also nullable, so both force the same handling. This is not the distinction between them."
+              }
+            ]
+          },
+          "explanationMarkdown": "The decisive property is that a where-clause cannot be forgotten. A separate check protects the call sites that perform it, and the realistic failure is a second path added later that loads the record without it."
+        },
+        {
+          "id": "v2-a17-i2",
+          "objectiveIds": [
+            "security.input-output-boundaries"
+          ],
+          "critical": true,
+          "promptMarkdown": "An endpoint returns `reply.send(await users.findUnique({ where: { id } }))`. A migration next month adds a `recoveryCodeHash` column to `users`.\n\nWhat happens to this endpoint, and what property of the alternative prevents it?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a2-publishes",
+                "textMarkdown": "It starts publishing `recoveryCodeHash` immediately; an explicit field allow-list would have kept the new column private by default.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The response shape is defined by the table, so a schema change silently changes what the API emits - and the pull request responsible touched no handler."
+              },
+              {
+                "id": "a2-error",
+                "textMarkdown": "It throws a serialisation error until the response schema is regenerated, which is why the problem gets noticed.",
+                "correct": false,
+                "explanationMarkdown": "Nothing throws. `send` will happily serialise a column it has never seen, which is precisely why this failure is silent."
+              },
+              {
+                "id": "a2-safe",
+                "textMarkdown": "Nothing, because the ORM only selects columns that existed when the client was generated.",
+                "correct": false,
+                "explanationMarkdown": "A regenerated client selects all scalar columns by default, and the client is regenerated as part of applying the migration."
+              },
+              {
+                "id": "a2-delete",
+                "textMarkdown": "Nothing, provided the handler deletes known-sensitive keys before sending.",
+                "correct": false,
+                "explanationMarkdown": "A deny-list only removes fields somebody already thought of. `recoveryCodeHash` did not exist when that list was written, so it is not on it."
+              }
+            ]
+          },
+          "explanationMarkdown": "Output shape defined by the table means schema changes are API changes. An allow-list inverts the default so new columns are private until deliberately exposed."
+        },
+        {
+          "id": "v2-a17-i3",
+          "objectiveIds": [
+            "security.input-output-boundaries"
+          ],
+          "critical": false,
+          "promptMarkdown": "A search endpoint validates `limit` with `z.coerce.number().int()` and passes it straight to `take`.\n\nSelect every statement that is accurate.",
+          "grading": {
+            "kind": "choice",
+            "mode": "multiple",
+            "options": [
+              {
+                "id": "a3-magnitude",
+                "textMarkdown": "The value is type-checked but not magnitude-checked, so a very large page size is accepted.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Shape validation and range validation are separate obligations, and only the first one has been met."
+              },
+              {
+                "id": "a3-schema",
+                "textMarkdown": "Putting `.min(1).max(100).default(20)` in the schema is better than clamping in the handler, because every caller of the schema inherits the bound.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The constraint belongs with the definition; a bound applied in one handler protects that handler only."
+              },
+              {
+                "id": "a3-injection",
+                "textMarkdown": "The unbounded `limit` allows SQL injection through the pagination parameter.",
+                "correct": false,
+                "explanationMarkdown": "It is coerced to a number and passed as a parameter, so injection is not the risk. Resource exhaustion is."
+              },
+              {
+                "id": "a3-fine",
+                "textMarkdown": "No change is needed, because the database will refuse an unreasonably large result set.",
+                "correct": false,
+                "explanationMarkdown": "The database will make a genuine effort to return whatever was asked for. Nothing downstream imposes a sensible page size on your behalf."
+              }
+            ]
+          },
+          "explanationMarkdown": "Type and range are different checks. Placing the range in the schema makes it inherited rather than remembered."
+        },
+        {
+          "id": "v2-a17-i4",
+          "objectiveIds": [
+            "security.secret-handling"
+          ],
+          "critical": true,
+          "promptMarkdown": "An API key is found in a private repository's git history. It was committed nine months ago and removed a month later, and remains valid.\n\nWhat is the first action, and why does it come before the others?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a4-rotate",
+                "textMarkdown": "Rotate the key, because until it is invalid every other step leaves a working credential in circulation.",
+                "correct": true,
+                "explanationMarkdown": "Correct. History rewriting, access review and scanning are all worth doing, and none of them takes back a credential that anyone already copied."
+              },
+              {
+                "id": "a4-rewrite",
+                "textMarkdown": "Rewrite git history to purge the object, because that removes the exposure at its source.",
+                "correct": false,
+                "explanationMarkdown": "It does not reach existing clones, forks or caches, and cannot affect anyone who read the repository during the month it was present. Worth doing second, not first."
+              },
+              {
+                "id": "a4-audit",
+                "textMarkdown": "Audit who had repository access, because the exposure is limited to that group.",
+                "correct": false,
+                "explanationMarkdown": "Useful for understanding scope, but it changes nothing about the key's validity, and the group includes anyone whose account was compromised in nine months."
+              },
+              {
+                "id": "a4-nothing",
+                "textMarkdown": "Nothing urgent: the repository is private and the file was removed a month later.",
+                "correct": false,
+                "explanationMarkdown": "Private narrows the population and removal stops further spread; neither invalidates a credential that is still accepted today."
+              }
+            ]
+          },
+          "explanationMarkdown": "Rotation is the only step that changes what an attacker holding the value can do. Everything else is scope-limiting or cleanup."
+        },
+        {
+          "id": "v2-a17-i5",
+          "objectiveIds": [
+            "security.dependency-management"
+          ],
+          "critical": false,
+          "promptMarkdown": "Two teams describe their dependency practice.\n\n**Team A** commits a lockfile, installs from it in CI, and upgrades on a fixed monthly schedule.\n\n**Team B** commits a lockfile, installs from it in CI, and upgrades only when a vulnerability is announced in a package they use.\n\nBoth are reproducible. Why is Team B's posture the riskier one?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a5-drift",
+                "textMarkdown": "Team B accumulates version distance, so when an advisory does arrive the patch is a migration rather than a bump - the fix is slowest exactly when speed matters.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The dangerous state is being unable to update quickly, and that state is produced by only ever updating under pressure."
+              },
+              {
+                "id": "a5-lockfile",
+                "textMarkdown": "Team B's lockfile will drift out of sync with its manifest and stop being reproducible.",
+                "correct": false,
+                "explanationMarkdown": "Nothing about upgrading less often desynchronises a lockfile. Both teams are equally reproducible, which is what makes the real difference worth isolating."
+              },
+              {
+                "id": "a5-advisories",
+                "textMarkdown": "Team B will not learn about vulnerabilities at all without a scheduled upgrade.",
+                "correct": false,
+                "explanationMarkdown": "Advisories arrive through scanning and notifications independently of upgrade cadence. The problem is the cost of acting on one, not awareness of it."
+              },
+              {
+                "id": "a5-transitive",
+                "textMarkdown": "Team B is exposed to transitive dependencies while Team A is not.",
+                "correct": false,
+                "explanationMarkdown": "Both teams have identical transitive exposure. Cadence changes how far behind current versions they sit, not which packages they depend on."
+              }
+            ]
+          },
+          "explanationMarkdown": "Both teams are reproducible; they differ in remediation latency. Distance from current versions converts a patch into a migration project."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

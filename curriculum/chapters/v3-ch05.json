@@ -1,0 +1,1248 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v3-ch05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "ASP.NET Core",
+      "conceptIds": [
+        "aspnet.routing",
+        "aspnet.model-binding",
+        "aspnet.middleware",
+        "aspnet.dependency-injection",
+        "aspnet.validation",
+        "aspnet.error-contracts"
+      ],
+      "prerequisiteIds": [
+        "node.route-boundaries",
+        "node.runtime-validation",
+        "node.error-contracts"
+      ],
+      "bodyMarkdown": "This is where the .NET track meets the service you already built. The problems are the ones from V1 chapter 9 — turn a request into typed arguments, reject bad input, return a consistent error shape — and the framework answers them with more machinery than Fastify did.\n\nThat machinery is worth understanding rather than memorising. **Routing** maps a path to an endpoint, and where several endpoints could match, precedence rules rather than declaration order decide the winner. **Model binding** assembles typed arguments from the route, query string, headers and body, and its failures are a category of bug all their own — a parameter that silently arrives as `null` or `0` because binding found nothing to fill it. **Middleware** forms a pipeline that every request passes through on the way in and again on the way out, so order is behaviour. **Dependency injection** is built into the framework rather than bolted on, and choosing a wrong lifetime produces bugs that only appear under concurrency.\n\nThe theme running through all four is that ASP.NET Core does a great deal for you, and each convenience has a failure mode that is quiet precisely because the mechanism is implicit. Binding does not throw when it cannot find a value; it supplies a default. The pipeline does not warn that authentication runs after your endpoint; it simply runs it there. A captured scoped service does not report a lifetime violation on the happy path; it fails under load.\n\nEverything here is practised locally in the .NET missions, since none of it runs in a browser.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v3-l13",
+        "v3-l14",
+        "v3-l15"
+      ],
+      "assessmentId": "v3-a05",
+      "objectiveIds": [
+        "aspnet.routing",
+        "aspnet.model-binding",
+        "aspnet.middleware",
+        "aspnet.dependency-injection",
+        "aspnet.validation",
+        "aspnet.error-contracts"
+      ],
+      "missionIds": [],
+      "sortOrder": 24
+    },
+    {
+      "kind": "lesson",
+      "id": "v3-l13",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Routing and model binding",
+      "conceptIds": [
+        "aspnet.routing",
+        "aspnet.model-binding"
+      ],
+      "prerequisiteIds": [
+        "node.route-boundaries"
+      ],
+      "bodyMarkdown": "A route template describes a shape of path: `/tickets/{id}` matches `/tickets/42` and binds `id` to `\"42\"`. Templates can constrain segments (`{id:int}`), make them optional (`{page?}`), or supply defaults.\n\nWhen several templates could match one path, **precedence is not declaration order**. A literal segment beats a parameter segment, so `/tickets/new` wins over `/tickets/{id}` for the path `/tickets/new` regardless of which was registered first. This is the opposite of the first-match-wins rule you met in switch expressions and in most JavaScript routers, and it is generally what you want — but it means moving a route registration around does not change behaviour, and two templates that are equally specific produce an ambiguity exception at run time rather than one silently shadowing the other.\n\n**Model binding** then assembles the handler's arguments. Simple types come from the route or query string; complex types come from the body, usually as JSON. `[FromRoute]`, `[FromQuery]`, `[FromBody]`, `[FromHeader]` and `[FromServices]` state a source explicitly, and stating it is worth the keystrokes because the defaults are conventions, not guarantees.\n\nThe failure mode is the important part: **binding does not throw when it cannot find a value.** It supplies the type's default. A missing `int page` binds to `0`; a missing `string filter` binds to `null`; a body that does not match the target shape produces an object with default-valued properties rather than an error. So a handler that reads `page` and gets `0` cannot tell whether the caller asked for page zero, sent something unparseable, or sent nothing at all — the same class of ambiguity as `FirstOrDefault` returning `0` for a missing rate in D03.\n\nThe remedy is to make absence representable and then check it: `int? page` binds to null when nothing was supplied, which is distinguishable from a real zero. Combine that with validation, and binding failures become explicit rejections instead of silently plausible values.",
+      "chapterId": "v3-ch05",
+      "sortOrder": 0,
+      "objectives": [
+        "Predict which route template matches a path when several could.",
+        "Identify where each handler argument is bound from, and say what happens when the source is missing.",
+        "Model an optional parameter so that absent is distinguishable from a legitimate default."
+      ],
+      "estimatedMinutes": 10,
+      "workedExampleMarkdown": "Two templates, one path, and the binding that follows.\n\n```csharp\napp.MapGet(\"/tickets/{id}\", (string id) => Results.Ok(Load(id)));\napp.MapGet(\"/tickets/new\", () => Results.Ok(BlankForm()));\n\n// GET /tickets/new  -> the literal route wins, despite being registered second\n// GET /tickets/42   -> the parameter route, with id bound to \"42\"\n```\n\nAnd the binding trap, in the form it usually appears:\n\n```csharp\n// Silently plausible: no way to tell \"page 0\" from \"nothing sent\".\napp.MapGet(\"/tickets\", (int page, int size) => Results.Ok(Page(page, size)));\n\n// Honest: absence is representable, and the handler decides what it means.\napp.MapGet(\"/tickets\", (int? page, int? size) =>\n{\n    var p = page ?? 1;\n    var s = size ?? 20;\n    if (s is < 1 or > 100)\n    {\n        return Results.ValidationProblem(new Dictionary<string, string[]>\n        {\n            [\"size\"] = [\"size must be between 1 and 100\"]\n        });\n    }\n    return Results.Ok(Page(p, s));\n});\n```\n\nThe second version is longer and states three things the first left to chance: what a missing page means, what a missing size means, and what an out-of-range size means. Note that `size = 0` from the first version would reach the paging code and probably return nothing at all, which reads in production as \"the list is empty\" rather than as a bad request.",
+      "commonMistakes": [
+        "Assuming route registration order decides which template wins. Precedence is by specificity, and literal segments beat parameters.",
+        "Binding an optional value to a non-nullable type, so \"absent\" becomes `0` or `null` and is indistinguishable from real input.",
+        "Relying on convention for binding sources instead of stating `[FromBody]`, `[FromQuery]` and friends explicitly.",
+        "Expecting binding to fail loudly. It supplies defaults, so an unparseable or missing value arrives as a plausible one."
+      ],
+      "summaryMarkdown": "Route precedence is by specificity, not registration order — literals beat parameters, and equally specific templates raise an ambiguity error. Model binding fills arguments from route, query, header and body, and supplies the type's default when it finds nothing rather than throwing. Make optional inputs nullable so absence is representable, then validate.",
+      "exerciseIds": [
+        "v3-e037",
+        "v3-e038",
+        "v3-e039"
+      ],
+      "reviewCardIds": [
+        "v3-c025",
+        "v3-c026"
+      ],
+      "references": [
+        {
+          "label": "Routing in ASP.NET Core (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/routing"
+        },
+        {
+          "label": "Model binding in ASP.NET Core (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/mvc/models/model-binding"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e037",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose an empty list caused by binding",
+      "conceptIds": [
+        "aspnet.model-binding"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A listing endpoint that returns nothing when a query parameter is omitted.",
+      "lessonId": "v3-l13",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "`GET /tickets?size=20` works. `GET /tickets` returns `200` with an empty array, and support insist there are plenty of tickets.\n\n```csharp\napp.MapGet(\"/tickets\", async (int size, ITicketRepo repo, CancellationToken ct) =>\n{\n    var page = await repo.PageAsync(size, ct);\n    return Results.Ok(page);\n});\n\n// repo\npublic Task<List<Ticket>> PageAsync(int size, CancellationToken ct)\n    => _db.Tickets.OrderBy(t => t.OpenedAt).Take(size).ToListAsync(ct);\n```\n\nWhy is the response empty rather than an error?",
+      "hints": [
+        "Ask what `size` contains when the query string does not include it, and whether anything objects.",
+        "Model binding does not throw for a missing value — it supplies the type's default, so `size` is `0`.",
+        "`Take(0)` legitimately returns no rows, so the query succeeds and returns an empty page. Make `size` nullable, default it explicitly, and validate the range."
+      ],
+      "solution": {
+        "modelAnswer": "With no `size` in the query string, model binding supplies `default(int)` — that is, `0`. Nothing fails, because `0` is a perfectly valid `int`. It flows into `Take(0)`, which correctly returns no rows, so the endpoint answers `200` with an empty array. The fix is to make absence representable and then decide what it means: `int? size`, then `var s = size ?? 20;` plus a range check rejecting anything outside 1..100 with a validation problem response.",
+        "explanationMarkdown": "This is the binding equivalent of D03's `FirstOrDefault` returning `0` for an unknown plan: a default that is indistinguishable from real data. It is worse here because there is no exception anywhere in the chain and every layer behaves correctly in isolation — binding did what it promises, `Take` did what it promises, and the endpoint returned a valid response. The only place the mistake can be caught is at the boundary, by refusing to accept a value the caller did not actually supply. That is the same conclusion V1 chapter 9 reached about runtime validation, arriving through a different mechanism."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "missing-binds-to-default-zero",
+            "textMarkdown": "Binding supplies `default(int)` = `0` for the missing parameter, and `Take(0)` legitimately returns no rows, so the request succeeds with an empty page.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Use `int?` so absence is distinguishable, apply an explicit default, and validate the range."
+          },
+          {
+            "id": "route-not-matched",
+            "textMarkdown": "Without a query string the route no longer matches, so a different empty endpoint handles the request.",
+            "correct": false,
+            "explanationMarkdown": "Query string values take no part in route matching. The same endpoint handles both requests."
+          },
+          {
+            "id": "orderby-null",
+            "textMarkdown": "`OrderBy` on a nullable `OpenedAt` sorts nulls first and the page fills with rows that are filtered out later.",
+            "correct": false,
+            "explanationMarkdown": "No later filtering exists, and the ordering column is irrelevant to how many rows `Take` returns."
+          },
+          {
+            "id": "cancellation",
+            "textMarkdown": "The cancellation token fires before the query completes, so an empty list is returned.",
+            "correct": false,
+            "explanationMarkdown": "A cancelled query throws rather than quietly yielding an empty list, and the request completes normally here."
+          }
+        ]
+      },
+      "primaryConceptId": "aspnet.model-binding",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e038",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Implement route precedence by specificity",
+      "conceptIds": [
+        "aspnet.routing"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Model the rule that decides between two templates that both match.",
+      "lessonId": "v3-l13",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "stretch",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "ASP.NET Core picks the most specific matching template, not the first registered. Implement that rule.\n\nImplement `matchRoute(templates, path)` returning the winning template string, or `\"none\"`.\n\n- A template and a path are compared segment by segment, after splitting on `/` and discarding empty segments.\n- A template segment wrapped in braces, such as `{id}`, matches any single path segment.\n- Any other template segment must equal the path segment exactly.\n- A template matches only when it has the same number of segments as the path.\n- Among all matching templates, the winner is the one with the **most literal** (non-brace) segments.\n- If two matching templates tie on literal count, return the one that appears **first** in `templates`.\n- If nothing matches, return `\"none\"`.\n\nDo not modify the inputs.",
+      "hints": [
+        "Write a helper that decides whether one template matches the path, then score the ones that do.",
+        "Score by counting segments that are NOT wrapped in braces — that count is the specificity.",
+        "Track the best score and the winning template as you walk `templates`, replacing the winner only on a strictly higher score so that ties keep the earlier entry."
+      ],
+      "solution": {
+        "code": "function matchRoute(templates, path) {\n  const pathParts = path.split('/').filter(function (s) { return s.length > 0; });\n  let winner = 'none';\n  let bestScore = -1;\n  for (const template of templates) {\n    const parts = template.split('/').filter(function (s) { return s.length > 0; });\n    if (parts.length !== pathParts.length) {\n      continue;\n    }\n    let matches = true;\n    let literals = 0;\n    for (let i = 0; i < parts.length; i = i + 1) {\n      const seg = parts[i];\n      const isParam = seg.startsWith('{') && seg.endsWith('}');\n      if (isParam) {\n        continue;\n      }\n      literals = literals + 1;\n      if (seg !== pathParts[i]) {\n        matches = false;\n      }\n    }\n    if (matches && literals > bestScore) {\n      bestScore = literals;\n      winner = template;\n    }\n  }\n  return winner;\n}",
+        "explanationMarkdown": "Scoring rather than short-circuiting is what separates this from the switch-expression selector in D01, and the difference is deliberate. A first-match router makes registration order part of the logic, so moving a line changes behaviour; a specificity router makes the templates themselves decide, so `/tickets/new` beats `/tickets/{id}` no matter where each is registered. The strict `>` comparison is what implements the tie-break rule — an equally specific later template never displaces an earlier one. In the real framework an exact tie between two genuinely ambiguous templates is an error rather than a silent win, which is a stricter and more helpful choice than the one modelled here."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "matchRoute",
+        "starterCode": "function matchRoute(templates, path) {\n  // First match wins, which is the wrong rule.\n  const pathParts = path.split('/').filter(function (s) { return s.length > 0; });\n  for (const template of templates) {\n    const parts = template.split('/').filter(function (s) { return s.length > 0; });\n    if (parts.length === pathParts.length) {\n      return template;\n    }\n  }\n  return 'none';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "literal-beats-parameter-when-registered-later",
+            "args": [
+              [
+                "/tickets/{id}",
+                "/tickets/new"
+              ],
+              "/tickets/new"
+            ],
+            "expected": "/tickets/new",
+            "hidden": false
+          },
+          {
+            "id": "parameter-matches-other-paths",
+            "args": [
+              [
+                "/tickets/{id}",
+                "/tickets/new"
+              ],
+              "/tickets/42"
+            ],
+            "expected": "/tickets/{id}",
+            "hidden": false
+          },
+          {
+            "id": "literal-still-wins-when-registered-first",
+            "args": [
+              [
+                "/tickets/new",
+                "/tickets/{id}"
+              ],
+              "/tickets/new"
+            ],
+            "expected": "/tickets/new",
+            "hidden": false
+          },
+          {
+            "id": "segment-count-must-agree",
+            "args": [
+              [
+                "/tickets/{id}"
+              ],
+              "/tickets"
+            ],
+            "expected": "none",
+            "hidden": false
+          },
+          {
+            "id": "deeper-path-does-not-match",
+            "args": [
+              [
+                "/tickets/{id}"
+              ],
+              "/tickets/42/comments"
+            ],
+            "expected": "none",
+            "hidden": false
+          },
+          {
+            "id": "tie-keeps-the-earlier-template",
+            "args": [
+              [
+                "/tickets/{id}",
+                "/tickets/{slug}"
+              ],
+              "/tickets/42"
+            ],
+            "expected": "/tickets/{id}",
+            "hidden": false
+          },
+          {
+            "id": "most-literals-wins-among-three",
+            "args": [
+              [
+                "/{area}/{id}",
+                "/tickets/{id}",
+                "/tickets/archive"
+              ],
+              "/tickets/archive"
+            ],
+            "expected": "/tickets/archive",
+            "hidden": true
+          },
+          {
+            "id": "no-templates-at-all",
+            "args": [
+              [],
+              "/tickets/42"
+            ],
+            "expected": "none",
+            "hidden": true
+          },
+          {
+            "id": "all-parameter-template-still-matches",
+            "args": [
+              [
+                "/{area}/{id}"
+              ],
+              "/tickets/42"
+            ],
+            "expected": "/{area}/{id}",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "aspnet.routing",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e039",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose a binding source for each argument",
+      "conceptIds": [
+        "aspnet.model-binding"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Match each handler argument to where its value should come from.",
+      "lessonId": "v3-l13",
+      "sortOrder": 2,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "An endpoint updates one ticket: `PUT /tickets/{id}`. It needs the ticket id from the path, the new field values from the request body, an idempotency key sent as a header, and the repository from the container.\n\nWhich set of attributes is right?",
+      "hints": [
+        "Take each argument separately and ask which part of the HTTP request — or which part of the application — actually carries that value.",
+        "The id appears in the URL path itself, which is the route, not the query string.",
+        "Services never come from the request at all; they come from the dependency injection container."
+      ],
+      "solution": {
+        "modelAnswer": "`[FromRoute] string id`, `[FromBody] TicketUpdate update`, `[FromHeader(Name = \"Idempotency-Key\")] string key`, `[FromServices] ITicketRepo repo`.",
+        "explanationMarkdown": "Each source corresponds to a genuinely different part of the request, and mismatching them produces the quiet default-value failure from this lesson rather than an error. The header case is the one most often got wrong, because the parameter name and the header name differ — HTTP headers are hyphenated and C# identifiers cannot be, so `Name` has to be stated explicitly or binding looks for a header called `key` and finds nothing. Being explicit throughout is worth the keystrokes: the conventions are reasonable but they are conventions, and a reader should not have to know them to review the endpoint."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "route-body-header-services",
+            "textMarkdown": "`[FromRoute] id`, `[FromBody] update`, `[FromHeader(Name = \"Idempotency-Key\")] key`, `[FromServices] repo`",
+            "correct": true,
+            "explanationMarkdown": "Correct. Note the explicit header name — the HTTP header is hyphenated and cannot match a C# identifier."
+          },
+          {
+            "id": "query-for-id",
+            "textMarkdown": "`[FromQuery] id`, `[FromBody] update`, `[FromHeader] key`, `[FromServices] repo`",
+            "correct": false,
+            "explanationMarkdown": "The id is part of the path in `/tickets/{id}`, not the query string, so query binding would find nothing and supply null."
+          },
+          {
+            "id": "body-for-everything",
+            "textMarkdown": "`[FromBody]` for id, update and key, with `[FromServices] repo`",
+            "correct": false,
+            "explanationMarkdown": "Only one parameter can bind from the body, and the id and idempotency key are not in it. This would fail to bind two of the three."
+          },
+          {
+            "id": "header-without-name",
+            "textMarkdown": "`[FromRoute] id`, `[FromBody] update`, `[FromHeader] key`, `[FromServices] repo`",
+            "correct": false,
+            "explanationMarkdown": "Close, but without `Name` the binder looks for a header literally called `key`. The real header is `Idempotency-Key`, so the value binds to null."
+          }
+        ]
+      },
+      "primaryConceptId": "aspnet.model-binding",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c025",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Route precedence",
+      "conceptIds": [
+        "aspnet.routing"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall how ASP.NET Core chooses between matching templates.",
+      "lessonId": "v3-l13",
+      "type": "recall",
+      "promptMarkdown": "Two templates could match one path. How does ASP.NET Core choose, and what happens if they are equally specific?",
+      "answerMarkdown": "It chooses the most specific template, not the first registered — a literal segment beats a parameter segment, so `/tickets/new` wins over `/tickets/{id}`. Registration order is irrelevant. Two genuinely equally specific templates raise an ambiguous-match exception at run time rather than one silently shadowing the other.",
+      "explanationMarkdown": "This is the opposite of the first-match-wins rule in switch expressions and most JavaScript routers. It means moving a registration cannot change behaviour, and a genuine ambiguity fails loudly instead of hiding.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "aspnet.routing"
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c026",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Binding supplies defaults, not errors",
+      "conceptIds": [
+        "aspnet.model-binding"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply binding behaviour to a missing query parameter.",
+      "lessonId": "v3-l13",
+      "type": "debugging",
+      "promptMarkdown": "A handler takes `int size` from the query string and the caller omits it. What does `size` hold, and how should the parameter be declared instead?",
+      "answerMarkdown": "It holds `0` — binding supplies the type's default rather than failing, so a missing value becomes a plausible one. Declare it `int? size`, apply an explicit default (`size ?? 20`), and validate the range, rejecting anything outside it with a validation problem response.",
+      "explanationMarkdown": "The same shape as `FirstOrDefault` returning `0` for a missing rate: the absent case must be representable in the type, or it will be mistaken for data. Here it typically surfaces as an endpoint returning an empty list rather than an error.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "aspnet.model-binding"
+    },
+    {
+      "kind": "lesson",
+      "id": "v3-l14",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Middleware and dependency injection",
+      "conceptIds": [
+        "aspnet.middleware",
+        "aspnet.dependency-injection"
+      ],
+      "prerequisiteIds": [
+        "node.route-boundaries"
+      ],
+      "bodyMarkdown": "Every request passes through a pipeline of middleware. Each component may act on the way in, call the next component, and then act again on the way out as the response travels back — an onion, not a queue. So a component registered first is outermost: it sees the request earliest and the response latest.\n\nThat structure makes **order behaviour**. Authentication must run before authorization, which must run before your endpoint, or the endpoint executes for an unauthenticated caller. Exception handling must be near the outside, or it cannot catch what happens further in. Response compression must wrap the thing producing the response. None of this is checked for you — a pipeline in the wrong order compiles and runs, and simply does the wrong thing.\n\nA component can also **short-circuit**: if it responds without calling the next one, everything inside it never runs. That is exactly what an authentication failure should do, and it is also how a misplaced component can silently disable half the pipeline.\n\n**Dependency injection** is built into the framework. Services are registered at startup and constructed on demand, and the lifetime you choose decides how long an instance lives:\n\n- **Transient** — a new instance every time it is requested. Safe, and occasionally wasteful.\n- **Scoped** — one instance per request. The right default for anything carrying per-request state, and what a `DbContext` must be.\n- **Singleton** — one instance for the application's lifetime. Correct for stateless helpers and caches, and it must be thread-safe, because many requests will use it at once.\n\nThe classic defect is a **captured dependency**: a singleton that takes a scoped service in its constructor. The container hands it one instance at startup, and that instance is then used forever, by every request, concurrently. For a `DbContext` this is a real hazard — it is not thread-safe, it tracks entities from unrelated requests, and it accumulates state until something fails in a way that has nothing to do with the code that caused it. ASP.NET Core detects this specific case at startup in the development environment, which is one of the reasons scope validation is worth leaving enabled.",
+      "chapterId": "v3-ch05",
+      "sortOrder": 1,
+      "objectives": [
+        "Trace a request in and out through a middleware pipeline and explain why order is behaviour.",
+        "Choose transient, scoped or singleton from what state a service holds.",
+        "Recognise a captured dependency and say why it fails only under concurrency."
+      ],
+      "estimatedMinutes": 10,
+      "workedExampleMarkdown": "A pipeline, and what a request actually does.\n\n```csharp\napp.UseExceptionHandler(\"/error\");   // outermost: can catch everything inside\napp.UseHttpsRedirection();\napp.UseAuthentication();             // must precede authorization\napp.UseAuthorization();\napp.MapControllers();                // innermost: the endpoint\n```\n\nA request enters through each in order and the response leaves through them in reverse — exception handler in, https in, authentication in, authorization in, endpoint, then authorization out, authentication out, https out, exception handler out. Moving `UseAuthentication` below `UseAuthorization` does not fail to compile; it simply means authorization decisions are made before anyone has been identified.\n\nAnd the captured dependency, which is the defect worth being able to spot on sight:\n\n```csharp\nbuilder.Services.AddDbContext<AppDbContext>(...);        // scoped by default\nbuilder.Services.AddSingleton<TicketCache>();            // lives forever\n\npublic sealed class TicketCache\n{\n    private readonly AppDbContext _db;                   // captured!\n    public TicketCache(AppDbContext db) => _db = db;     // one instance, forever\n}\n```\n\n`TicketCache` is constructed once and holds the `DbContext` it was given at startup. Every subsequent request shares that one context: it is not thread-safe, it accumulates tracked entities from unrelated requests, and it will eventually fail in a way that points at whichever request happened to be running. The fix is to inject `IServiceScopeFactory` and create a scope per operation, or to make the cache scoped if it genuinely holds per-request state.",
+      "commonMistakes": [
+        "Registering authentication after authorization, so access decisions are made before identity is established.",
+        "Placing exception handling too far inside the pipeline, where it cannot catch failures from components outside it.",
+        "Injecting a scoped service such as a `DbContext` into a singleton, producing a captured dependency that fails under concurrency.",
+        "Choosing singleton for performance without asking whether the type is thread-safe."
+      ],
+      "summaryMarkdown": "Middleware is an onion: registered first means outermost, seeing the request first and the response last, and a component that does not call the next short-circuits everything inside. Order is behaviour and nothing validates it. Choose a service lifetime from the state it holds — scoped for per-request state such as a `DbContext`, singleton only for thread-safe stateless work — and never capture a scoped service in a singleton.",
+      "exerciseIds": [
+        "v3-e040",
+        "v3-e041",
+        "v3-e042"
+      ],
+      "reviewCardIds": [
+        "v3-c027",
+        "v3-c028"
+      ],
+      "references": [
+        {
+          "label": "ASP.NET Core Middleware (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/middleware/"
+        },
+        {
+          "label": "Dependency injection in ASP.NET Core (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/dependency-injection"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e040",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a cache that fails only under load",
+      "conceptIds": [
+        "aspnet.dependency-injection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A service that behaves perfectly in development and corrupts data in production.",
+      "lessonId": "v3-l14",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "Under load, the support desk starts throwing `InvalidOperationException: A second operation was started on this context instance before a previous operation completed`, and occasionally returns another customer's ticket.\n\n```csharp\nbuilder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(cs));  // scoped\nbuilder.Services.AddSingleton<TicketLookup>();\n\npublic sealed class TicketLookup\n{\n    private readonly AppDbContext _db;\n    public TicketLookup(AppDbContext db) => _db = db;\n\n    public Task<Ticket?> FindAsync(string id, CancellationToken ct)\n        => _db.Tickets.FirstOrDefaultAsync(t => t.Id == id, ct);\n}\n```\n\nSingle-user testing never reproduces it. What is the defect?",
+      "hints": [
+        "Compare the two registered lifetimes and ask how many instances of each exist over the application's life.",
+        "`TicketLookup` is a singleton constructed once, so the `DbContext` it received at startup is the only one it will ever have.",
+        "That single context is then shared by every concurrent request — it is not thread-safe and it tracks entities across unrelated requests, which explains both the exception and the cross-customer leak."
+      ],
+      "solution": {
+        "modelAnswer": "`TicketLookup` is a singleton that captures a scoped `AppDbContext`. The container constructs it once and injects one context, which then serves every request for the lifetime of the application. `DbContext` is not thread-safe, so overlapping requests produce the \"second operation started on this context\" exception, and because the context tracks entities across all those requests, one request can be handed an instance loaded for another — the cross-customer leak. Single-user testing never overlaps requests, so it never reproduces. The fix is to inject `IServiceScopeFactory` and create a scope per operation, resolving a fresh context inside it, or to register `TicketLookup` as scoped if it genuinely holds per-request state.",
+        "explanationMarkdown": "The reason this is worth recognising on sight is that the symptoms point everywhere except the cause: an exception mentioning concurrency, plus an authorization-shaped data leak, both originating in a startup registration line. It also illustrates why lifetime is a correctness decision rather than a performance one. ASP.NET Core's scope validation catches exactly this case at startup in development, so a second lesson here is not to disable it — the check exists because the failure it prevents is so hard to diagnose from its symptoms."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "captured-scoped-dbcontext",
+            "textMarkdown": "The singleton captures a scoped `DbContext`, so one non-thread-safe context is shared by every concurrent request — producing both the concurrency exception and cross-request entity leakage.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Inject `IServiceScopeFactory` and create a scope per operation, or make the lookup scoped."
+          },
+          {
+            "id": "missing-await",
+            "textMarkdown": "`FindAsync` returns the task without awaiting it, so the context is disposed before the query completes.",
+            "correct": false,
+            "explanationMarkdown": "Returning the task directly is a legitimate pattern and the caller awaits it. The context is not disposed here — its problem is that it lives too long, not too briefly."
+          },
+          {
+            "id": "needs-asnotracking",
+            "textMarkdown": "The query needs `AsNoTracking()`; tracking is what makes it slow under load.",
+            "correct": false,
+            "explanationMarkdown": "`AsNoTracking` would reduce the leakage symptom but leaves the real defect — a shared, non-thread-safe context — fully in place."
+          },
+          {
+            "id": "connection-pool",
+            "textMarkdown": "The Npgsql connection pool is exhausted, so requests reuse one another's connections.",
+            "correct": false,
+            "explanationMarkdown": "Pool exhaustion produces timeouts waiting for a connection, not this exception, and pooled connections are never shared concurrently."
+          }
+        ]
+      },
+      "primaryConceptId": "aspnet.dependency-injection",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e041",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Trace a request through the pipeline",
+      "conceptIds": [
+        "aspnet.middleware"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Model the in-and-out ordering that makes middleware an onion.",
+      "lessonId": "v3-l14",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Middleware runs on the way in and again on the way out. Implement the trace a request produces.\n\nImplement `pipelineTrace(components, shortCircuitAt)`.\n\n- `components` is an array of names in registration order; the first registered is outermost.\n- Each component contributes `\"<name>:in\"` on the way in and `\"<name>:out\"` on the way back.\n- Inner components run after outer ones on the way in, and the response unwinds in reverse.\n- `shortCircuitAt` is a component name that responds without calling the next one, or `null`. Everything inside it never runs, but it still contributes its own `:out` as the response unwinds.\n- Return the full trace as an array of strings.\n- An empty pipeline yields an empty array. A `shortCircuitAt` naming a component that is not present is ignored.\n\nDo not modify the inputs.",
+      "hints": [
+        "Build the inbound half first, then produce the outbound half by reversing the components you actually entered.",
+        "Only components up to and including the short-circuiting one are entered — decide that set before generating any strings.",
+        "Find the index of `shortCircuitAt`; if it is present, keep components up to that index inclusive, otherwise keep them all, then emit `:in` forwards and `:out` backwards."
+      ],
+      "solution": {
+        "code": "function pipelineTrace(components, shortCircuitAt) {\n  let entered = components;\n  if (shortCircuitAt !== null) {\n    const stop = components.indexOf(shortCircuitAt);\n    if (stop >= 0) {\n      entered = components.slice(0, stop + 1);\n    }\n  }\n  const trace = [];\n  for (const name of entered) {\n    trace.push(name + ':in');\n  }\n  for (let i = entered.length - 1; i >= 0; i = i - 1) {\n    trace.push(entered[i] + ':out');\n  }\n  return trace;\n}",
+        "explanationMarkdown": "Generating the outbound half by reversing the inbound half is the whole model: a component is not a step in a queue but a wrapper around everything after it, so the first registered is the last to finish. That is why exception handling belongs near the top — it can only catch what it wraps — and why a component registered after your endpoint never sees the request at all. The short-circuit case matters because it is both the intended behaviour of an authentication failure and the mechanism by which a misplaced component silently disables everything beneath it: the request simply never reaches those layers, and nothing reports that they were skipped."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "pipelineTrace",
+        "starterCode": "function pipelineTrace(components, shortCircuitAt) {\n  // Treats the pipeline as a queue: in only, no unwinding.\n  const trace = [];\n  for (const name of components) {\n    trace.push(name + ':in');\n  }\n  return trace;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "unwinds-in-reverse",
+            "args": [
+              [
+                "exception",
+                "auth",
+                "endpoint"
+              ],
+              null
+            ],
+            "expected": [
+              "exception:in",
+              "auth:in",
+              "endpoint:in",
+              "endpoint:out",
+              "auth:out",
+              "exception:out"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "short-circuit-skips-inner",
+            "args": [
+              [
+                "exception",
+                "auth",
+                "endpoint"
+              ],
+              "auth"
+            ],
+            "expected": [
+              "exception:in",
+              "auth:in",
+              "auth:out",
+              "exception:out"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "outermost-short-circuit",
+            "args": [
+              [
+                "exception",
+                "auth"
+              ],
+              "exception"
+            ],
+            "expected": [
+              "exception:in",
+              "exception:out"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "empty-pipeline",
+            "args": [
+              [],
+              null
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "single-component",
+            "args": [
+              [
+                "endpoint"
+              ],
+              null
+            ],
+            "expected": [
+              "endpoint:in",
+              "endpoint:out"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "unknown-short-circuit-is-ignored",
+            "args": [
+              [
+                "auth",
+                "endpoint"
+              ],
+              "compression"
+            ],
+            "expected": [
+              "auth:in",
+              "endpoint:in",
+              "endpoint:out",
+              "auth:out"
+            ],
+            "hidden": true
+          },
+          {
+            "id": "short-circuit-on-the-innermost",
+            "args": [
+              [
+                "auth",
+                "endpoint"
+              ],
+              "endpoint"
+            ],
+            "expected": [
+              "auth:in",
+              "endpoint:in",
+              "endpoint:out",
+              "auth:out"
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "aspnet.middleware",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e042",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Justify a service lifetime choice",
+      "conceptIds": [
+        "aspnet.dependency-injection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Argue for a registration lifetime from the state a service holds.",
+      "lessonId": "v3-l14",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "A colleague proposes registering everything as singleton \"because constructing objects per request is wasteful\", including a `DbContext` wrapper, a stateless `PriceCalculator`, and a `CurrentUserAccessor` that reads the authenticated user.\n\nGo through the three, say which lifetime each should have and why, and explain what would actually go wrong with the blanket singleton approach.",
+      "hints": [
+        "Ask of each service: does it hold state, and if so, is that state tied to one request or to the whole application?",
+        "A service holding per-request state as a singleton would serve one request's data to every other request.",
+        "For the genuinely stateless one, singleton is fine — but only if it is also thread-safe, since many requests will use the instance simultaneously."
+      ],
+      "solution": {
+        "modelAnswer": "The `DbContext` wrapper must be **scoped**: `DbContext` is not thread-safe and tracks entities, so one shared instance would throw concurrency exceptions and leak entities between unrelated requests. `PriceCalculator`, being stateless, can safely be a **singleton** — provided it really is stateless and thread-safe; a cached field added later would quietly turn it into a shared-state hazard. `CurrentUserAccessor` must be **scoped**, because the current user is per-request state by definition; as a singleton it would hold whichever user happened to authenticate first and serve that identity to everyone, which is an authorization failure rather than a performance one. The blanket approach also creates captured dependencies: any singleton taking a scoped service in its constructor pins one instance forever. The cost being optimised away is small — object construction — while the cost being introduced is correctness under concurrency, which only appears under load and is very hard to diagnose from its symptoms.",
+        "explanationMarkdown": "The key move is to reframe lifetime as a correctness question rather than a performance one. Once you ask \"what state does this hold, and who is it for\", each answer follows immediately, and the singleton-everything proposal is revealed as trading a negligible saving for a class of concurrency bug. The `CurrentUserAccessor` case is the sharpest, because its failure mode is not a crash but silently serving the wrong identity — the same category of defect as the ownership bug from mission M03, arriving via a registration line rather than a query."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Assigns scoped to the `DbContext` wrapper and explains thread safety and entity tracking.",
+          "Assigns singleton to the stateless calculator, with the caveat that it must genuinely be stateless and thread-safe.",
+          "Assigns scoped to `CurrentUserAccessor` and identifies serving the wrong user as the failure, not merely a stale value.",
+          "Names the captured-dependency problem that a blanket singleton policy creates.",
+          "Frames lifetime as a correctness decision, noting the failure appears only under concurrency."
+        ],
+        "modelAnswerMarkdown": "See the model answer: scoped, singleton, scoped — decided by what state each holds and for whom; the blanket policy trades a negligible allocation saving for concurrency defects and captured dependencies."
+      },
+      "primaryConceptId": "aspnet.dependency-injection",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c027",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The pipeline is an onion",
+      "conceptIds": [
+        "aspnet.middleware"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the order middleware runs in, both ways.",
+      "lessonId": "v3-l14",
+      "type": "recall",
+      "promptMarkdown": "In what order does middleware see a request and its response, and what does it mean for a component to short-circuit?",
+      "answerMarkdown": "Registered first means outermost: it sees the request first and the response last. Components run inward on the way in and unwind in reverse on the way out. Short-circuiting means responding without calling the next component, so everything inside it never runs — intended for an authentication failure, and the mechanism by which a misplaced component silently disables the rest of the pipeline.",
+      "explanationMarkdown": "It is why exception handling goes near the top — it can only catch what it wraps — and why nothing warns you when the order is wrong. A wrongly ordered pipeline compiles and runs.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "aspnet.middleware"
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c028",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Captured dependency",
+      "conceptIds": [
+        "aspnet.dependency-injection"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply lifetime rules to a singleton that takes a scoped service.",
+      "lessonId": "v3-l14",
+      "type": "transfer",
+      "promptMarkdown": "A singleton service takes a `DbContext` in its constructor. What happens, and why does testing never reveal it?",
+      "answerMarkdown": "The container constructs the singleton once and hands it one `DbContext`, which it keeps for the application's lifetime. Every concurrent request then shares that context: it is not thread-safe, so overlapping operations throw, and because it tracks entities across requests, one request can receive data loaded for another. Single-user testing never overlaps requests, so it never reproduces — the failure needs concurrency.",
+      "explanationMarkdown": "Fix it with `IServiceScopeFactory` and a scope per operation, or by making the service scoped. Leave development scope validation enabled: it catches exactly this at startup.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "aspnet.dependency-injection"
+    },
+    {
+      "kind": "lesson",
+      "id": "v3-l15",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Validation and error contracts",
+      "conceptIds": [
+        "aspnet.validation",
+        "aspnet.error-contracts"
+      ],
+      "prerequisiteIds": [
+        "node.runtime-validation",
+        "node.error-contracts"
+      ],
+      "bodyMarkdown": "V1 chapter 9 established the principle: a typed language does not validate HTTP input, because the data arrives from outside the type system. C# changes nothing about that. A `TicketRequest` with a non-nullable `string Subject` will happily bind from a body that omits the subject, and the property will be null despite the annotation — the same erasure you met in D01.\n\nASP.NET Core offers several places to say what valid means. **Data annotations** (`[Required]`, `[StringLength]`, `[Range]`) are declarative and automatic for controller actions, which makes them a good default for shape rules. A **FluentValidation-style** validator or a hand-written check is better for rules that involve several fields or need to consult a service. **Minimal APIs** do not run data annotations automatically, so validation there is explicit — a detail worth knowing before you assume an attribute is doing something.\n\nWhat matters more than the mechanism is the **contract**. .NET standardises error responses as `ProblemDetails` (RFC 9457), with `type`, `title`, `status`, `detail` and `instance`, and `ValidationProblemDetails` adds an `errors` dictionary keyed by field name. Using it consistently means a client can handle failures generically instead of learning a bespoke error shape per endpoint — the same argument V1 made for its `{ error: { code, message, fieldErrors } }` envelope, arriving at a standardised version of the same idea.\n\nStatus codes carry meaning and are worth getting right. `400` for a malformed or invalid request; `422` where you distinguish structurally valid but semantically unacceptable; `401` when the caller is unidentified; `403` when identified but not permitted; `404` when the resource does not exist — or, as V1's mission M03 established, when it exists but revealing that would leak information. `409` for a conflict such as a duplicate or a stale revision.\n\nAnd the rule that outlives every framework: **an error response must not leak internals.** No stack traces, no SQL, no entity names the caller has no business knowing. Log the detail with a correlation id and return the id, so an operator can find the failure and the caller learns only what they need. In ASP.NET Core, `UseExceptionHandler` gives you that boundary; `UseDeveloperExceptionPage` is the opposite and belongs only in development.",
+      "chapterId": "v3-ch05",
+      "sortOrder": 2,
+      "objectives": [
+        "Explain why declared types do not validate a request body, and where the check belongs.",
+        "Map a failure to an appropriate status code and a `ProblemDetails` response.",
+        "Keep internal detail out of an error response while remaining diagnosable."
+      ],
+      "estimatedMinutes": 10,
+      "workedExampleMarkdown": "Validation stated explicitly, and an error contract that does not leak.\n\n```csharp\npublic sealed class CreateTicketRequest\n{\n    [Required, StringLength(200, MinimumLength = 1)]\n    public string Subject { get; init; } = \"\";\n\n    [Required, StringLength(10_000)]\n    public string Body { get; init; } = \"\";\n\n    [Range(1, 5)]\n    public int Priority { get; init; } = 3;\n}\n\n// Minimal APIs do NOT run data annotations for you — check explicitly.\napp.MapPost(\"/tickets\", async (CreateTicketRequest req, ITicketRepo repo, CancellationToken ct) =>\n{\n    var errors = Validate(req);\n    if (errors.Count > 0)\n    {\n        return Results.ValidationProblem(errors);   // 400 + errors dictionary\n    }\n\n    var created = await repo.CreateAsync(req, ct);\n    return Results.Created($\"/tickets/{created.Id}\", created);\n});\n```\n\nAnd the boundary that turns an unexpected failure into a safe response:\n\n```csharp\napp.UseExceptionHandler(handler => handler.Run(async context =>\n{\n    var feature = context.Features.Get<IExceptionHandlerFeature>();\n    var correlationId = context.TraceIdentifier;\n\n    logger.LogError(feature?.Error, \"unhandled failure {CorrelationId}\", correlationId);\n\n    await Results.Problem(\n        title: \"An unexpected error occurred.\",\n        statusCode: 500,\n        extensions: new Dictionary<string, object?> { [\"correlationId\"] = correlationId })\n        .ExecuteAsync(context);\n}));\n```\n\nThe caller receives a generic message and an id; the log holds the exception. That split is the whole discipline: diagnosable for the operator, opaque to the client.",
+      "commonMistakes": [
+        "Assuming a non-nullable property means the body contained a value. Binding fills what it finds and defaults the rest.",
+        "Expecting data annotations to run automatically in a minimal API endpoint, where validation must be invoked explicitly.",
+        "Returning a bespoke error shape per endpoint instead of a consistent `ProblemDetails` response.",
+        "Letting exception detail reach the client — stack traces, SQL, or entity names — instead of logging it against a correlation id."
+      ],
+      "summaryMarkdown": "Types do not validate HTTP input; binding supplies defaults and the check belongs at the boundary. Data annotations suit shape rules and run automatically for controllers but not for minimal APIs. Return `ProblemDetails` consistently, choose the status code deliberately, and keep internals out of the response — log the detail against a correlation id and return the id.",
+      "exerciseIds": [
+        "v3-e043",
+        "v3-e044",
+        "v3-e045"
+      ],
+      "reviewCardIds": [
+        "v3-c029",
+        "v3-c030"
+      ],
+      "references": [
+        {
+          "label": "Handle errors in ASP.NET Core (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling"
+        },
+        {
+          "label": "Model validation in ASP.NET Core (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/mvc/models/validation"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e043",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review an error response that leaks internals",
+      "conceptIds": [
+        "aspnet.error-contracts"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An exception handler that is helpful to exactly the wrong audience.",
+      "lessonId": "v3-l15",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "This handler was added so that support could diagnose production failures from a customer's screenshot.\n\n```csharp\napp.UseExceptionHandler(handler => handler.Run(async context =>\n{\n    var feature = context.Features.Get<IExceptionHandlerFeature>();\n    await Results.Problem(\n        title: feature?.Error.Message ?? \"Error\",\n        detail: feature?.Error.ToString(),\n        statusCode: 500)\n        .ExecuteAsync(context);\n}));\n```\n\nIt uses `ProblemDetails` and a correct status code. What is wrong with it, and what should it do instead?",
+      "hints": [
+        "Consider what `Error.ToString()` contains, and who receives it.",
+        "It contains the full stack trace, and often the exception message contains connection strings, table names or SQL fragments — all sent to whoever made the request.",
+        "Log the detail server-side against a correlation id, and return only a generic title plus that id so support can find the entry without the customer ever seeing internals."
+      ],
+      "solution": {
+        "modelAnswer": "It sends internal detail to the client. `Error.ToString()` includes the full stack trace, and exception messages routinely carry table names, SQL fragments, file paths or connection details — everything an attacker needs to map the system, handed over on request. The intent is reasonable but the audience is wrong: support needs the detail, the caller does not. Log the exception server-side with a correlation id (`context.TraceIdentifier`), and return a generic title with that id in the response. Support then asks for the id from the screenshot and finds the full detail in the logs.",
+        "explanationMarkdown": "What makes this worth studying is that it is a security defect introduced by a genuine operational need, which is why it survives review — someone asks for better diagnosability, this delivers it, and the trade being made is never stated. The correlation id resolves the tension completely: the operator gets more than the stack trace alone would give them, since the log also holds the request context, and the caller gets nothing exploitable. Note it also fails a second way: an exception message as the `title` makes the response shape unpredictable, so clients cannot handle failures generically."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "leaks-stack-and-internals",
+            "textMarkdown": "It returns the stack trace and exception message to the caller, exposing internals; log the detail against a correlation id and return only a generic title plus that id.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The operator needs the detail, the caller needs the id — and using the exception message as the title also makes the response shape unpredictable."
+          },
+          {
+            "id": "wrong-status-code",
+            "textMarkdown": "The status code should be `400`, since most failures originate in bad client input.",
+            "correct": false,
+            "explanationMarkdown": "An unhandled exception is by definition unexpected; `500` is right. Input problems should have been rejected earlier with a validation response."
+          },
+          {
+            "id": "should-not-catch",
+            "textMarkdown": "It should not catch exceptions at all — letting them propagate gives the framework a chance to respond correctly.",
+            "correct": false,
+            "explanationMarkdown": "Without a handler the framework's default behaviour depends on environment configuration and can expose more, not less. A deliberate boundary is right; this one just says too much."
+          },
+          {
+            "id": "needs-async-void",
+            "textMarkdown": "The handler should be synchronous, since writing the response asynchronously can race with the framework closing the connection.",
+            "correct": false,
+            "explanationMarkdown": "Writing the response asynchronously is the normal, supported pattern here and no such race exists."
+          }
+        ]
+      },
+      "primaryConceptId": "aspnet.error-contracts",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e044",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Map a failure to a status code",
+      "conceptIds": [
+        "aspnet.error-contracts",
+        "aspnet.validation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Implement the failure-to-response mapping an API applies at its boundary.",
+      "lessonId": "v3-l15",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "A consistent error contract needs one place that decides the status code. Implement it.\n\nImplement `statusForFailure(failure)` where `failure` is `{ kind, ownedByCaller }`.\n\nMap `kind` as follows:\n\n- `\"validation\"` → `400`\n- `\"unauthenticated\"` → `401`\n- `\"conflict\"` → `409`\n- `\"not-found\"` → `404`\n- `\"forbidden\"` → `403` when `ownedByCaller` is `true`, but `404` when it is `false`\n- anything else → `500`\n\nThe forbidden rule is the interesting one. If the caller owns the resource and is merely not permitted this operation, `403` is honest. If they do **not** own it, answering `403` confirms the resource exists — so the API answers `404` instead and reveals nothing.\n\nDo not modify the input.",
+      "hints": [
+        "Most kinds map straight to a number; only one needs a second input.",
+        "For `\"forbidden\"`, the decision is about what the response reveals, not about what went wrong internally.",
+        "Handle `\"forbidden\"` as its own branch checking `ownedByCaller`, and make sure any unrecognised kind falls through to `500` rather than to a client-error code."
+      ],
+      "solution": {
+        "code": "function statusForFailure(failure) {\n  if (failure.kind === 'validation') {\n    return 400;\n  }\n  if (failure.kind === 'unauthenticated') {\n    return 401;\n  }\n  if (failure.kind === 'conflict') {\n    return 409;\n  }\n  if (failure.kind === 'not-found') {\n    return 404;\n  }\n  if (failure.kind === 'forbidden') {\n    if (failure.ownedByCaller === true) {\n      return 403;\n    }\n    return 404;\n  }\n  return 500;\n}",
+        "explanationMarkdown": "Two design decisions are encoded here. The first is that unknown failures fall through to `500` rather than to a client-error code: a failure the mapping does not recognise is by definition unexpected, and blaming the caller for it would be both wrong and misleading in metrics. The second is the forbidden branch, which is the same policy V1's mission M03 arrived at — distinguishing `403` from `404` leaks the existence of resources, so an API that hides other users' data must answer `404` for them. Putting the rule in one function rather than at each call site is what makes it consistent, and consistency is the whole point of having an error contract at all."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "statusForFailure",
+        "starterCode": "function statusForFailure(failure) {\n  // Everything the caller could have caused becomes a 400.\n  if (failure.kind === 'unauthenticated') {\n    return 401;\n  }\n  return 400;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "validation-is-400",
+            "args": [
+              {
+                "kind": "validation",
+                "ownedByCaller": true
+              }
+            ],
+            "expected": 400,
+            "hidden": false
+          },
+          {
+            "id": "unauthenticated-is-401",
+            "args": [
+              {
+                "kind": "unauthenticated",
+                "ownedByCaller": false
+              }
+            ],
+            "expected": 401,
+            "hidden": false
+          },
+          {
+            "id": "forbidden-on-own-resource-is-403",
+            "args": [
+              {
+                "kind": "forbidden",
+                "ownedByCaller": true
+              }
+            ],
+            "expected": 403,
+            "hidden": false
+          },
+          {
+            "id": "forbidden-on-another-users-resource-is-404",
+            "args": [
+              {
+                "kind": "forbidden",
+                "ownedByCaller": false
+              }
+            ],
+            "expected": 404,
+            "hidden": false
+          },
+          {
+            "id": "conflict-is-409",
+            "args": [
+              {
+                "kind": "conflict",
+                "ownedByCaller": true
+              }
+            ],
+            "expected": 409,
+            "hidden": false
+          },
+          {
+            "id": "not-found-is-404",
+            "args": [
+              {
+                "kind": "not-found",
+                "ownedByCaller": false
+              }
+            ],
+            "expected": 404,
+            "hidden": false
+          },
+          {
+            "id": "unknown-kind-is-500",
+            "args": [
+              {
+                "kind": "disk-on-fire",
+                "ownedByCaller": true
+              }
+            ],
+            "expected": 500,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "aspnet.error-contracts",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e045",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain why a required property is not validation",
+      "conceptIds": [
+        "aspnet.validation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Settle whether a non-nullable declared property protects an endpoint from a missing field.",
+      "lessonId": "v3-l15",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "A colleague deletes the `[Required]` attributes from a request model, arguing that the properties are already declared as non-nullable `string` with nullable reference types enabled, so \"the type system already guarantees it\".\n\nExplain what actually happens when a client posts a body with those fields missing, why the declared type does not help, and where the check belongs. Connect it to what you learned about nullable reference types in D01.",
+      "hints": [
+        "Trace the value's journey: it starts as JSON outside your program and becomes a C# property. Ask what checks it passes on the way.",
+        "Nullable reference type annotations are compile-time analysis and are erased — the deserialiser is not bound by them and will happily leave a property null.",
+        "So the endpoint receives an object whose non-nullable string is null, and the failure surfaces later at the first use, or worse, is stored."
+      ],
+      "solution": {
+        "modelAnswer": "The body is deserialised into the model, and the deserialiser fills the properties it finds and leaves the rest at their defaults. Nullable reference type annotations are compile-time analysis only and are erased before run time — exactly as established in D01 — so nothing stops a non-nullable `string Subject` from holding null. The endpoint then receives a `CreateTicketRequest` that looks valid to the compiler and is not, and the failure surfaces at the first use of the field, or silently persists an empty subject. The declared type describes the shape the code intends; it does not inspect data arriving from outside the type system. The check belongs at the boundary, before the value reaches business logic: `[Required]` for controller actions (which run data annotations automatically), or an explicit validation call for minimal APIs (which do not), returning a `ValidationProblemDetails` naming the offending fields.",
+        "explanationMarkdown": "This closes a loop the track opened in V1 chapter 5 and reopened in D01: an annotation is a claim about data, and a claim about data you have not inspected is only as reliable as its source. The C# version of the argument is more seductive than the TypeScript one, because `[Required]` and a non-nullable declaration look like they say the same thing, and one of them is enforced while the other is not. The minimal-API detail is worth carrying separately, since a team that moves endpoints from controllers to minimal APIs can lose automatic validation without any code appearing to change."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that deserialisation fills what it finds and defaults the rest, so a missing field leaves the property null.",
+          "Explains that nullable reference type annotations are compile-time only and erased, so they impose no run-time check — connecting it back to D01.",
+          "Describes the consequence concretely: a failure at first use, or an invalid value silently persisted.",
+          "Places the check at the boundary, before the value reaches business logic.",
+          "Notes the mechanism difference — data annotations run automatically for controllers but not for minimal API endpoints, where validation must be explicit."
+        ],
+        "modelAnswerMarkdown": "See the model answer: the deserialiser is not bound by the annotations, which are erased; a non-nullable string can hold null; the check belongs at the boundary, and minimal APIs do not run data annotations for you."
+      },
+      "primaryConceptId": "aspnet.validation",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c029",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "403 against 404",
+      "conceptIds": [
+        "aspnet.error-contracts"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the policy for refusing access to another user's resource.",
+      "lessonId": "v3-l15",
+      "type": "recall",
+      "promptMarkdown": "A caller requests a resource belonging to someone else. Should the API answer `403` or `404`, and why?",
+      "answerMarkdown": "`404`. Answering `403` confirms the resource exists, which leaks information the caller has no right to — an attacker can enumerate ids and learn which are real. Reserve `403` for a resource the caller genuinely owns but is not permitted to act on in this particular way, where the existence is not a secret.",
+      "explanationMarkdown": "The same policy mission M03 enforced with its scoped queries. Whichever you choose, apply it consistently: an endpoint that answers `403` for one route and `404` for another leaks through the inconsistency.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "aspnet.error-contracts"
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c030",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnosable without leaking",
+      "conceptIds": [
+        "aspnet.error-contracts"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the error-response discipline to an unhandled exception.",
+      "lessonId": "v3-l15",
+      "type": "transfer",
+      "promptMarkdown": "Support ask for more detail in production error responses so they can diagnose from a customer screenshot. How do you satisfy them without exposing internals?",
+      "answerMarkdown": "Log the full exception server-side against a correlation id (`context.TraceIdentifier`), and return a generic `ProblemDetails` containing only that id. Support ask the customer for the id and look up the complete detail — including request context the stack trace alone would not give them. The caller never receives stack traces, SQL, table names or paths.",
+      "explanationMarkdown": "The request is legitimate and the naive answer is a security defect. The correlation id dissolves the tension: the operator ends up with more than a stack trace, and the client with nothing exploitable.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "aspnet.error-contracts"
+    },
+    {
+      "kind": "assessment",
+      "id": "v3-a05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "ASP.NET Core placement check",
+      "conceptIds": [
+        "aspnet.routing",
+        "aspnet.model-binding",
+        "aspnet.middleware",
+        "aspnet.dependency-injection",
+        "aspnet.validation",
+        "aspnet.error-contracts"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items on route precedence, binding defaults, pipeline order, service lifetimes and error contracts. Explanations appear after you submit.",
+      "chapterId": "v3-ch05",
+      "items": [
+        {
+          "id": "v3-a05-i1",
+          "objectiveIds": [
+            "aspnet.routing"
+          ],
+          "critical": false,
+          "promptMarkdown": "`/orders/{id}` is registered first and `/orders/export` second. Which handles `GET /orders/export`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "literal-wins",
+                "textMarkdown": "`/orders/export` — a literal segment is more specific than a parameter, and registration order is irrelevant.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Precedence is by specificity, so moving a registration cannot change which endpoint wins."
+              },
+              {
+                "id": "first-registered",
+                "textMarkdown": "`/orders/{id}` — the first registered template that matches wins.",
+                "correct": false,
+                "explanationMarkdown": "That is how many JavaScript routers behave, but ASP.NET Core ranks by specificity instead."
+              },
+              {
+                "id": "ambiguous",
+                "textMarkdown": "Neither — the request fails with an ambiguous match exception.",
+                "correct": false,
+                "explanationMarkdown": "Ambiguity arises only when two templates are equally specific. Here one is strictly more specific."
+              },
+              {
+                "id": "id-bound-to-export",
+                "textMarkdown": "`/orders/{id}` with `id` bound to `\"export\"`, which is why such routes are discouraged.",
+                "correct": false,
+                "explanationMarkdown": "That would happen if the literal route did not exist. Since it does, it takes precedence."
+              }
+            ]
+          },
+          "explanationMarkdown": "Specificity ranking is what makes route registration order safe to rearrange."
+        },
+        {
+          "id": "v3-a05-i2",
+          "objectiveIds": [
+            "aspnet.model-binding"
+          ],
+          "critical": true,
+          "promptMarkdown": "A handler declares `int page` bound from the query string, and the caller omits it. What does the handler receive?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "zero-no-error",
+                "textMarkdown": "`0`, with no error — binding supplies the type's default when it finds nothing.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Declare it `int?` so absence is distinguishable from a real zero, then default and validate explicitly."
+              },
+              {
+                "id": "400-automatically",
+                "textMarkdown": "The framework returns `400` automatically, since a non-nullable parameter is required.",
+                "correct": false,
+                "explanationMarkdown": "No such requirement is inferred from nullability for a simple type bound from the query string."
+              },
+              {
+                "id": "null",
+                "textMarkdown": "`null`, which then throws when used in arithmetic.",
+                "correct": false,
+                "explanationMarkdown": "`int` is a value type and cannot hold null. That is precisely why the default is a plausible number instead."
+              },
+              {
+                "id": "minus-one",
+                "textMarkdown": "`-1`, the conventional sentinel for an unbound value.",
+                "correct": false,
+                "explanationMarkdown": "There is no such convention; the value is `default(int)`, which is `0`."
+              }
+            ]
+          },
+          "explanationMarkdown": "A default that is indistinguishable from real input is the recurring shape of this whole track's boundary defects."
+        },
+        {
+          "id": "v3-a05-i3",
+          "objectiveIds": [
+            "aspnet.middleware"
+          ],
+          "critical": true,
+          "promptMarkdown": "`UseAuthorization()` is registered before `UseAuthentication()`. What happens?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "authorizes-before-identity",
+                "textMarkdown": "Authorization decisions run before the caller has been identified, so policies evaluate against an unauthenticated user.",
+                "correct": true,
+                "explanationMarkdown": "Correct. It compiles and runs; nothing validates pipeline order, which is why order is behaviour."
+              },
+              {
+                "id": "startup-error",
+                "textMarkdown": "The application fails at startup with an ordering validation error.",
+                "correct": false,
+                "explanationMarkdown": "No such validation exists for middleware order. The pipeline is whatever you registered."
+              },
+              {
+                "id": "framework-reorders",
+                "textMarkdown": "The framework reorders them automatically, since the dependency is well known.",
+                "correct": false,
+                "explanationMarkdown": "Nothing is reordered. The pipeline runs exactly in registration order."
+              },
+              {
+                "id": "no-effect",
+                "textMarkdown": "No effect — both run before the endpoint either way.",
+                "correct": false,
+                "explanationMarkdown": "Both do run first, but authorization needs the identity that authentication establishes, so the sequence between them matters."
+              }
+            ]
+          },
+          "explanationMarkdown": "The failure is silent and looks like an authorization bug rather than a configuration one."
+        },
+        {
+          "id": "v3-a05-i4",
+          "objectiveIds": [
+            "aspnet.dependency-injection"
+          ],
+          "critical": true,
+          "promptMarkdown": "Which registration is a defect?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "singleton-holding-dbcontext",
+                "textMarkdown": "A singleton service whose constructor takes a scoped `DbContext`.",
+                "correct": true,
+                "explanationMarkdown": "Correct — a captured dependency. One context is shared by every concurrent request, and `DbContext` is not thread-safe."
+              },
+              {
+                "id": "scoped-holding-singleton",
+                "textMarkdown": "A scoped service whose constructor takes a singleton logger.",
+                "correct": false,
+                "explanationMarkdown": "Perfectly fine. Depending on something longer-lived than yourself is always safe."
+              },
+              {
+                "id": "transient-holding-transient",
+                "textMarkdown": "A transient service that takes another transient service.",
+                "correct": false,
+                "explanationMarkdown": "Also fine — each resolution constructs a fresh graph."
+              },
+              {
+                "id": "scoped-dbcontext",
+                "textMarkdown": "Registering `DbContext` as scoped.",
+                "correct": false,
+                "explanationMarkdown": "That is the correct lifetime for a `DbContext`, and what `AddDbContext` does by default."
+              }
+            ]
+          },
+          "explanationMarkdown": "The rule of thumb: depending on something longer-lived is safe; capturing something shorter-lived is not."
+        },
+        {
+          "id": "v3-a05-i5",
+          "objectiveIds": [
+            "aspnet.error-contracts",
+            "aspnet.validation"
+          ],
+          "critical": false,
+          "promptMarkdown": "A production error response includes the exception message and stack trace so support can diagnose it. What is the better approach?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "correlation-id",
+                "textMarkdown": "Log the exception server-side against a correlation id and return only a generic message plus that id.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Support gets more context than a stack trace alone; the caller gets nothing exploitable."
+              },
+              {
+                "id": "only-message",
+                "textMarkdown": "Return the exception message but strip the stack trace.",
+                "correct": false,
+                "explanationMarkdown": "Messages routinely carry table names, SQL fragments, paths and connection details. The message is not the safe half."
+              },
+              {
+                "id": "detail-for-authenticated",
+                "textMarkdown": "Return full detail only to authenticated users, since they are known.",
+                "correct": false,
+                "explanationMarkdown": "Being authenticated does not make someone entitled to your internals, and account creation is often trivial."
+              },
+              {
+                "id": "developer-page",
+                "textMarkdown": "Enable the developer exception page in production so the detail is nicely formatted.",
+                "correct": false,
+                "explanationMarkdown": "That is the most complete leak available and belongs strictly in development."
+              }
+            ]
+          },
+          "explanationMarkdown": "Diagnosable for the operator, opaque to the client — the correlation id satisfies both at once."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,1612 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v2-ch20",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Operations and review",
+      "conceptIds": [
+        "ops.structured-diagnostics",
+        "ops.deployment-recovery",
+        "ops.code-review",
+        "ops.change-proposals"
+      ],
+      "prerequisiteIds": [
+        "ops.request-id",
+        "ops.rollback"
+      ],
+      "bodyMarkdown": "The last chapter of V2 is about the work that happens around code rather than inside it: finding out what a running system did, getting back to a working state after a bad release, and the two conversations - reviewing someone's change, and proposing your own - that decide what gets built.\n\nThese are the skills that separate someone who can write a feature from someone a team relies on during an incident. They are also the ones least likely to be practised deliberately, because each is usually learned once, badly, under pressure.\n\nThe connecting idea is that all three are exercises in **making a system explicable** - to yourself at 2am, to a colleague reading a diff, to whoever has to decide whether your proposal is worth the risk. Code that works and cannot be explained is a liability with a delay on it.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v2-l22",
+        "v2-l23",
+        "v2-l24"
+      ],
+      "assessmentId": "v2-a20",
+      "objectiveIds": [
+        "ops.structured-diagnostics",
+        "ops.deployment-recovery",
+        "ops.code-review",
+        "ops.change-proposals"
+      ],
+      "missionIds": [],
+      "sortOrder": 19
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l22",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnostics you can actually query",
+      "conceptIds": [
+        "ops.structured-diagnostics"
+      ],
+      "prerequisiteIds": [
+        "ops.request-id",
+        "ops.log-hygiene"
+      ],
+      "bodyMarkdown": "V1 established the request id: generate one at the edge, attach it to every line, return it to the client. This lesson is about what makes the resulting stream answerable rather than merely voluminous.\n\n**Structure beats prose.** `logger.info('user ' + id + ' updated ticket ' + ticketId)` produces a line a human can read and a machine cannot group. The same event as `logger.info({ userId, ticketId, action: 'ticket.updated' })` can be filtered, counted and correlated. Once a log store holds millions of lines, the only lines that help are the ones you can query, and free text is not queryable - it is greppable, which is a much weaker thing the moment the format drifts.\n\n**Log events, not sentences.** A stable `event` field with a small vocabulary - `ticket.created`, `refund.failed`, `job.retried` - lets you count how often something happens and alert when the rate changes. A message rewritten for readability in a later pull request silently breaks every dashboard built on it, which is why the machine-readable field and the human-readable message should be separate things.\n\n**Levels are a routing decision.** `error` should mean somebody needs to look; `warn` means something recovered but is worth knowing; `info` is the narrative of normal operation. Logging handled, expected conditions at `error` is how a team learns to ignore errors, and an ignored error channel is functionally the same as no error channel.\n\n**Timings belong on the event that finished.** One line per stage with a duration is worth more than a start line and an end line the reader must subtract - and far more than a single request-level duration, which tells you something was slow without telling you which part.\n\n**Sampling, when volume forces it, must be per-trace.** Sampling individual lines gives you fragments of many requests and the complete story of none. Decide once per request whether to keep it, and keep all of it. Always keep errors.",
+      "chapterId": "v2-ch20",
+      "sortOrder": 0,
+      "objectives": [
+        "Explain why structured fields are queryable where interpolated prose is not.",
+        "Derive per-stage durations from timestamped events.",
+        "Choose log levels so that the error channel stays meaningful."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "The same incident, logged two ways.\n\n```js\n// Prose: readable once, useless in aggregate.\nlogger.info(`refund for ticket ${id} failed after ${ms}ms: ${err.message}`);\n```\n\nTo answer 'how many refunds failed this week, and for which reason?' someone must write a regular expression against a sentence that a well-meaning pull request will reword next month. The data is present and not addressable.\n\n```js\n// Structured: the same facts, as fields.\nlogger.error({\n  event: 'refund.failed',\n  requestId,\n  ticketId: id,\n  durationMs: ms,\n  reason: err.code,\n}, 'refund failed');\n```\n\nNow the question is a filter and a count, the human message can be reworded freely, and `reason` groups the failures without anybody parsing anything.\n\nFor timing, prefer one line per completed stage:\n\n```js\nlogger.info({ event: 'stage.completed', stage: 'validate', requestId, durationMs: 4 });\nlogger.info({ event: 'stage.completed', stage: 'provider', requestId, durationMs: 812 });\nlogger.info({ event: 'stage.completed', stage: 'persist',  requestId, durationMs: 6 });\n```\n\nA request-level duration of 822ms says the request was slow. These three lines say the provider was slow and the rest of the system was not, which is the difference between having a hypothesis and having an answer.\n\nWhen only point-in-time events exist - a stage marker with a timestamp and nothing else - the spans have to be derived by sorting the events and subtracting consecutive timestamps. That reconstruction is exactly what the exercise below asks for, and doing it once is a good way to understand why emitting the duration directly is worth the small effort.",
+      "commonMistakes": [
+        "Interpolating values into a message string, so the data cannot be filtered or grouped without parsing prose.",
+        "Rewording a log message that a dashboard or alert was built on, silently breaking it.",
+        "Logging handled, expected conditions at error level, which trains the team to ignore the error channel.",
+        "Emitting only a request-level duration, so a slow request cannot be attributed to a stage.",
+        "Logging a start line and an end line and leaving the reader to subtract timestamps by hand.",
+        "Sampling individual log lines rather than whole requests, which yields fragments of many stories and the whole of none.",
+        "Omitting the request id from the very lines most needed during an incident - the ones written by error handlers."
+      ],
+      "summaryMarkdown": "Log structured fields rather than sentences, with a stable event name kept separate from the human message so wording can change without breaking a dashboard. Attach durations to the stage that finished, keep levels meaningful so the error channel stays worth reading, and sample per request rather than per line.",
+      "exerciseIds": [
+        "v2-e20-01",
+        "v2-e20-02",
+        "v2-e20-03"
+      ],
+      "reviewCardIds": [
+        "v2-c20-01",
+        "v2-c20-02"
+      ],
+      "references": [
+        {
+          "label": "OpenTelemetry: Traces",
+          "url": "https://opentelemetry.io/docs/concepts/signals/traces/"
+        },
+        {
+          "label": "Pino: structured logging",
+          "url": "https://getpino.io/#/docs/api"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e20-01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Summarise one request from its log lines",
+      "conceptIds": [
+        "ops.structured-diagnostics"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The first thing you do with a request id, written as a function.",
+      "lessonId": "v2-l22",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "Implement `summariseRequest(lines, requestId)` for Ashgrove's incident tooling.\n\n`lines` is an array of `{ requestId, level, at }`, where `at` is a millisecond timestamp. Levels are `'info'`, `'warn'` and `'error'`.\n\nReturn `{ lineCount, errorCount, warnCount, durationMs }` describing **only** the lines whose `requestId` matches:\n\n- `lineCount` - how many lines belong to the request;\n- `errorCount` and `warnCount` - how many are at each level;\n- `durationMs` - the largest `at` minus the smallest `at` among the matching lines.\n\nWhen no line matches, return all four values as `0`. The lines arrive in arbitrary order. Do not modify the input.",
+      "hints": [
+        "Make a single pass, ignoring any line whose request id does not match, and accumulate everything you need as you go.",
+        "Track the smallest and largest timestamps seen rather than sorting - the duration is a span, and you only need its two ends.",
+        "Seed the minimum and maximum from the first matching line rather than from zero, otherwise a request whose timestamps are all large will report a duration measured from the epoch."
+      ],
+      "solution": {
+        "code": "function summariseRequest(lines, requestId) {\n  let lineCount = 0;\n  let errorCount = 0;\n  let warnCount = 0;\n  let earliest = 0;\n  let latest = 0;\n\n  for (const line of lines) {\n    if (line.requestId !== requestId) {\n      continue;\n    }\n    if (lineCount === 0) {\n      earliest = line.at;\n      latest = line.at;\n    } else {\n      earliest = Math.min(earliest, line.at);\n      latest = Math.max(latest, line.at);\n    }\n    lineCount += 1;\n    if (line.level === 'error') {\n      errorCount += 1;\n    }\n    if (line.level === 'warn') {\n      warnCount += 1;\n    }\n  }\n\n  return {\n    lineCount: lineCount,\n    errorCount: errorCount,\n    warnCount: warnCount,\n    durationMs: lineCount === 0 ? 0 : latest - earliest,\n  };\n}",
+        "explanationMarkdown": "Seeding the extremes from the first matching line is the detail worth taking away. Initialising `earliest` to `0` and taking a minimum against it would report every duration as the time since the epoch, because a real millisecond timestamp is always larger than zero - a bug that produces a plausible-looking enormous number rather than an obvious failure.\n\nA single pass tracking two extremes is both simpler and cheaper than sorting. Sorting answers a question nobody asked - the order of the middle lines - and would also require copying the array first, since sorting in place would modify the caller's input.\n\nThe `lineCount === 0` guard on the duration keeps the empty case honest. Without it the function returns `0 - 0`, which happens to be the right answer for the wrong reason, and would stop being right the moment the seeds changed."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "summariseRequest",
+        "starterCode": "function summariseRequest(lines, requestId) {\n  // Counts every line, not just this request's, and ignores timestamps.\n  return {\n    lineCount: lines.length,\n    errorCount: 0,\n    warnCount: 0,\n    durationMs: 0,\n  };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "no-lines-at-all",
+            "args": [
+              [],
+              "r-1"
+            ],
+            "expected": {
+              "lineCount": 0,
+              "errorCount": 0,
+              "warnCount": 0,
+              "durationMs": 0
+            },
+            "hidden": false
+          },
+          {
+            "id": "no-matching-lines",
+            "args": [
+              [
+                {
+                  "requestId": "r-2",
+                  "level": "info",
+                  "at": 1000
+                }
+              ],
+              "r-1"
+            ],
+            "expected": {
+              "lineCount": 0,
+              "errorCount": 0,
+              "warnCount": 0,
+              "durationMs": 0
+            },
+            "hidden": false
+          },
+          {
+            "id": "single-line-has-no-duration",
+            "args": [
+              [
+                {
+                  "requestId": "r-1",
+                  "level": "info",
+                  "at": 1700000000000
+                }
+              ],
+              "r-1"
+            ],
+            "expected": {
+              "lineCount": 1,
+              "errorCount": 0,
+              "warnCount": 0,
+              "durationMs": 0
+            },
+            "hidden": false
+          },
+          {
+            "id": "counts-levels-and-span",
+            "args": [
+              [
+                {
+                  "requestId": "r-1",
+                  "level": "info",
+                  "at": 1000
+                },
+                {
+                  "requestId": "r-1",
+                  "level": "warn",
+                  "at": 1200
+                },
+                {
+                  "requestId": "r-1",
+                  "level": "error",
+                  "at": 1450
+                }
+              ],
+              "r-1"
+            ],
+            "expected": {
+              "lineCount": 3,
+              "errorCount": 1,
+              "warnCount": 1,
+              "durationMs": 450
+            },
+            "hidden": false
+          },
+          {
+            "id": "ignores-other-requests",
+            "args": [
+              [
+                {
+                  "requestId": "r-1",
+                  "level": "info",
+                  "at": 1000
+                },
+                {
+                  "requestId": "r-2",
+                  "level": "error",
+                  "at": 9999
+                },
+                {
+                  "requestId": "r-1",
+                  "level": "info",
+                  "at": 1100
+                }
+              ],
+              "r-1"
+            ],
+            "expected": {
+              "lineCount": 2,
+              "errorCount": 0,
+              "warnCount": 0,
+              "durationMs": 100
+            },
+            "hidden": false
+          },
+          {
+            "id": "lines-out-of-order",
+            "args": [
+              [
+                {
+                  "requestId": "r-1",
+                  "level": "error",
+                  "at": 2000
+                },
+                {
+                  "requestId": "r-1",
+                  "level": "info",
+                  "at": 500
+                },
+                {
+                  "requestId": "r-1",
+                  "level": "info",
+                  "at": 1250
+                }
+              ],
+              "r-1"
+            ],
+            "expected": {
+              "lineCount": 3,
+              "errorCount": 1,
+              "warnCount": 0,
+              "durationMs": 1500
+            },
+            "hidden": false
+          },
+          {
+            "id": "large-timestamps",
+            "args": [
+              [
+                {
+                  "requestId": "r-1",
+                  "level": "info",
+                  "at": 1758000000000
+                },
+                {
+                  "requestId": "r-1",
+                  "level": "info",
+                  "at": 1758000000822
+                }
+              ],
+              "r-1"
+            ],
+            "expected": {
+              "lineCount": 2,
+              "errorCount": 0,
+              "warnCount": 0,
+              "durationMs": 822
+            },
+            "hidden": false
+          },
+          {
+            "id": "multiple-errors-and-warns",
+            "args": [
+              [
+                {
+                  "requestId": "r-1",
+                  "level": "error",
+                  "at": 10
+                },
+                {
+                  "requestId": "r-1",
+                  "level": "error",
+                  "at": 20
+                },
+                {
+                  "requestId": "r-1",
+                  "level": "warn",
+                  "at": 30
+                },
+                {
+                  "requestId": "r-1",
+                  "level": "warn",
+                  "at": 40
+                }
+              ],
+              "r-1"
+            ],
+            "expected": {
+              "lineCount": 4,
+              "errorCount": 2,
+              "warnCount": 2,
+              "durationMs": 30
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ops.structured-diagnostics"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e20-02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the logging that cannot answer the question",
+      "conceptIds": [
+        "ops.structured-diagnostics"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Everything is logged. Nothing can be counted.",
+      "lessonId": "v2-l22",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "After an incident, Ashgrove is asked: 'how many refunds failed yesterday, and for what reasons?' The refund path logs this.\n\n```js\ntry {\n  await provider.refunds.create(input);\n} catch (err) {\n  logger.error(`refund failed for ticket ${ticket.id}: ${err.message}`);\n  throw err;\n}\n```\n\nThe log store holds every line. Select every accurate criticism of this logging.",
+      "hints": [
+        "Imagine writing the query that answers the question, using only what these lines contain.",
+        "The ticket id and the reason are present in the text but not as fields, so grouping requires parsing a sentence whose wording is not guaranteed.",
+        "Separately, check which identifier is missing entirely - the one that would let you pull up everything else that happened during the same request."
+      ],
+      "solution": {
+        "modelAnswer": "The values are interpolated rather than fields, the request id is missing, and the reason is a free-text message.",
+        "explanationMarkdown": "Everything needed is technically in the line and none of it is addressable. Answering the question means writing a regular expression against a sentence, and that expression breaks the first time someone rewords the message for clarity - so the reporting silently degrades in a pull request that looks like a tidy-up.\n\nThe missing request id is the more serious omission during an incident. With it, one failed refund expands into the whole story of that request: what was validated, how long the provider took, what the caller was told. Without it, this line is an island.\n\nUsing `err.message` as the reason compounds it, because the message is written by the provider's library and can change between versions. A stable `err.code` in a `reason` field is what makes 'group failures by reason' a query rather than a research project.\n\nRe-throwing after logging is fine and is not a criticism - the caller still decides how to respond, and the record exists either way."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "interpolated",
+            "textMarkdown": "The ticket id and reason are interpolated into a message, so they cannot be filtered or grouped without parsing prose that may be reworded.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Structured fields survive rewording; sentences do not."
+          },
+          {
+            "id": "no-request-id",
+            "textMarkdown": "The line carries no request id, so a failed refund cannot be joined to the rest of what that request did.",
+            "correct": true,
+            "explanationMarkdown": "Correct, and this is the omission that hurts most during an incident, when the surrounding context is what you need."
+          },
+          {
+            "id": "message-not-code",
+            "textMarkdown": "Using `err.message` rather than a stable error code means the grouping key can change when the provider library is upgraded.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A stable code belongs in a `reason` field; the message is for humans."
+          },
+          {
+            "id": "rethrow",
+            "textMarkdown": "Re-throwing after logging is wrong: the error should be swallowed once it has been recorded.",
+            "correct": false,
+            "explanationMarkdown": "Logging and handling are different responsibilities. Swallowing here would leave the caller believing the refund succeeded, which is far worse than a duplicate log line."
+          }
+        ]
+      },
+      "primaryConceptId": "ops.structured-diagnostics"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e20-03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Derive stage durations from point events",
+      "conceptIds": [
+        "ops.structured-diagnostics"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Reconstructing spans when all you were given is timestamps.",
+      "lessonId": "v2-l22",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Ashgrove's older services log a marker when each stage **begins**, with no duration. Implement `stageDurations(events)` to reconstruct the spans.\n\n`events` is an array of `{ stage, at }` in arbitrary order, plus exactly one event whose `stage` is `'end'` marking the moment the request finished.\n\nReturn an array of `{ stage, ms }`, ordered by time, where `ms` is the gap between each stage and the next event. The `'end'` event marks the finish and never appears in the output.\n\n- When two events share a timestamp, order them by stage name alphabetically.\n- When `events` contains only the `'end'` event, or is empty, return an empty array.\n\nDo not modify the input.",
+      "hints": [
+        "Sort a copy of the events by time before doing anything else - the input order carries no meaning and you must not reorder the caller's array.",
+        "Once sorted, each stage's duration is simply the next event's timestamp minus its own, which is why the terminating 'end' event has to exist.",
+        "Walk to the second-to-last element only, so every stage you emit has a successor to subtract against."
+      ],
+      "solution": {
+        "code": "function stageDurations(events) {\n  const sorted = events.slice();\n  sorted.sort(function (a, b) {\n    if (a.at !== b.at) {\n      return a.at - b.at;\n    }\n    return a.stage.localeCompare(b.stage);\n  });\n\n  const spans = [];\n  for (let i = 0; i < sorted.length - 1; i += 1) {\n    spans.push({ stage: sorted[i].stage, ms: sorted[i + 1].at - sorted[i].at });\n  }\n  return spans;\n}",
+        "explanationMarkdown": "Copying before sorting is not a nicety. `Array.prototype.sort` reorders in place, so sorting `events` directly would rearrange the caller's array - a mutation the input-unchanged check catches here, and one that in production would quietly corrupt whatever else held a reference to that list.\n\nThe comparator falls back to the stage name when timestamps are equal, which is what makes the output deterministic. Without it, two events logged in the same millisecond come back in an engine-dependent order, and a test asserting the result becomes intermittently red - the same equal-sort-key problem that makes integration suites flaky.\n\nStopping at `sorted.length - 1` is what the terminating `'end'` event is for: every emitted stage has a successor to subtract against, and the final marker contributes the last duration without appearing itself. This is also a decent argument for logging durations directly rather than reconstructing them - the reconstruction is correct, and it depends on a terminating event that a crashed request will never write."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "stageDurations",
+        "starterCode": "function stageDurations(events) {\n  // Assumes the events arrive in order and includes the terminator.\n  const spans = [];\n  for (let i = 0; i < events.length; i += 1) {\n    spans.push({ stage: events[i].stage, ms: 0 });\n  }\n  return spans;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty",
+            "args": [
+              []
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "only-the-end-marker",
+            "args": [
+              [
+                {
+                  "stage": "end",
+                  "at": 100
+                }
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "single-stage",
+            "args": [
+              [
+                {
+                  "stage": "validate",
+                  "at": 100
+                },
+                {
+                  "stage": "end",
+                  "at": 140
+                }
+              ]
+            ],
+            "expected": [
+              {
+                "stage": "validate",
+                "ms": 40
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "three-stages-in-order",
+            "args": [
+              [
+                {
+                  "stage": "validate",
+                  "at": 0
+                },
+                {
+                  "stage": "provider",
+                  "at": 4
+                },
+                {
+                  "stage": "persist",
+                  "at": 816
+                },
+                {
+                  "stage": "end",
+                  "at": 822
+                }
+              ]
+            ],
+            "expected": [
+              {
+                "stage": "validate",
+                "ms": 4
+              },
+              {
+                "stage": "provider",
+                "ms": 812
+              },
+              {
+                "stage": "persist",
+                "ms": 6
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "input-order-does-not-matter",
+            "args": [
+              [
+                {
+                  "stage": "end",
+                  "at": 822
+                },
+                {
+                  "stage": "persist",
+                  "at": 816
+                },
+                {
+                  "stage": "validate",
+                  "at": 0
+                },
+                {
+                  "stage": "provider",
+                  "at": 4
+                }
+              ]
+            ],
+            "expected": [
+              {
+                "stage": "validate",
+                "ms": 4
+              },
+              {
+                "stage": "provider",
+                "ms": 812
+              },
+              {
+                "stage": "persist",
+                "ms": 6
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "equal-timestamps-sort-alphabetically",
+            "args": [
+              [
+                {
+                  "stage": "beta",
+                  "at": 10
+                },
+                {
+                  "stage": "alpha",
+                  "at": 10
+                },
+                {
+                  "stage": "end",
+                  "at": 30
+                }
+              ]
+            ],
+            "expected": [
+              {
+                "stage": "alpha",
+                "ms": 0
+              },
+              {
+                "stage": "beta",
+                "ms": 20
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "zero-length-stage",
+            "args": [
+              [
+                {
+                  "stage": "validate",
+                  "at": 500
+                },
+                {
+                  "stage": "persist",
+                  "at": 500
+                },
+                {
+                  "stage": "end",
+                  "at": 600
+                }
+              ]
+            ],
+            "expected": [
+              {
+                "stage": "persist",
+                "ms": 0
+              },
+              {
+                "stage": "validate",
+                "ms": 100
+              }
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ops.structured-diagnostics"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c20-01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why structured fields beat a good sentence",
+      "conceptIds": [
+        "ops.structured-diagnostics"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what interpolation costs you.",
+      "lessonId": "v2-l22",
+      "type": "recall",
+      "promptMarkdown": "What can you do with `logger.error({ event: \"refund.failed\", reason: err.code, ticketId })` that you cannot do with the same facts interpolated into a message string?",
+      "answerMarkdown": "Filter, group and count without parsing: 'how many refund failures, by reason, this week' becomes a query over fields rather than a regular expression over prose. It also decouples the human wording from the machine contract, so a message can be reworded for clarity without breaking a dashboard or an alert built on it.",
+      "explanationMarkdown": "The failure this prevents is a slow one. Interpolated logs work fine until somebody needs an aggregate, and the reporting built on parsed prose degrades silently whenever the sentence changes.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ops.structured-diagnostics"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c20-02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Debug: the request that was slow somewhere",
+      "conceptIds": [
+        "ops.structured-diagnostics"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply stage timing to an unhelpful measurement.",
+      "lessonId": "v2-l22",
+      "type": "debugging",
+      "promptMarkdown": "A request is logged with a single `durationMs: 2200`. What can you conclude, and what would you change so the next occurrence is diagnosable?",
+      "answerMarkdown": "Only that the request was slow - not which part of it was. Emit one line per completed stage with its own duration (`validate`, `provider`, `persist`), so the next slow request identifies its own cause. If only start markers exist, the spans can be reconstructed by sorting events and subtracting consecutive timestamps, but that depends on a terminating event a crashed request never writes.",
+      "explanationMarkdown": "This is the most common gap between 'we have logs' and 'we can diagnose'. A request-level duration supports a hypothesis; per-stage durations supply an answer, and the cost of emitting them is trivial compared with reproducing the incident.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ops.structured-diagnostics"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l23",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Getting back to a working state",
+      "conceptIds": [
+        "ops.deployment-recovery"
+      ],
+      "prerequisiteIds": [
+        "ops.rollback",
+        "ops.deployment-order"
+      ],
+      "bodyMarkdown": "V1 covered the order of a release and the idea of a rollback. This lesson is about the situation where the rollback is not simply the reverse of the deploy, which is most situations involving a database.\n\n**Code rolls back. Data does not.** Redeploying the previous container is quick and safe when the schema has not moved. Once a migration has run, the old code is facing a database it was never written against - a renamed column it still selects, a dropped column it still writes. So the real question before every release is not 'can we roll back?' but **'is the previous version still compatible with the database after this migration?'**\n\n**Expand and contract is what makes that answer yes.** Split a breaking change into stages that are individually reversible: add the new column and write to both (expand), backfill, switch reads, and only in a later release drop the old one (contract). Each step leaves both versions of the code able to run, so at every moment there is a safe way back. It is more releases and more patience, in exchange for never being trapped.\n\n**A destructive step is a separate, later release.** Dropping a column in the same deploy as the code that stopped using it means a rollback restores code that needs a column which no longer exists. Wait until the new version has run long enough that you are confident, then drop it on its own.\n\n**Restoring a backup is not a rollback.** It is a distinct recovery action with data loss between the snapshot and now, and it must be described that way rather than as a routine undo. Anyone deciding to restore should be told what will be lost.\n\n**Decide to roll back early.** The instinct during an incident is to diagnose first, because understanding feels responsible. Restoring service first and investigating afterwards is almost always the better order - the evidence is still there in the logs, and every minute spent theorising is a minute of continued impact. Roll back, then find out why.\n\n**Know what 'working' means before you need to.** A short list of checks that prove the principal flows are healthy - sign in, load the list, submit one write - turns 'I think it is fine' into a verified statement, and it is not something to invent at 2am.",
+      "chapterId": "v2-ch20",
+      "sortOrder": 1,
+      "objectives": [
+        "Decide whether a rollback is safe by asking if the previous code is compatible with the migrated database.",
+        "Sequence a breaking schema change so every intermediate state is reversible.",
+        "Distinguish a rollback from a backup restore, and describe the cost of each."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "Renaming a column, done twice.\n\n```sql\n-- One release. Fast, and there is no way back.\nALTER TABLE tickets RENAME COLUMN summary TO subject;\n```\n\nThe new code selects `subject`; the old code selects `summary`. The moment this runs, rolling back the application produces a version that queries a column which no longer exists - so every affected request fails, and the only remaining options are rolling forward under pressure or restoring a backup and losing whatever happened since.\n\n```sql\n-- Release 1 (expand): additive, reversible.\nALTER TABLE tickets ADD COLUMN subject text;\n-- application writes both columns, reads summary\n\n-- Release 2: backfill, then read subject.\nUPDATE tickets SET subject = summary WHERE subject IS NULL;\n-- application writes both, reads subject\n\n-- Release 3 (contract), days later: stop writing summary.\n-- Release 4: ALTER TABLE tickets DROP COLUMN summary;\n```\n\nFour releases instead of one. At no point is there a version of the application that cannot run against the current schema, which means at every point the answer to 'can we go back?' is yes. That is the entire trade: more steps, in exchange for never being cornered.\n\nThe ordering rule generalises. Within a single release the safe sequence is: back up, apply only additive migrations, deploy, verify, backfill if needed, and leave anything destructive for a later release once the new version has proven itself. Verification is not optional - a deploy that is not checked is a deploy whose failure will be reported by a customer.\n\nAnd when a restore genuinely is the answer, it is announced as what it is: 'we will lose everything written since 04:00', not 'we are rolling back'.",
+      "commonMistakes": [
+        "Assuming a rollback is always available, when a migration has already made the previous version incompatible with the schema.",
+        "Renaming or dropping a column in the same release as the code change, which strands the previous version.",
+        "Putting a destructive step in the same deploy as the code that stopped needing it, so the rollback path is destroyed by the deploy itself.",
+        "Describing a backup restore as a rollback, which hides the data loss from whoever is approving it.",
+        "Diagnosing before restoring service, when the logs will still be there after the rollback.",
+        "Deploying without a defined verification step, so the first report of failure comes from a customer.",
+        "Backfilling in the same transaction as the migration on a large table, holding locks long enough to cause an outage of its own."
+      ],
+      "summaryMarkdown": "Code can be rolled back; a migrated database usually cannot. Before every release, ask whether the previous version still runs against the new schema - and use expand-and-contract to make the answer yes, keeping destructive steps for a later, separate release. A backup restore is a different action with real data loss and must be described as such. During an incident, restore service first and diagnose afterwards.",
+      "exerciseIds": [
+        "v2-e20-04",
+        "v2-e20-05",
+        "v2-e20-06"
+      ],
+      "reviewCardIds": [
+        "v2-c20-03",
+        "v2-c20-04"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: ALTER TABLE",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html"
+        },
+        {
+          "label": "Google SRE Workbook: Canarying Releases",
+          "url": "https://sre.google/workbook/canarying-releases/"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e20-04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Order the steps of a release safely",
+      "conceptIds": [
+        "ops.deployment-recovery"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The sequence that keeps a way back at every point.",
+      "lessonId": "v2-l23",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `releasePlan(change)`, which returns the ordered step names for a release.\n\n`change` has four boolean flags: `hasMigration`, `needsBackfill`, `isDestructive` and `behindFlag`.\n\nBuild the plan in this order, including only the steps that apply:\n\n1. `'run-checks'` - always.\n2. `'back-up-database'` - only when `hasMigration` is true.\n3. `'apply-migration'` - only when `hasMigration` is true.\n4. `'deploy'` - always.\n5. `'verify'` - always.\n6. `'backfill'` - only when `needsBackfill` is true. It runs **after** verification, so a failed deploy is not compounded by a long-running data change.\n7. `'enable-flag'` - only when `behindFlag` is true.\n8. `'schedule-destructive-step'` - only when `isDestructive` is true. The destructive change itself belongs to a **later** release, so this step only schedules it.\n\nReturn an array of the step names in that order. Do not modify the input.",
+      "hints": [
+        "The three unconditional steps give the plan its skeleton; everything else is inserted at a fixed position relative to them.",
+        "Build the array by appending in the order given, testing each flag as you reach its position - that keeps the code in the same order as the specification, which is what makes it reviewable.",
+        "Note that backfill comes after verify, not before: a deploy that failed verification should not be followed by a long data migration."
+      ],
+      "solution": {
+        "code": "function releasePlan(change) {\n  const steps = ['run-checks'];\n  if (change.hasMigration) {\n    steps.push('back-up-database');\n    steps.push('apply-migration');\n  }\n  steps.push('deploy');\n  steps.push('verify');\n  if (change.needsBackfill) {\n    steps.push('backfill');\n  }\n  if (change.behindFlag) {\n    steps.push('enable-flag');\n  }\n  if (change.isDestructive) {\n    steps.push('schedule-destructive-step');\n  }\n  return steps;\n}",
+        "explanationMarkdown": "The ordering encodes three separate safety arguments, and each one is worth being able to state.\n\nThe backup precedes the migration because it is the only thing that makes an unsuccessful migration recoverable - taken afterwards it captures the damage rather than the state before it. Verification precedes the backfill because a backfill is slow and touches a lot of rows; starting one on top of a deploy that has already failed its checks turns a bad release into a long bad release. And the destructive step is only *scheduled*, because performing it in this release would remove the very column the previous version still needs - destroying the rollback path as part of the deploy that might require it.\n\nWriting the function in the same order as the specification is deliberate. A reviewer can read the two side by side and check them off, which is a real property of maintainable code: the shape of the implementation matches the shape of the rule it implements."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "releasePlan",
+        "starterCode": "function releasePlan(change) {\n  // Migrates before backing up, and performs the destructive step immediately.\n  const steps = ['run-checks', 'apply-migration', 'deploy'];\n  if (change.isDestructive) {\n    steps.push('drop-column');\n  }\n  return steps;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "plain-code-change",
+            "args": [
+              {
+                "hasMigration": false,
+                "needsBackfill": false,
+                "isDestructive": false,
+                "behindFlag": false
+              }
+            ],
+            "expected": [
+              "run-checks",
+              "deploy",
+              "verify"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "with-migration",
+            "args": [
+              {
+                "hasMigration": true,
+                "needsBackfill": false,
+                "isDestructive": false,
+                "behindFlag": false
+              }
+            ],
+            "expected": [
+              "run-checks",
+              "back-up-database",
+              "apply-migration",
+              "deploy",
+              "verify"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "migration-and-backfill",
+            "args": [
+              {
+                "hasMigration": true,
+                "needsBackfill": true,
+                "isDestructive": false,
+                "behindFlag": false
+              }
+            ],
+            "expected": [
+              "run-checks",
+              "back-up-database",
+              "apply-migration",
+              "deploy",
+              "verify",
+              "backfill"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "behind-a-flag",
+            "args": [
+              {
+                "hasMigration": false,
+                "needsBackfill": false,
+                "isDestructive": false,
+                "behindFlag": true
+              }
+            ],
+            "expected": [
+              "run-checks",
+              "deploy",
+              "verify",
+              "enable-flag"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "destructive-is-only-scheduled",
+            "args": [
+              {
+                "hasMigration": true,
+                "needsBackfill": false,
+                "isDestructive": true,
+                "behindFlag": false
+              }
+            ],
+            "expected": [
+              "run-checks",
+              "back-up-database",
+              "apply-migration",
+              "deploy",
+              "verify",
+              "schedule-destructive-step"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "everything-at-once",
+            "args": [
+              {
+                "hasMigration": true,
+                "needsBackfill": true,
+                "isDestructive": true,
+                "behindFlag": true
+              }
+            ],
+            "expected": [
+              "run-checks",
+              "back-up-database",
+              "apply-migration",
+              "deploy",
+              "verify",
+              "backfill",
+              "enable-flag",
+              "schedule-destructive-step"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "backfill-without-migration",
+            "args": [
+              {
+                "hasMigration": false,
+                "needsBackfill": true,
+                "isDestructive": false,
+                "behindFlag": false
+              }
+            ],
+            "expected": [
+              "run-checks",
+              "deploy",
+              "verify",
+              "backfill"
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ops.deployment-recovery"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e20-05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the release with no way back",
+      "conceptIds": [
+        "ops.deployment-recovery"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The deploy succeeded. Twenty minutes later there is no safe option.",
+      "lessonId": "v2-l23",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "Ashgrove ships this release at 09:00. At 09:20 a serious defect is found in the new code.\n\n```sql\n-- migration, applied during the deploy\nALTER TABLE tickets RENAME COLUMN summary TO subject;\nALTER TABLE tickets DROP COLUMN legacy_ref;\n```\n\n```js\n// new application code\nconst rows = await db.query('SELECT id, subject FROM tickets');\n```\n\nThe previous version selects `summary` and `legacy_ref`. The last backup was taken at 04:00. What is the situation, and what should have been done differently?",
+      "hints": [
+        "Ask what happens if the previous container is redeployed right now, given the schema as it currently stands.",
+        "The old code queries `summary` and `legacy_ref`; neither exists any more, so redeploying it does not restore service.",
+        "That leaves rolling forward or restoring the 04:00 backup - and the second of those has a cost that must be stated in hours of data."
+      ],
+      "solution": {
+        "modelAnswer": "Rolling back is impossible because the old code is incompatible with the migrated schema; expand-and-contract would have preserved the option.",
+        "explanationMarkdown": "Redeploying the previous version does not restore service: it queries `summary` and `legacy_ref`, and the migration removed both. The rollback path was destroyed by the deploy itself, which is the specific trap this lesson is about.\n\nThat leaves two poor options. Rolling forward means writing and shipping a fix under incident pressure, which is where second mistakes come from. Restoring the 04:00 backup discards five hours of tickets and comments - and it is a data-loss event, not a rollback, so it needs to be described that way to whoever approves it.\n\nExpand and contract would have kept the option open. Add `subject`, write both columns, read `summary`; backfill; switch reads to `subject`; and drop `summary` and `legacy_ref` in a separate release days later. At 09:20 the previous version would still have run perfectly against the schema, and the rollback would have been a two-minute redeploy.\n\nThe `DROP COLUMN` is the sharpest error of the two. A rename at least has a symmetrical reverse migration; a dropped column's data is gone, and no reverse migration brings it back."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "no-rollback",
+            "textMarkdown": "The rollback path was destroyed by the deploy: the previous version queries columns the migration removed, so redeploying it does not restore service.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The question to ask before every release is whether the previous version still runs against the new schema, and here the answer became no at 09:00."
+          },
+          {
+            "id": "expand-contract",
+            "textMarkdown": "Splitting the change into expand, backfill, switch reads, and a later drop would have kept the previous version runnable at every point.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Each intermediate state is individually reversible, which is the entire benefit of the extra releases."
+          },
+          {
+            "id": "restore-is-loss",
+            "textMarkdown": "Restoring the 04:00 backup is a data-loss event of about five hours, not a rollback, and must be described that way.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Calling it a rollback hides the cost from whoever is approving it."
+          },
+          {
+            "id": "backup-solves",
+            "textMarkdown": "The 04:00 backup means the situation is fully recoverable, so the release process was adequate.",
+            "correct": false,
+            "explanationMarkdown": "A backup that costs five hours of customer data is a last resort, not a rollback plan. Having one does not make a non-reversible release acceptable."
+          }
+        ]
+      },
+      "primaryConceptId": "ops.deployment-recovery"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e20-06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Write the recovery plan for a bad release",
+      "conceptIds": [
+        "ops.deployment-recovery"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The decision, the order, and what you tell people it costs.",
+      "lessonId": "v2-l23",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Ashgrove deployed 25 minutes ago. Error rates on the ticket list have risen sharply and support is receiving reports. The release included an **additive** migration (a new nullable column) and no destructive steps. The last backup is six hours old.\n\nWrite the recovery plan you would follow and communicate. Cover: what you do first and why; whether a rollback is available here and how you know; what you would check to confirm service is restored; and when a backup restore would and would not be the right call.",
+      "hints": [
+        "Start from the compatibility question rather than from the cause of the errors: can the previous version run against the schema as it stands right now?",
+        "An additive, nullable migration leaves the previous version able to run, because nothing it reads or writes was removed. That determines which options are open.",
+        "For the confirmation step, decide in advance what 'working' means - a short list of flows you can check quickly beats an impression that things look better."
+      ],
+      "solution": {
+        "modelAnswer": "**First, roll back the application. Do not diagnose first.** The evidence stays in the logs and will be there in an hour; the impact does not stop until the deploy does. Understanding the defect is the second task, not the first.\n\n**A rollback is available, and I can say why.** The migration added a nullable column and removed nothing, so the previous version's queries still work - it neither reads nor writes the new column, and the column being nullable means its own inserts still satisfy the schema. That compatibility is the specific fact that makes the rollback safe, and it is worth stating explicitly rather than assuming.\n\n**The new column stays.** Reversing an additive migration buys nothing, adds risk, and would have to be redone. Leaving it costs nothing while the previous version runs.\n\n**Confirm with a fixed checklist, not an impression**: sign in, load the ticket list, open one ticket, submit one comment, and watch the error rate and p95 latency return to their pre-deploy levels for several minutes. Support confirms the reports have stopped. Then I record the release commit, the migration version and the rollback time.\n\n**A backup restore is not the right call here** and I would push back on it. Six hours of tickets and comments would be lost to fix a problem a redeploy resolves in minutes. A restore becomes correct only when data has been corrupted or destroyed - a bad backfill, a mistaken delete, a destructive migration with no reverse - so that the current data is worth less than the older snapshot. If it ever is the answer, it gets announced as 'we will lose everything written since 04:00', never as 'we are rolling back'.\n\nAfterwards: reproduce the defect in a preview environment with a regression test, and ask why verification did not catch it before customers did.",
+        "explanationMarkdown": "The two things that distinguish a real answer are restoring service before diagnosing, and justifying the rollback from schema compatibility rather than asserting it. 'The migration was additive and nullable, therefore the previous version still runs' is the reasoning; 'rollbacks are usually fine' is not.\n\nDeclining the backup restore, and saying what would make it appropriate, shows the candidate understands it as a distinct action with a price rather than a stronger undo.\n\nA fixed verification checklist beats 'check it looks OK' because it can be executed by whoever is on call, at speed, without judgement calls - which is precisely what is in short supply during an incident."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Rolls back before diagnosing, and justifies that order by noting the evidence remains available afterwards.",
+          "Establishes that a rollback is safe from the specific nature of the migration - additive and nullable, so the previous version remains compatible.",
+          "Leaves the additive migration in place rather than reversing it, with a reason.",
+          "Defines a concrete verification checklist plus a metric returning to baseline, rather than an impression that things improved.",
+          "Rejects the backup restore here and states the conditions under which it would be correct, describing it as data loss rather than as a rollback."
+        ],
+        "modelAnswerMarkdown": "See the model answer: roll back first, justify it from schema compatibility, keep the additive column, verify against a fixed checklist and baseline metrics, and reserve a restore for data corruption while naming its cost in hours."
+      },
+      "primaryConceptId": "ops.deployment-recovery"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c20-03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The question to ask before every release",
+      "conceptIds": [
+        "ops.deployment-recovery"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the test for whether a rollback exists.",
+      "lessonId": "v2-l23",
+      "type": "recall",
+      "promptMarkdown": "What single question determines whether a release can be rolled back, and what technique keeps the answer positive?",
+      "answerMarkdown": "Is the previous version of the application still compatible with the database after this migration? If a column it reads or writes has been renamed or dropped, redeploying it does not restore service. Expand and contract keeps the answer yes: add new structures, write to both, backfill, switch reads, and only drop the old structure in a later release once the new version has proven itself.",
+      "explanationMarkdown": "The trap is treating rollback as a property of the deployment tooling rather than of the schema. The tooling will happily redeploy the old container; whether that container can talk to the database is a different question, and it is decided by the migration.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ops.deployment-recovery"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c20-04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer: rollback or restore?",
+      "conceptIds": [
+        "ops.deployment-recovery"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the distinction to two different incidents.",
+      "lessonId": "v2-l23",
+      "type": "transfer",
+      "promptMarkdown": "Incident A: a new release has a rendering defect; the migration added a nullable column. Incident B: a backfill script wrote the wrong value into 40,000 rows an hour ago. Which needs a rollback and which needs a restore, and what do you tell people in each case?",
+      "answerMarkdown": "A is a rollback: the additive, nullable migration leaves the previous version compatible, so redeploying it restores service in minutes with no data loss - say exactly that. B is not a rollback at all, because the code is fine and the data is wrong; it needs a targeted repair from a backup or from a recomputation, and if a full restore is used the announcement must state what will be lost since the snapshot.",
+      "explanationMarkdown": "The distinction is which layer is broken. Rollback fixes bad code; restore fixes bad data, and it costs everything written since the snapshot. Conflating them in an announcement hides that cost from whoever is approving the decision.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ops.deployment-recovery"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l24",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Reviewing a change, and proposing one",
+      "conceptIds": [
+        "ops.code-review",
+        "ops.change-proposals"
+      ],
+      "prerequisiteIds": [
+        "ops.deployment-order",
+        "test.boundary-cases"
+      ],
+      "bodyMarkdown": "Two conversations decide most of what a team builds: the review of a change someone has written, and the proposal for a change nobody has written yet. Both are engineering work, and both are usually learned by imitation rather than deliberately.\n\n**A review is a risk assessment, not a style inspection.** Formatting belongs to a formatter; naming conventions belong to a linter. What a human reviewer can do that a tool cannot is ask whether the change is correct at its boundaries, whether it fails safely, whether it can be rolled back, whether it introduces a rule that will be forgotten at the second call site, and whether the tests would notice if it were wrong.\n\n**Prioritise findings, and say which are which.** A review that lists a security hole and a variable name as two bullet points has hidden the security hole. Separate what blocks the change from what would improve it from what is merely a preference, and label them - it is also the only way an author knows what they must address before merging.\n\n**Comment on the code, and be specific.** 'This is confusing' gives the author nothing; 'this returns null when the list is empty, and the caller at line 40 indexes into the result' names the input, the behaviour and the consequence. The most useful review comment is usually a concrete failing case, because it is checkable rather than arguable.\n\n**Say when something is fine.** A review consisting only of objections is exhausting and makes it hard to tell a serious concern from a routine one. Noting that an approach is right, and approving with minor comments rather than blocking on them, is part of the skill.\n\n**A proposal is a decision brief.** State the problem before the solution, with evidence that it is real. Name at least one alternative and why you rejected it, because a proposal with no alternatives reads as a preference rather than an analysis. Be explicit about cost and risk, including the cost of doing nothing. And say how you would know it worked - a proposal with no success criterion cannot be evaluated afterwards, which is how teams accumulate changes nobody can assess.\n\nThe reason both matter is the same: someone else has to decide, and they can only decide with what you gave them.",
+      "chapterId": "v2-ch20",
+      "sortOrder": 2,
+      "objectives": [
+        "Distinguish blocking findings from improvements and preferences in a review.",
+        "Write a review comment that names an input, a behaviour and a consequence.",
+        "Structure a change proposal around problem, alternatives, cost and a success criterion."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "The same review, twice.\n\n```\nA few notes:\n- naming could be clearer in places\n- the new endpoint doesn't check ownership\n- prefer const over let on line 12\n- missing a test\n```\n\nFour bullets of equal weight, one of which is a data breach. The author may fix the `const` first, because it is the easiest, and a busy reviewer skim-reading their own list can lose the important item among the trivia.\n\n```\n**Blocking**\n- `GET /exports/:id` loads by id with no ownership filter, so any signed-in\n  user can export another team's data. Suggest `findFirst({ where: { id, teamId } })`\n  so the restriction lives in the query.\n\n**Should fix before merge**\n- No test covers the empty-list case; `summarise([])` returns\n  `undefined` and the caller at line 40 reads `.length` from it.\n\n**Non-blocking**\n- `let` on line 12 is never reassigned.\n- Approach looks right to me - moving\n  the policy into one module is the correct call.\n```\n\nSame findings, ordered by consequence, each naming the specific input and result. The author knows what must change, what should change, and what is optional - and the security issue cannot be missed.\n\nA proposal has a comparable shape, and the parts people omit are the last two:\n\n```\nProblem: the ticket list takes 900ms per keystroke at 8,000 rows. Support\nreports abandoning filtering entirely. Profiler: 8,000 row renders, 0.1ms each.\n\nProposal: window the list, rendering the visible slice plus overscan.\n\nAlternatives: debouncing (reduces frequency, not cost - the pause still\nreads as slow); memoising rows (filtering changes which rows exist, so little\nis skipped).\n\nCost and risk: ~2 days. Risk is scroll-position and keyboard-navigation\nregressions; mitigated by keeping stable keys and adding an end-to-end test.\n\nSuccess: keystroke latency under 50ms at 8,000 rows, measured the same way.\n```\n\nThe success criterion is what makes it possible to say afterwards whether this was worth doing - and it is the line most often missing.",
+      "commonMistakes": [
+        "Listing findings of wildly different severity as equal bullets, which buries the serious one.",
+        "Reviewing formatting and naming that a formatter or linter already governs, at the expense of correctness and failure behaviour.",
+        "Writing \"this is confusing\" instead of naming the input, the behaviour and the consequence.",
+        "Blocking a change over a preference, which makes blocking meaningless when something genuinely warrants it.",
+        "Producing reviews that contain only objections, so the author cannot distinguish a serious concern from a routine one.",
+        "Proposing a solution before establishing that the problem is real and measured.",
+        "Offering no alternatives, which makes a proposal read as a preference rather than an analysis.",
+        "Omitting a success criterion, so nobody can say afterwards whether the change achieved anything."
+      ],
+      "summaryMarkdown": "Review for risk rather than style: correctness at the boundaries, failure behaviour, reversibility, and whether the tests would notice. Rank findings and label them, comment with a specific input and consequence, and say when something is right. Structure a proposal as problem with evidence, alternatives considered, cost and risk, and a success criterion you could check afterwards.",
+      "exerciseIds": [
+        "v2-e20-07",
+        "v2-e20-08",
+        "v2-e20-09"
+      ],
+      "reviewCardIds": [
+        "v2-c20-05",
+        "v2-c20-06"
+      ],
+      "references": [
+        {
+          "label": "Google: Code Review Developer Guide",
+          "url": "https://google.github.io/eng-practices/review/reviewer/"
+        },
+        {
+          "label": "Michael Nygard: Documenting Architecture Decisions",
+          "url": "https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e20-07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Rank what you found in a review",
+      "conceptIds": [
+        "ops.code-review"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Four findings, and the question of which one blocks the merge.",
+      "lessonId": "v2-l24",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "You are reviewing a pull request that adds a CSV export endpoint.\n\n```js\napp.get('/exports/:id', async (request, reply) => {\n  let rows = await db.ticket.findMany({ where: { exportId: request.params.id } });\n  const csv = rows.map((r) => `${r.id},${r.subject}`).join('\\n');\n  return reply.type('text/csv').send(csv);\n});\n```\n\nYou notice four things:\n\n**W** - no ownership filter, so any signed-in user can export any export id.\n**X** - `let rows` is never reassigned.\n**Y** - a subject containing a comma or a newline corrupts the CSV.\n**Z** - no test covers an empty result set.\n\nWhich single finding must block the merge, and how would you classify the rest?",
+      "hints": [
+        "Ask what each finding costs if the change ships unfixed, and to whom.",
+        "One of these exposes other users' data to anyone who can guess or enumerate an id. The others produce malformed output, an untested path, or nothing at all.",
+        "Blocking is a claim that something must not ship. Spending it on a style preference makes it mean less when you need it."
+      ],
+      "solution": {
+        "modelAnswer": "W blocks; Y should be fixed before merge; Z is a should-fix; X is non-blocking.",
+        "explanationMarkdown": "**W blocks.** The query filters on `exportId` and nothing else, so any authenticated user who supplies another id receives that export. It is the same broken-access-control shape as chapter 17's example, and it ships a data breach - nothing else here is in that category.\n\n**Y should be fixed before merge.** Unescaped commas and newlines in a subject corrupt the output silently: the file opens, the columns are wrong, and whoever consumes it downstream gets bad data without an error. Serious, but it damages a file rather than exposing somebody's tickets.\n\n**Z should be fixed before merge**, and is smaller. An untested empty case is a gap rather than a defect; it becomes a defect the day the behaviour changes and nothing notices.\n\n**X is non-blocking.** `let` instead of `const` is exactly the finding a linter should be making, and raising it at the same weight as W is how the important item gets lost. Mention it, mark it optional, move on.\n\nThe discipline is that blocking means 'must not ship'. A reviewer who blocks on preferences trains authors to treat every block as negotiable, which is expensive on the day something genuinely must not ship."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "w-blocks",
+            "textMarkdown": "W blocks the merge; Y and Z are should-fix; X is a non-blocking preference a linter should own.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Only W ships a data breach, and separating the levels is what stops it from being lost among the other three."
+          },
+          {
+            "id": "all-block",
+            "textMarkdown": "All four block: a merge should be clean on every count before it ships.",
+            "correct": false,
+            "explanationMarkdown": "Blocking on everything makes blocking meaningless, and it removes the reviewer's ability to signal that one of these is categorically more serious."
+          },
+          {
+            "id": "y-blocks",
+            "textMarkdown": "Y blocks, because corrupted export data is the most visible failure to customers.",
+            "correct": false,
+            "explanationMarkdown": "Corrupt CSV is a real problem, but it damages a file. W hands one user another user's data, which is a different category of consequence."
+          },
+          {
+            "id": "none-block",
+            "textMarkdown": "None block: all four can be addressed in a follow-up once the feature is available.",
+            "correct": false,
+            "explanationMarkdown": "Shipping a known access-control hole and fixing it later means it is live in the meantime. W is precisely the case blocking exists for."
+          }
+        ]
+      },
+      "primaryConceptId": "ops.code-review"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e20-08",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Write the change proposal",
+      "conceptIds": [
+        "ops.change-proposals"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Problem, alternatives, cost, and how you would know it worked.",
+      "lessonId": "v2-l24",
+      "sortOrder": 1,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "Ashgrove's integration test suite takes 11 minutes and fails intermittently roughly once a day. The failures are irreproducible in isolation. All test files share one database and truncate every table before each test. Developers have started re-running the suite as a matter of routine, and two have admitted merging on a re-run without reading the failure.\n\nWrite a change proposal for your team lead recommending a database per test worker.\n\nInclude the problem with evidence, the proposal, at least one alternative you rejected and why, the cost and risk, and how you would know afterwards that it worked.",
+      "hints": [
+        "Lead with the problem and its evidence. The strongest evidence here is not the eleven minutes - it is what the flakiness has done to how people treat failures.",
+        "For alternatives, consider transaction rollback and simply retrying failed tests, and give each a specific reason for rejection rather than dismissing it.",
+        "A success criterion has to be checkable later by someone else: name the number and how it will be measured."
+      ],
+      "solution": {
+        "modelAnswer": "**Problem.** The integration suite takes 11 minutes and fails intermittently about once a day, irreproducibly. The direct cost is time; the serious cost is that the team has stopped believing failures - re-running is now routine, and two people have merged after a re-run without reading what failed. A suite people do not trust provides no protection while still costing eleven minutes, and the first real regression it catches will be re-run away.\n\nThe cause is shared state: all files use one database and truncate in `beforeEach`, so any concurrency means one file's cleanup runs during another file's test. That matches the symptom precisely - failures that vanish in isolation and cluster when the machine is busy.\n\n**Proposal.** Give each test worker its own database, created and migrated at suite start, with the worker id in the connection string. Files then run in parallel with no shared state to race over.\n\n**Alternatives considered.** *Transaction rollback per test*: faster and it removes cleanup entirely, but our order-submission code manages its own transactions and depends on committing. Wrapping it makes the inner commit a savepoint release, so the tests that exist specifically to verify the commit boundary would pass without testing it. Rejected as unsafe for this codebase. *Automatic retry of failed tests*: cheapest to implement and it institutionalises the problem - it makes a real intermittent bug indistinguishable from test noise, and we would lose the signal permanently.\n\n**Cost and risk.** Roughly two days: database creation and migration in the setup, worker-id plumbing, and updating CI to allocate the connections. Risk is mainly CI resource use - N databases instead of one - which we can bound by capping worker count. Second risk is that some flakiness has another cause, most likely ordering by `createdAt` without a tiebreaker; that would remain and would then be clearly visible rather than lost in the noise.\n\n**Cost of doing nothing.** The suite continues to consume eleven minutes per run while providing decreasing protection, and the habit of merging on a re-run keeps spreading.\n\n**Success criteria.** Measured over two weeks after the change: zero irreproducible failures attributable to cross-file interference; wall-clock suite time under four minutes at four workers; and no re-run-to-green merges, which we can check from CI history.",
+        "explanationMarkdown": "The strongest evidence in this proposal is behavioural rather than numeric. Eleven minutes is an annoyance; engineers merging on a re-run without reading the failure is a broken safety net, and leading with that reframes the request from convenience to risk.\n\nThe alternatives are rejected for specific, technical reasons tied to this codebase - self-managing transactions make rollback unsafe here - rather than dismissed as generally inferior. That is what distinguishes analysis from preference.\n\nNaming the cost of doing nothing, and acknowledging that some flakiness may survive the change, both build credibility. A proposal that claims to fix everything invites scepticism about the part it can actually deliver."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Leads with the problem and includes the behavioural evidence - re-running as routine, merging without reading failures - not just the elapsed time.",
+          "Identifies shared database state as the cause and connects it to the specific symptom of irreproducibility.",
+          "Rejects at least one alternative for a concrete reason grounded in this codebase, such as self-managing transactions making rollback unsafe.",
+          "States cost and risk honestly, including CI resource use and the possibility that some flakiness has a different cause.",
+          "Gives a success criterion that someone else could check afterwards, with numbers and a measurement method."
+        ],
+        "modelAnswerMarkdown": "See the model answer: problem with behavioural evidence, shared state as the cause, rollback and auto-retry rejected for specific reasons, roughly two days with bounded CI cost, and success measured over two weeks by interference failures, wall-clock time and re-run-to-green merges."
+      },
+      "primaryConceptId": "ops.change-proposals"
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e20-09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Order review findings for the author",
+      "conceptIds": [
+        "ops.code-review"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Severity first, then somewhere predictable.",
+      "lessonId": "v2-l24",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Implement `orderFindings(findings)` so a review reads in the order an author should act on it.\n\nEach finding is `{ id, severity, file, line }`. Severities, most serious first, are `'blocker'`, `'major'`, `'minor'` and `'nit'`.\n\nReturn an array of finding **ids**, sorted by:\n\n1. severity, most serious first;\n2. then `file`, alphabetically;\n3. then `line`, ascending.\n\nAny unrecognised severity sorts **after** all recognised ones, and ties among unrecognised severities fall through to the same file and line rules.\n\nDo not modify the input.",
+      "hints": [
+        "Map each severity name to a rank number once, then sort by that rank - comparing the strings themselves would order them alphabetically, which is not the order you want.",
+        "Give an unrecognised severity a rank higher than every known one so it naturally falls to the end, rather than special-casing it in the comparator.",
+        "Sort a copy: `sort` reorders in place, and the caller's array must come back untouched. Compare rank, then file, then line, returning as soon as one differs."
+      ],
+      "solution": {
+        "code": "function orderFindings(findings) {\n  const order = ['blocker', 'major', 'minor', 'nit'];\n\n  function rankOf(severity) {\n    const index = order.indexOf(severity);\n    return index === -1 ? order.length : index;\n  }\n\n  const sorted = findings.slice();\n  sorted.sort(function (a, b) {\n    const rankA = rankOf(a.severity);\n    const rankB = rankOf(b.severity);\n    if (rankA !== rankB) {\n      return rankA - rankB;\n    }\n    const byFile = a.file.localeCompare(b.file);\n    if (byFile !== 0) {\n      return byFile;\n    }\n    return a.line - b.line;\n  });\n\n  const ids = [];\n  for (const finding of sorted) {\n    ids.push(finding.id);\n  }\n  return ids;\n}",
+        "explanationMarkdown": "Mapping severity names to ranks is the step that makes the sort express the intended meaning. Comparing the strings directly would order them `blocker, major, minor, nit` by accident of the alphabet - and that coincidence breaks the moment someone adds `critical`, which sorts before `major` but after `blocker` alphabetically while being the most serious of the three.\n\nGiving an unknown severity `order.length` places it after everything recognised without a special case in the comparator. It also fails safe: a typo in a severity name pushes that finding to the end rather than promoting it to the top, which is the less alarming of the two possible mistakes.\n\nThe tiebreakers exist for the author's benefit rather than the reviewer's. Grouping by file and then by line means the author works down one file at a time instead of jumping between them, and it makes the output deterministic - the same review always renders in the same order, so a test can assert it.\n\nCopying before sorting keeps the caller's array intact, which the input-unchanged check enforces here."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "orderFindings",
+        "starterCode": "function orderFindings(findings) {\n  // Sorts by the severity string itself, and mutates the caller's array.\n  findings.sort(function (a, b) {\n    return a.severity < b.severity ? -1 : 1;\n  });\n  const ids = [];\n  for (const finding of findings) {\n    ids.push(finding.id);\n  }\n  return ids;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty",
+            "args": [
+              []
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "severity-order",
+            "args": [
+              [
+                {
+                  "id": "f1",
+                  "severity": "nit",
+                  "file": "a.js",
+                  "line": 1
+                },
+                {
+                  "id": "f2",
+                  "severity": "blocker",
+                  "file": "a.js",
+                  "line": 1
+                },
+                {
+                  "id": "f3",
+                  "severity": "minor",
+                  "file": "a.js",
+                  "line": 1
+                },
+                {
+                  "id": "f4",
+                  "severity": "major",
+                  "file": "a.js",
+                  "line": 1
+                }
+              ]
+            ],
+            "expected": [
+              "f2",
+              "f4",
+              "f3",
+              "f1"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "file-then-line-within-severity",
+            "args": [
+              [
+                {
+                  "id": "f1",
+                  "severity": "major",
+                  "file": "b.js",
+                  "line": 5
+                },
+                {
+                  "id": "f2",
+                  "severity": "major",
+                  "file": "a.js",
+                  "line": 90
+                },
+                {
+                  "id": "f3",
+                  "severity": "major",
+                  "file": "a.js",
+                  "line": 12
+                }
+              ]
+            ],
+            "expected": [
+              "f3",
+              "f2",
+              "f1"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "severity-beats-file",
+            "args": [
+              [
+                {
+                  "id": "f1",
+                  "severity": "nit",
+                  "file": "a.js",
+                  "line": 1
+                },
+                {
+                  "id": "f2",
+                  "severity": "blocker",
+                  "file": "z.js",
+                  "line": 400
+                }
+              ]
+            ],
+            "expected": [
+              "f2",
+              "f1"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "unknown-severity-sorts-last",
+            "args": [
+              [
+                {
+                  "id": "f1",
+                  "severity": "whenever",
+                  "file": "a.js",
+                  "line": 1
+                },
+                {
+                  "id": "f2",
+                  "severity": "nit",
+                  "file": "z.js",
+                  "line": 999
+                }
+              ]
+            ],
+            "expected": [
+              "f2",
+              "f1"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "unknown-severities-tie-on-file-and-line",
+            "args": [
+              [
+                {
+                  "id": "f1",
+                  "severity": "later",
+                  "file": "b.js",
+                  "line": 1
+                },
+                {
+                  "id": "f2",
+                  "severity": "someday",
+                  "file": "a.js",
+                  "line": 7
+                }
+              ]
+            ],
+            "expected": [
+              "f2",
+              "f1"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "single-finding",
+            "args": [
+              [
+                {
+                  "id": "only",
+                  "severity": "minor",
+                  "file": "x.js",
+                  "line": 3
+                }
+              ]
+            ],
+            "expected": [
+              "only"
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ops.code-review"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c20-05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What makes a review comment actionable",
+      "conceptIds": [
+        "ops.code-review"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the shape of a useful finding.",
+      "lessonId": "v2-l24",
+      "type": "recall",
+      "promptMarkdown": "Rewrite \"this function is confusing\" into an actionable review comment, and name the three things a good comment contains.",
+      "answerMarkdown": "Something like: 'summarise() returns undefined for an empty list, and the caller at line 40 reads .length from the result, so an empty ticket queue throws.' The three parts are the input or condition, the behaviour it produces, and the consequence for the system. That makes the comment checkable rather than arguable - the author can reproduce it, and either fix it or show that it cannot occur.",
+      "explanationMarkdown": "The general test is whether the author could act on the comment without asking a follow-up question. 'Confusing' describes the reviewer's experience; a failing case describes the code, and only one of those can be verified.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ops.code-review"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c20-06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer: the proposal that will not be evaluated",
+      "conceptIds": [
+        "ops.change-proposals"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the proposal structure to a change with a missing part.",
+      "lessonId": "v2-l24",
+      "type": "transfer",
+      "promptMarkdown": "A colleague proposes replacing the team's HTTP client 'because the current one is outdated'. Which parts of a good proposal are missing, and what would you ask for?",
+      "answerMarkdown": "Nearly all of them. There is no stated problem - 'outdated' is not an impact, so ask what breaks or costs time today, with evidence. There are no alternatives, so ask whether upgrading the current client was considered and why it was rejected. There is no cost or risk, so ask about the migration size and what regressions are plausible. And there is no success criterion, so ask what would be measurably better afterwards - without one, nobody can say later whether the work paid off.",
+      "explanationMarkdown": "Proposals framed around a solution rather than a problem are the common case, and the missing success criterion is the most consequential omission: it is what turns a change into something a team can learn from rather than merely accumulate.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ops.change-proposals"
+    },
+    {
+      "kind": "assessment",
+      "id": "v2-a20",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Operations and review placement check",
+      "conceptIds": [
+        "ops.structured-diagnostics",
+        "ops.deployment-recovery",
+        "ops.code-review",
+        "ops.change-proposals"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five questions on structured diagnostics, deployment recovery, code review and change proposals. No hints and no solutions are shown until you submit.",
+      "chapterId": "v2-ch20",
+      "items": [
+        {
+          "id": "v2-a20-i1",
+          "objectiveIds": [
+            "ops.structured-diagnostics"
+          ],
+          "critical": true,
+          "promptMarkdown": "A service logs `logger.info(\"charge \" + id + \" failed: \" + err.message)`. The team is asked how many charges failed last week, grouped by reason.\n\nWhat is the core problem?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a20-1-unqueryable",
+                "textMarkdown": "The values are inside a sentence rather than in fields, so grouping requires parsing prose whose wording can change at any time.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Structured fields are queryable; interpolated text is greppable until someone rewords it."
+              },
+              {
+                "id": "a20-1-level",
+                "textMarkdown": "It uses `info` where a failure should be `error`, so the lines were discarded by log retention.",
+                "correct": false,
+                "explanationMarkdown": "The level is arguably wrong and worth raising, but the lines still exist. The reason the question cannot be answered is that the data is not addressable."
+              },
+              {
+                "id": "a20-1-volume",
+                "textMarkdown": "There are too many lines for the log store to search efficiently.",
+                "correct": false,
+                "explanationMarkdown": "Volume is not the obstacle described. Even a small store cannot group by a field that does not exist."
+              },
+              {
+                "id": "a20-1-nothing",
+                "textMarkdown": "Nothing: a regular expression over the message recovers the same information.",
+                "correct": false,
+                "explanationMarkdown": "It does, until the sentence is reworded in a routine tidy-up - at which point the reporting silently degrades with no failure anywhere."
+              }
+            ]
+          },
+          "explanationMarkdown": "Log the facts as fields with a stable event name, and keep the human message separate so it can change freely."
+        },
+        {
+          "id": "v2-a20-i2",
+          "objectiveIds": [
+            "ops.deployment-recovery"
+          ],
+          "critical": true,
+          "promptMarkdown": "A release renames a column and drops another in the same migration as the code change. Twenty minutes later a serious defect appears.\n\nWhat is the situation?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a20-2-stranded",
+                "textMarkdown": "Redeploying the previous version will not restore service, because it queries columns that no longer exist - the deploy destroyed its own rollback path.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Whether a rollback exists is decided by the migration, not by the deployment tooling."
+              },
+              {
+                "id": "a20-2-fine",
+                "textMarkdown": "A rollback is available as usual, since the deployment tool can always redeploy the previous image.",
+                "correct": false,
+                "explanationMarkdown": "It can redeploy the image. That image cannot talk to the migrated schema, which is what makes the rollback useless here."
+              },
+              {
+                "id": "a20-2-reverse",
+                "textMarkdown": "Running a reverse migration fully restores the previous state, including the dropped column.",
+                "correct": false,
+                "explanationMarkdown": "A rename can be reversed; a dropped column's data is gone, and no reverse migration recreates it."
+              },
+              {
+                "id": "a20-2-backup",
+                "textMarkdown": "The backup makes this routine, so the release process was sound.",
+                "correct": false,
+                "explanationMarkdown": "Restoring costs every write since the snapshot. Having a last resort does not make a non-reversible release acceptable."
+              }
+            ]
+          },
+          "explanationMarkdown": "Expand and contract keeps every intermediate state runnable by both versions, so a rollback stays available throughout."
+        },
+        {
+          "id": "v2-a20-i3",
+          "objectiveIds": [
+            "ops.deployment-recovery"
+          ],
+          "critical": false,
+          "promptMarkdown": "An incident begins immediately after a deploy whose migration added one nullable column.\n\nWhat is the correct first action?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a20-3-rollback",
+                "textMarkdown": "Roll back the application straight away; the additive nullable migration leaves the previous version compatible, and the logs remain available for diagnosis afterwards.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Restore service first - understanding is the second task, and the evidence does not expire."
+              },
+              {
+                "id": "a20-3-diagnose",
+                "textMarkdown": "Diagnose the root cause first, so the rollback decision is well informed.",
+                "correct": false,
+                "explanationMarkdown": "Every minute of diagnosis is a minute of continued impact, and the same investigation is possible after service is restored."
+              },
+              {
+                "id": "a20-3-restore",
+                "textMarkdown": "Restore the most recent database backup, since a migration was involved.",
+                "correct": false,
+                "explanationMarkdown": "That discards every write since the snapshot to fix a problem a redeploy resolves in minutes. A restore is for damaged data, not bad code."
+              },
+              {
+                "id": "a20-3-reverse",
+                "textMarkdown": "Reverse the migration before redeploying, to return the schema to its previous state.",
+                "correct": false,
+                "explanationMarkdown": "Unnecessary risk. An additive nullable column does not impede the previous version, and reversing it would only have to be redone."
+              }
+            ]
+          },
+          "explanationMarkdown": "The rollback is safe precisely because the migration was additive and nullable - a fact worth stating rather than assuming."
+        },
+        {
+          "id": "v2-a20-i4",
+          "objectiveIds": [
+            "ops.code-review"
+          ],
+          "critical": true,
+          "promptMarkdown": "A review lists, as four equal bullets: a missing ownership filter on a new endpoint; a `let` that could be `const`; an unescaped comma in CSV output; and a missing test for the empty case.\n\nWhat is the main problem with the review itself?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a20-4-unranked",
+                "textMarkdown": "The findings are unranked, so a data-exposure bug sits at the same weight as a style preference and can be lost among the others.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Ranking and labelling is what tells the author what must be fixed before merging."
+              },
+              {
+                "id": "a20-4-too-few",
+                "textMarkdown": "Four findings is too few for a change of this size.",
+                "correct": false,
+                "explanationMarkdown": "Nothing here suggests the review missed anything. How the findings are presented is the issue."
+              },
+              {
+                "id": "a20-4-tone",
+                "textMarkdown": "The review is too blunt and should be phrased as questions.",
+                "correct": false,
+                "explanationMarkdown": "Tone matters, but phrasing a security hole as a question would make it easier to overlook, not harder."
+              },
+              {
+                "id": "a20-4-none",
+                "textMarkdown": "Nothing: listing everything found and letting the author judge priority is the reviewer's job done.",
+                "correct": false,
+                "explanationMarkdown": "Judging severity is exactly what the reviewer is positioned to do, and declining to leaves the most serious item competing with a linting nit."
+              }
+            ]
+          },
+          "explanationMarkdown": "Separate blocking from should-fix from preference, and reserve blocking for things that genuinely must not ship."
+        },
+        {
+          "id": "v2-a20-i5",
+          "objectiveIds": [
+            "ops.change-proposals"
+          ],
+          "critical": false,
+          "promptMarkdown": "A proposal reads: 'We should adopt a job queue. The current setup is messy and a queue is the industry standard. It will take about a week.'\n\nWhich omission most limits the team's ability to decide?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a20-5-problem-and-success",
+                "textMarkdown": "There is no stated problem with evidence and no success criterion, so nobody can judge whether it is worth doing or tell afterwards whether it worked.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Without a measured problem the proposal is a preference, and without a success criterion it can never be evaluated in hindsight."
+              },
+              {
+                "id": "a20-5-estimate",
+                "textMarkdown": "The one-week estimate is not broken down by task.",
+                "correct": false,
+                "explanationMarkdown": "A finer estimate would help, but the team cannot even decide whether the week is worth spending without knowing what problem it solves."
+              },
+              {
+                "id": "a20-5-tech",
+                "textMarkdown": "It does not name which queue technology to use.",
+                "correct": false,
+                "explanationMarkdown": "That decision can follow. The prior question - what problem this solves and how success is measured - is the one blocking a decision."
+              },
+              {
+                "id": "a20-5-nothing",
+                "textMarkdown": "Nothing important: adopting a standard approach needs little justification.",
+                "correct": false,
+                "explanationMarkdown": "\"Industry standard\" is not a problem statement. Plenty of standard tools are wrong for a given system, and this proposal offers no way to tell."
+              }
+            ]
+          },
+          "explanationMarkdown": "Problem with evidence, alternatives, cost and risk, and a checkable success criterion - the last is the one most often missing."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

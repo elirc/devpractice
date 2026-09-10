@@ -1,0 +1,1300 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v3-ch04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Asynchronous C#",
+      "conceptIds": [
+        "dotnet.tasks",
+        "dotnet.async-await",
+        "dotnet.cancellation-tokens",
+        "dotnet.async-exceptions"
+      ],
+      "prerequisiteIds": [
+        "js.promises",
+        "js.async-await"
+      ],
+      "bodyMarkdown": "You have written `async`/`await` before, and the syntax here is deliberately the same. What differs is everything underneath it.\n\nA JavaScript promise is already running when you receive it, and there is exactly one thread to return to. A .NET `Task` may or may not have started, work genuinely runs in parallel on a thread pool, and cancellation is a first-class part of the design rather than an afterthought. Those three differences produce the whole chapter.\n\nThe most consequential one is cancellation. In .NET, a caller can say \"stop, nobody needs this any more\" and have that request travel down through every layer of a call chain — but only if each layer passes the token along. A single method that forgets to forward it silently severs the chain, and the work keeps running after the request that wanted it has gone. There is no exception, no warning, and the only symptom is a server doing work nobody is waiting for.\n\nThe second is exceptions. An exception inside a `Task` does not propagate immediately; it is captured and stored on the task, and it surfaces when the task is awaited. If nothing ever awaits it, nothing ever sees it — a failure that leaves no trace at all. This is the .NET form of the unhandled-rejection problem, and it is quieter.\n\nThe support desk gives us the running example: a request handler that fans out to fetch a ticket, its comments and its customer record, and must behave correctly when the client disconnects halfway through.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v3-l10",
+        "v3-l11",
+        "v3-l12"
+      ],
+      "assessmentId": "v3-a04",
+      "objectiveIds": [
+        "dotnet.tasks",
+        "dotnet.async-await",
+        "dotnet.cancellation-tokens",
+        "dotnet.async-exceptions"
+      ],
+      "missionIds": [],
+      "sortOrder": 23
+    },
+    {
+      "kind": "lesson",
+      "id": "v3-l10",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Tasks and await",
+      "conceptIds": [
+        "dotnet.tasks",
+        "dotnet.async-await"
+      ],
+      "prerequisiteIds": [
+        "js.async-await"
+      ],
+      "bodyMarkdown": "A `Task` represents an operation that will finish at some point and may produce a value (`Task<T>`) or nothing (`Task`). Awaiting one suspends the current method until it completes and then resumes it — which is the part that looks exactly like JavaScript.\n\nThe first real difference is **parallelism**. Starting three tasks and then awaiting all three does not merely interleave them; on a thread pool they genuinely run at the same time. This is why the fan-out pattern matters so much more here:\n\nAwaiting each call in turn makes them sequential — three round trips, one after another. Starting all three and then awaiting `Task.WhenAll` makes them concurrent, so the total time is roughly the slowest of the three rather than their sum. Getting this wrong is the single most common performance defect in .NET request handlers, and it reads perfectly naturally, because sequential `await` is what you would write by reflex.\n\nThe second difference is that **a `Task` is a value you can hold**. You can start work, do something else, and await later. That flexibility is what makes the unobserved-exception problem in the third lesson possible, so it is worth noticing early.\n\nTwo rules will keep you out of trouble. **Never block on a task** with `.Result` or `.Wait()`. In a web application this can deadlock, and even where it does not it consumes a thread doing nothing. If a method calls asynchronous code, make it `async` and await properly — the change usually propagates up the call chain, which is normal and correct.\n\nAnd **`async void` is for event handlers only**. An `async void` method returns nothing to await, so its caller cannot know when it finished, cannot know whether it failed, and cannot catch its exceptions — which are raised on whatever thread happens to be running and typically terminate the process. Use `async Task` for everything else.",
+      "chapterId": "v3-ch04",
+      "sortOrder": 0,
+      "objectives": [
+        "Distinguish sequential awaiting from concurrent fan-out with `Task.WhenAll`.",
+        "Explain why `.Result` and `.Wait()` are hazardous in a request handler.",
+        "Say why `async void` prevents a caller from observing completion or failure."
+      ],
+      "estimatedMinutes": 9,
+      "workedExampleMarkdown": "The same handler, written sequentially and concurrently.\n\n```csharp\n// Sequential: each await finishes before the next call starts.\npublic async Task<TicketView> LoadSequential(string id, CancellationToken ct)\n{\n    var ticket   = await _tickets.GetAsync(id, ct);      // 40 ms\n    var comments = await _comments.ForTicketAsync(id, ct); // 60 ms\n    var customer = await _customers.GetAsync(ticket.CustomerId, ct); // 30 ms\n    return new TicketView(ticket, comments, customer);   // ~130 ms total\n}\n\n// Concurrent: start the independent work, then await together.\npublic async Task<TicketView> LoadConcurrent(string id, CancellationToken ct)\n{\n    var ticketTask   = _tickets.GetAsync(id, ct);\n    var commentsTask = _comments.ForTicketAsync(id, ct);\n\n    await Task.WhenAll(ticketTask, commentsTask);        // ~60 ms so far\n\n    var ticket = await ticketTask;                       // already complete\n    var customer = await _customers.GetAsync(ticket.CustomerId, ct); // must follow\n    return new TicketView(ticket, await commentsTask, customer);\n}\n```\n\nNote what could *not* be parallelised: the customer lookup needs `ticket.CustomerId`, so it genuinely depends on the first call and has to wait. Fan-out applies only to independent work, and pretending a dependency does not exist is how concurrency bugs start.\n\nAnd the blocking anti-pattern, for recognition:\n\n```csharp\nvar ticket = _tickets.GetAsync(id, ct).Result;   // blocks a thread; can deadlock\n```",
+      "commonMistakes": [
+        "Awaiting independent calls one at a time, turning parallel work into a sequential chain.",
+        "Calling `.Result` or `.Wait()` to avoid making a method `async`, which wastes a thread and risks deadlock.",
+        "Using `Task.WhenAll` on operations that actually depend on one another's results.",
+        "Declaring a non-event-handler method `async void`, so callers cannot await it or observe its failures."
+      ],
+      "summaryMarkdown": "A `Task` is an operation you can hold and await later, and .NET tasks genuinely run in parallel. Await independent work with `Task.WhenAll` rather than in sequence; only genuinely dependent calls belong in a chain. Never block with `.Result`/`.Wait()`, and reserve `async void` for event handlers.",
+      "exerciseIds": [
+        "v3-e028",
+        "v3-e029",
+        "v3-e030"
+      ],
+      "reviewCardIds": [
+        "v3-c019",
+        "v3-c020"
+      ],
+      "references": [
+        {
+          "label": "Asynchronous programming with async and await (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/asynchronous-programming/"
+        },
+        {
+          "label": "Task.WhenAll (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/api/system.threading.tasks.task.whenall"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e028",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a handler that serialises independent work",
+      "conceptIds": [
+        "dotnet.async-await",
+        "dotnet.tasks"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A correct handler that is three times slower than it needs to be.",
+      "lessonId": "v3-l10",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "The dashboard endpoint takes about 300 ms. Each of the three calls takes about 100 ms and none of them uses another's result.\n\n```csharp\npublic async Task<Dashboard> LoadAsync(string ownerId, CancellationToken ct)\n{\n    var open     = await _tickets.CountOpenAsync(ownerId, ct);\n    var breached = await _tickets.CountBreachedAsync(ownerId, ct);\n    var recent   = await _tickets.RecentAsync(ownerId, ct);\n\n    return new Dashboard(open, breached, recent);\n}\n```\n\nThe code is correct. What should change, and what would the new timing be?",
+      "hints": [
+        "Look at whether any call needs a value produced by an earlier one.",
+        "None of them do, so awaiting each in turn imposes an ordering the work does not require.",
+        "Start all three without awaiting, then await them together with `Task.WhenAll`; the total becomes roughly the slowest call rather than the sum."
+      ],
+      "solution": {
+        "modelAnswer": "The three calls are independent, but each `await` suspends the method until that call finishes, so they run one after another and the durations add up. Start them all first and then await together:\n\n```csharp\nvar openTask     = _tickets.CountOpenAsync(ownerId, ct);\nvar breachedTask = _tickets.CountBreachedAsync(ownerId, ct);\nvar recentTask   = _tickets.RecentAsync(ownerId, ct);\n\nawait Task.WhenAll(openTask, breachedTask, recentTask);\n\nreturn new Dashboard(await openTask, await breachedTask, await recentTask);\n```\n\nThe three now overlap, so the endpoint takes roughly 100 ms — the slowest call — rather than 300 ms.",
+        "explanationMarkdown": "This defect is so common because the sequential version is what anyone writes by reflex, it is completely correct, and nothing in the code looks wrong. The tell is structural rather than syntactic: several `await`s in a row where no later call consumes an earlier result. Note the second detail in the fix — after `WhenAll`, each task is already complete, so `await openTask` returns immediately and is simply how you retrieve the value. Awaiting the tasks individually *without* the `WhenAll` would also work and would also be concurrent, since the work started at the point of the call; `WhenAll` mainly makes the intent explicit and handles the failure semantics in one place."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "fan-out-with-whenall",
+            "textMarkdown": "The calls are independent, so start all three and await `Task.WhenAll`; the endpoint then takes roughly 100 ms instead of 300 ms.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Several consecutive awaits where no later call uses an earlier result is the structural signal for fan-out."
+          },
+          {
+            "id": "use-result",
+            "textMarkdown": "Replace the awaits with `.Result` so the calls do not suspend the method between steps.",
+            "correct": false,
+            "explanationMarkdown": "That blocks a thread per call and risks deadlock, and it would still run the three calls one after another — slower, not faster."
+          },
+          {
+            "id": "configure-await",
+            "textMarkdown": "Add `.ConfigureAwait(false)` to each await, which allows the calls to overlap.",
+            "correct": false,
+            "explanationMarkdown": "`ConfigureAwait(false)` controls which context the continuation resumes on. It does not start any work earlier, so the calls remain sequential."
+          },
+          {
+            "id": "parallel-foreach",
+            "textMarkdown": "Use `Parallel.ForEach` over the three operations to run them on separate threads.",
+            "correct": false,
+            "explanationMarkdown": "`Parallel.ForEach` is for CPU-bound work over a collection. These are I/O-bound calls that already release their thread while waiting; `WhenAll` is the right tool."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.async-await",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e029",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Determine the outcome of a WhenAll",
+      "conceptIds": [
+        "dotnet.tasks",
+        "dotnet.async-exceptions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Implement the precedence rules that decide how a combined await completes.",
+      "lessonId": "v3-l10",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "When several tasks are awaited together, the combined result has to reduce many outcomes to one. Implement that rule.\n\nImplement `whenAllOutcome(tasks)` where each task is `{ id, state }` and `state` is `\"completed\"`, `\"faulted\"` or `\"canceled\"`.\n\nReturn:\n\n- `\"faulted:<id>\"` using the id of the **first** faulted task in the array, if any task faulted. A fault takes precedence over a cancellation, because a fault means something went wrong rather than merely being abandoned.\n- otherwise `\"canceled\"` if any task was canceled\n- otherwise `\"completed\"`\n- and `\"completed\"` for an empty array, since nothing failed.\n\nDo not modify the input.",
+      "hints": [
+        "The precedence is fixed: faults beat cancellations, cancellations beat success — so decide in that order rather than reporting whatever you meet first while scanning.",
+        "You need the FIRST faulted task specifically, so scan for faults across the whole array before you consider cancellations.",
+        "Make one pass looking for a fault and return immediately if found; make a second pass (or record a flag during the first) for cancellation; otherwise return completed."
+      ],
+      "solution": {
+        "code": "function whenAllOutcome(tasks) {\n  for (const task of tasks) {\n    if (task.state === 'faulted') {\n      return 'faulted:' + task.id;\n    }\n  }\n  for (const task of tasks) {\n    if (task.state === 'canceled') {\n      return 'canceled';\n    }\n  }\n  return 'completed';\n}",
+        "explanationMarkdown": "The precedence encodes a real judgement: a cancellation means nobody wanted the result any more, whereas a fault means something is broken, and the broken thing is the more important news. .NET follows the same priority — `Task.WhenAll` surfaces a fault ahead of a cancellation, and awaiting it rethrows the first exception while the task itself holds all of them in an `AggregateException`. That last detail is why the id matters here: awaiting gives you one exception, so if several tasks failed you will only see one of them in a log unless you inspect the aggregate deliberately. Scanning for faults across the whole array before considering cancellation is what makes the precedence work regardless of the order the tasks happen to appear in."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "whenAllOutcome",
+        "starterCode": "function whenAllOutcome(tasks) {\n  // Reports whatever non-completed state it meets first.\n  for (const task of tasks) {\n    if (task.state !== 'completed') {\n      return task.state;\n    }\n  }\n  return 'completed';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "all-completed",
+            "args": [
+              [
+                {
+                  "id": "a",
+                  "state": "completed"
+                },
+                {
+                  "id": "b",
+                  "state": "completed"
+                }
+              ]
+            ],
+            "expected": "completed",
+            "hidden": false
+          },
+          {
+            "id": "single-fault-names-the-task",
+            "args": [
+              [
+                {
+                  "id": "a",
+                  "state": "completed"
+                },
+                {
+                  "id": "b",
+                  "state": "faulted"
+                }
+              ]
+            ],
+            "expected": "faulted:b",
+            "hidden": false
+          },
+          {
+            "id": "fault-beats-earlier-cancellation",
+            "args": [
+              [
+                {
+                  "id": "a",
+                  "state": "canceled"
+                },
+                {
+                  "id": "b",
+                  "state": "faulted"
+                }
+              ]
+            ],
+            "expected": "faulted:b",
+            "hidden": false
+          },
+          {
+            "id": "first-fault-wins",
+            "args": [
+              [
+                {
+                  "id": "a",
+                  "state": "faulted"
+                },
+                {
+                  "id": "b",
+                  "state": "faulted"
+                }
+              ]
+            ],
+            "expected": "faulted:a",
+            "hidden": false
+          },
+          {
+            "id": "cancellation-when-nothing-faulted",
+            "args": [
+              [
+                {
+                  "id": "a",
+                  "state": "completed"
+                },
+                {
+                  "id": "b",
+                  "state": "canceled"
+                }
+              ]
+            ],
+            "expected": "canceled",
+            "hidden": false
+          },
+          {
+            "id": "empty-set-completes",
+            "args": [
+              []
+            ],
+            "expected": "completed",
+            "hidden": true
+          },
+          {
+            "id": "fault-last-still-wins",
+            "args": [
+              [
+                {
+                  "id": "a",
+                  "state": "canceled"
+                },
+                {
+                  "id": "b",
+                  "state": "completed"
+                },
+                {
+                  "id": "c",
+                  "state": "faulted"
+                }
+              ]
+            ],
+            "expected": "faulted:c",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.tasks",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e030",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain the risk of async void",
+      "conceptIds": [
+        "dotnet.async-await"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Weigh a change that made a checkout endpoint faster by no longer waiting for its outcome.",
+      "lessonId": "v3-l10",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "A colleague changes `public async Task SendReceiptAsync(...)` to `public async void SendReceipt(...)` so that callers \"do not have to await it\", and reports that checkout now feels faster.\n\nExplain what the caller loses, what happens if the method throws, and what the right way to start work you do not want to wait for would be.",
+      "hints": [
+        "Start from what the caller receives back, and what it can therefore do.",
+        "There is no task, so there is nothing to await, nothing to inspect for completion, and nothing to wrap in a try/catch from the caller's side.",
+        "For genuine fire-and-forget, the work still needs somewhere to be observed — a queued job or a hosted background service with its own logging and retry, which is exactly what mission M08 builds."
+      ],
+      "solution": {
+        "modelAnswer": "`async void` returns nothing, so the caller has no handle at all: it cannot await completion, cannot know whether the receipt was sent, and cannot catch failures, because a `try`/`catch` around the call returns before the asynchronous part runs. An exception thrown inside an `async void` method is not stored on any task — it is raised on the synchronization context, which in a typical ASP.NET Core application means an unhandled exception that can bring the process down rather than failing one request. Checkout feels faster only because it is no longer waiting to find out whether anything worked. If the receipt genuinely need not block the response, the work should be handed to something that can observe it: a queued job or a hosted background service that logs failures and can retry. `async void` is appropriate only for event handlers, where the framework's signature leaves no alternative.",
+        "explanationMarkdown": "The seductive part is that it does what was asked — the response really is faster. What has actually happened is that a failure mode was moved out of sight rather than removed, and the system now cannot tell a sent receipt from a silently lost one. This is the same reasoning V2 applies to background work: fire-and-forget is not a way of avoiding the reliability question, it is a decision to answer it somewhere else, and that somewhere else needs state, logging and a retry policy."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that `async void` returns no task, so the caller cannot await it or observe completion.",
+          "Explains that a caller's try/catch cannot catch the failure, because the call returns before the asynchronous work runs.",
+          "Says the exception is raised on the synchronization context rather than stored on a task, and can terminate the process.",
+          "Recognises that the apparent speed-up comes from no longer waiting to learn the outcome.",
+          "Proposes a real alternative for work that should not block the response — a queued job or hosted background service with logging and retry — and notes that event handlers are the legitimate use of `async void`."
+        ],
+        "modelAnswerMarkdown": "See the model answer: no task means no await, no completion signal and no catchable failure; the exception escapes to the context; genuine fire-and-forget needs a background worker that can observe and retry."
+      },
+      "primaryConceptId": "dotnet.async-await",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c019",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Sequential awaits against WhenAll",
+      "conceptIds": [
+        "dotnet.async-await"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the structural signal for concurrent fan-out.",
+      "lessonId": "v3-l10",
+      "type": "recall",
+      "promptMarkdown": "What pattern in a handler tells you the work should be fanned out with `Task.WhenAll`, and what pattern tells you it must stay sequential?",
+      "answerMarkdown": "Fan out when several `await`s appear in a row and no later call consumes a value produced by an earlier one — the durations are adding up for no reason. Keep it sequential when a later call needs an earlier result, such as using `ticket.CustomerId` to fetch the customer; that dependency is real and `WhenAll` would be wrong.",
+      "explanationMarkdown": "The test is data dependency, not syntax. Sequential `await` is what everyone writes by reflex, and it is correct — just needlessly slow when the calls are independent.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.async-await"
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c020",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why .Result is dangerous",
+      "conceptIds": [
+        "dotnet.tasks"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply blocking semantics to a request handler.",
+      "lessonId": "v3-l10",
+      "type": "debugging",
+      "promptMarkdown": "A method calls `SomethingAsync().Result` to avoid becoming `async`. What are the two costs, and what is the correct fix?",
+      "answerMarkdown": "First, it blocks a thread that would otherwise be released while waiting, so throughput falls under load. Second, in contexts with a synchronization context it can deadlock: the blocked thread is the one the continuation needs in order to finish. The fix is to make the method `async` and await properly, letting the change propagate up the call chain — which is normal, not a smell.",
+      "explanationMarkdown": "\"Async all the way\" exists because the halfway version is worse than either extreme. The deadlock is the dramatic failure; the wasted thread is the one that quietly limits how much traffic the service can take.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.tasks"
+    },
+    {
+      "kind": "lesson",
+      "id": "v3-l11",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Cancellation tokens",
+      "conceptIds": [
+        "dotnet.cancellation-tokens"
+      ],
+      "prerequisiteIds": [
+        "dotnet.async-await"
+      ],
+      "bodyMarkdown": "Cancellation in .NET is **cooperative**. Nothing is forcibly stopped; a token is passed around carrying a flag, and the work checks it and gives up voluntarily. That design makes cancellation safe — no operation is torn down halfway through — and it puts the responsibility on you to actually participate.\n\nA `CancellationTokenSource` owns the decision and produces a `CancellationToken` that observers hold. ASP.NET Core hands you one per request as `HttpContext.RequestAborted`, already wired to fire when the client disconnects. Accepting a `CancellationToken` parameter — conventionally last, conventionally named `ct` or `cancellationToken` — and passing it to every call you make is the whole discipline.\n\nAnd it is a chain. If a handler receives a token, passes it to a service, and that service calls the database **without** it, then everything below that point is uncancellable. The chain is only as good as its weakest link, and nothing warns you: the code compiles, the tests pass, and the only symptom is a server still executing a query for a request that was abandoned two minutes ago. Under load that is how a queue of dead work builds up.\n\nParticipating takes two forms. Library calls that accept a token handle it for you. Your own loops must check: `ct.ThrowIfCancellationRequested()` at the top of each iteration is the idiomatic form, and `ct.IsCancellationRequested` is available when you want to exit cleanly rather than throw.\n\nCancellation surfaces as an `OperationCanceledException` (or its subclass `TaskCanceledException`). Treat it as **expected** rather than as an error: a cancelled request should not appear in your logs as a 500, and a `catch (Exception)` that swallows it will convert a clean cancellation into confusing behaviour. Catch it explicitly, before any general handler, and return a suitable response — or let it propagate, since the framework already understands it.\n\nOne subtlety worth knowing: `CancellationToken.None` means \"this can never be cancelled\". Passing it to satisfy a signature is how a chain gets silently broken, so it deserves a comment whenever it appears.",
+      "chapterId": "v3-ch04",
+      "sortOrder": 1,
+      "objectives": [
+        "Trace a cancellation token through a call chain and find the layer that drops it.",
+        "Participate in cancellation from your own loop with `ThrowIfCancellationRequested`.",
+        "Handle `OperationCanceledException` as an expected outcome rather than as a failure."
+      ],
+      "estimatedMinutes": 10,
+      "workedExampleMarkdown": "A chain that works, and the one-line change that breaks it.\n\n```csharp\n// Handler: the framework supplies a token tied to the client connection.\npublic async Task<IActionResult> Get(string id, CancellationToken ct)\n{\n    var view = await _service.LoadAsync(id, ct);\n    return Ok(view);\n}\n\n// Service: forwards the token to everything it calls.\npublic async Task<TicketView> LoadAsync(string id, CancellationToken ct)\n{\n    var ticket = await _repo.GetAsync(id, ct);\n\n    foreach (var attachment in ticket.Attachments)\n    {\n        ct.ThrowIfCancellationRequested();     // our own loop participates\n        await _scanner.ScanAsync(attachment, ct);\n    }\n\n    return new TicketView(ticket);\n}\n\n// Repository: the break.\npublic Task<Ticket> GetAsync(string id, CancellationToken ct)\n{\n    return _db.Tickets.FirstAsync(t => t.Id == id);   // token NOT passed\n}\n```\n\nThe repository compiles, its tests pass, and it accepts a token it then ignores. Everything below it is uncancellable, so a client that disconnects leaves the query running to completion. The fix is one argument — `FirstAsync(t => t.Id == id, ct)` — and the reason it is worth hunting for is that nothing else will ever tell you.\n\nHandling it as an expected outcome:\n\n```csharp\ntry\n{\n    return Ok(await _service.LoadAsync(id, ct));\n}\ncatch (OperationCanceledException) when (ct.IsCancellationRequested)\n{\n    return StatusCode(499);   // client closed the request; not a server error\n}\n```",
+      "commonMistakes": [
+        "Accepting a `CancellationToken` and then not passing it on, which silently severs the chain below that method.",
+        "Passing `CancellationToken.None` to satisfy a signature, which permanently opts that call out of cancellation.",
+        "Writing a long-running loop that never checks the token, so cancellation cannot take effect until it finishes.",
+        "Catching `OperationCanceledException` in a general handler and logging it as a server error, when it is an expected outcome."
+      ],
+      "summaryMarkdown": "Cancellation is cooperative: a token carries the request and the work must check it. Accept a token, pass it to every call, and check it inside your own loops with `ThrowIfCancellationRequested`. A single method that drops the token makes everything below it uncancellable, silently. Treat `OperationCanceledException` as expected, not as a failure.",
+      "exerciseIds": [
+        "v3-e031",
+        "v3-e032",
+        "v3-e033"
+      ],
+      "reviewCardIds": [
+        "v3-c021",
+        "v3-c022"
+      ],
+      "references": [
+        {
+          "label": "Cancellation in managed threads (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads"
+        },
+        {
+          "label": "CancellationToken (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/api/system.threading.cancellationtoken"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e031",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a chain that accepts a token and ignores it",
+      "conceptIds": [
+        "dotnet.cancellation-tokens"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Find the layer that severs a cancellation chain.",
+      "lessonId": "v3-l11",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "Clients report that abandoning a slow export does not reduce database load. Every method accepts a token.\n\n```csharp\n// 1\npublic async Task<IActionResult> Export(string ownerId, CancellationToken ct)\n    => Ok(await _export.BuildAsync(ownerId, ct));\n\n// 2\npublic async Task<Report> BuildAsync(string ownerId, CancellationToken ct)\n{\n    var rows = await _repo.AllRowsAsync(ownerId, ct);\n    foreach (var row in rows)\n    {\n        ct.ThrowIfCancellationRequested();\n        Accumulate(row);\n    }\n    return Finish();\n}\n\n// 3\npublic Task<List<Row>> AllRowsAsync(string ownerId, CancellationToken ct)\n    => _db.Rows.Where(r => r.OwnerId == ownerId).ToListAsync();\n```\n\nWhich layer breaks the chain, and why does the loop's check not rescue it?",
+      "hints": [
+        "Check each call site for whether the token it received is actually handed on.",
+        "Method 3 accepts `ct` and then calls `ToListAsync()` without it — the parameter is present but unused.",
+        "The loop in method 2 can only check the token once `AllRowsAsync` has returned, and that is precisely the call that is taking all the time."
+      ],
+      "solution": {
+        "modelAnswer": "Method 3 breaks it: it accepts `ct` and then calls `ToListAsync()` without passing it, so the database query is uncancellable. The loop's `ThrowIfCancellationRequested` in method 2 does not help because it cannot run until `AllRowsAsync` has already completed — the expensive part is the query itself, and by the time control reaches the loop the work you wanted to abandon has been done. The fix is `ToListAsync(ct)`. Accepting a token you then ignore is worse than not accepting one, because the signature advertises a capability the method does not provide.",
+        "explanationMarkdown": "The important habit is checking call sites rather than signatures. Every method here looks cancellation-aware, and a reviewer scanning parameter lists would approve all three. The other lesson is about where a check can help: a token check placed after the slow operation is decoration, and the loop's check would only earn its place if `Accumulate` were itself slow across many rows. This is also a hint about the shape of streaming alternatives — `IAsyncEnumerable` with `WithCancellation` would let the loop begin before the whole result set is materialised, making the check meaningful."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "repo-drops-token",
+            "textMarkdown": "Method 3 accepts `ct` but calls `ToListAsync()` without it, so the query cannot be cancelled; the loop's check comes after that call has already finished.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The fix is `ToListAsync(ct)`, and the general rule is to inspect call sites rather than signatures."
+          },
+          {
+            "id": "handler-missing-token",
+            "textMarkdown": "Method 1 should create its own `CancellationTokenSource` rather than accepting a token from the framework.",
+            "correct": false,
+            "explanationMarkdown": "The framework-supplied token is already tied to the client connection, which is exactly what is wanted. Creating a new source would disconnect it from the client."
+          },
+          {
+            "id": "loop-check-wrong-place",
+            "textMarkdown": "`ThrowIfCancellationRequested` should be at the end of the loop body rather than the start.",
+            "correct": false,
+            "explanationMarkdown": "The position within the loop is immaterial here; the problem is that the loop is reached only after the slow, uncancellable query has completed."
+          },
+          {
+            "id": "needs-configureawait",
+            "textMarkdown": "The awaits need `.ConfigureAwait(false)` for the cancellation to propagate across layers.",
+            "correct": false,
+            "explanationMarkdown": "`ConfigureAwait` affects which context a continuation resumes on and has no bearing on whether a token reaches a call."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.cancellation-tokens",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e032",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Find the call that drops the token",
+      "conceptIds": [
+        "dotnet.cancellation-tokens"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Implement the check that locates a severed cancellation chain.",
+      "lessonId": "v3-l11",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "A cancellation chain is only as good as its weakest link. Implement a checker that finds the break.\n\nImplement `firstBrokenLink(chain)` where `chain` is an array of call layers in order, each `{ name, acceptsToken, forwardsToken }`.\n\nReturn the `name` of the first layer that breaks the chain, or `\"intact\"` if none does.\n\nA layer breaks the chain when:\n\n- it does not accept a token (`acceptsToken` is false) — nothing below it can be cancelled, **or**\n- it accepts a token but does not forward it (`forwardsToken` is false).\n\nThe **last** layer is the exception: it performs the actual work and has nothing to forward to, so it breaks the chain only if it does not accept a token. Its `forwardsToken` value is irrelevant.\n\nAn empty chain is `\"intact\"`.\n\nDo not modify the input.",
+      "hints": [
+        "Walk the chain in order and return at the first break — later breaks do not matter once the chain is already severed.",
+        "You need to know whether you are on the final layer, so track the index rather than using a plain for-of loop.",
+        "For every layer, a missing `acceptsToken` is a break; for all but the last, a false `forwardsToken` is also a break."
+      ],
+      "solution": {
+        "code": "function firstBrokenLink(chain) {\n  for (let i = 0; i < chain.length; i = i + 1) {\n    const layer = chain[i];\n    const isLast = i === chain.length - 1;\n    if (layer.acceptsToken !== true) {\n      return layer.name;\n    }\n    if (!isLast && layer.forwardsToken !== true) {\n      return layer.name;\n    }\n  }\n  return 'intact';\n}",
+        "explanationMarkdown": "Returning at the first break mirrors the real situation: once a layer stops passing the token, everything below it is uncancellable regardless of how carefully those layers were written. That is why a review that checks only the bottom layer proves nothing. The special case for the final layer is worth dwelling on — it is the one doing the actual I/O, so accepting the token is the whole of its obligation, and demanding that it forward one would be meaningless. In real code the equivalent question is whether the library call you are making has a token-accepting overload, and reaching for the one without it is precisely how these breaks are introduced."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "firstBrokenLink",
+        "starterCode": "function firstBrokenLink(chain) {\n  // Only inspects the final layer.\n  if (chain.length === 0) {\n    return 'intact';\n  }\n  const last = chain[chain.length - 1];\n  if (last.acceptsToken !== true) {\n    return last.name;\n  }\n  return 'intact';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "middle-layer-drops-it",
+            "args": [
+              [
+                {
+                  "name": "handler",
+                  "acceptsToken": true,
+                  "forwardsToken": true
+                },
+                {
+                  "name": "service",
+                  "acceptsToken": true,
+                  "forwardsToken": false
+                },
+                {
+                  "name": "repository",
+                  "acceptsToken": true,
+                  "forwardsToken": true
+                }
+              ]
+            ],
+            "expected": "service",
+            "hidden": false
+          },
+          {
+            "id": "fully-intact-chain",
+            "args": [
+              [
+                {
+                  "name": "handler",
+                  "acceptsToken": true,
+                  "forwardsToken": true
+                },
+                {
+                  "name": "service",
+                  "acceptsToken": true,
+                  "forwardsToken": true
+                },
+                {
+                  "name": "repository",
+                  "acceptsToken": true,
+                  "forwardsToken": false
+                }
+              ]
+            ],
+            "expected": "intact",
+            "hidden": false
+          },
+          {
+            "id": "layer-does-not-accept",
+            "args": [
+              [
+                {
+                  "name": "handler",
+                  "acceptsToken": true,
+                  "forwardsToken": true
+                },
+                {
+                  "name": "legacy",
+                  "acceptsToken": false,
+                  "forwardsToken": false
+                },
+                {
+                  "name": "repository",
+                  "acceptsToken": true,
+                  "forwardsToken": true
+                }
+              ]
+            ],
+            "expected": "legacy",
+            "hidden": false
+          },
+          {
+            "id": "last-layer-must-accept",
+            "args": [
+              [
+                {
+                  "name": "handler",
+                  "acceptsToken": true,
+                  "forwardsToken": true
+                },
+                {
+                  "name": "repository",
+                  "acceptsToken": false,
+                  "forwardsToken": false
+                }
+              ]
+            ],
+            "expected": "repository",
+            "hidden": false
+          },
+          {
+            "id": "first-break-wins",
+            "args": [
+              [
+                {
+                  "name": "handler",
+                  "acceptsToken": true,
+                  "forwardsToken": false
+                },
+                {
+                  "name": "service",
+                  "acceptsToken": false,
+                  "forwardsToken": false
+                }
+              ]
+            ],
+            "expected": "handler",
+            "hidden": false
+          },
+          {
+            "id": "empty-chain",
+            "args": [
+              []
+            ],
+            "expected": "intact",
+            "hidden": true
+          },
+          {
+            "id": "single-layer-that-accepts",
+            "args": [
+              [
+                {
+                  "name": "only",
+                  "acceptsToken": true,
+                  "forwardsToken": false
+                }
+              ]
+            ],
+            "expected": "intact",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.cancellation-tokens",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e033",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Classify a cancellation in a catch block",
+      "conceptIds": [
+        "dotnet.cancellation-tokens",
+        "dotnet.async-exceptions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Decide how an abandoned request should be reported.",
+      "lessonId": "v3-l11",
+      "sortOrder": 2,
+      "type": "choice",
+      "difficulty": "core",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "An export endpoint is wrapped in `catch (Exception ex) { _log.LogError(ex, \"export failed\"); return StatusCode(500); }`.\n\nSince a cancellation feature was added, the error dashboard shows hundreds of \"export failed\" entries every day, all from users who navigated away mid-export.\n\nWhat should change?",
+      "hints": [
+        "Ask what kind of event a client disconnecting actually is, from the server's point of view.",
+        "A cancellation the server itself requested — or that the client caused deliberately — is an expected outcome, not a fault.",
+        "Catch `OperationCanceledException` explicitly *before* the general handler, and respond without logging it as an error."
+      ],
+      "solution": {
+        "modelAnswer": "Add a specific `catch (OperationCanceledException) when (ct.IsCancellationRequested)` before the general handler, and have it return without logging an error.",
+        "explanationMarkdown": "A cancelled request is the system working as designed: the client stopped caring, the server stopped working, and nothing failed. Logging it as an error is actively harmful, because a dashboard full of expected events is one nobody reads — the genuine export failures are now hidden among hundreds of non-events. The `when (ct.IsCancellationRequested)` filter matters: an `OperationCanceledException` arising from something *other* than this request's token (an internal timeout, say) is a real problem and should still reach the general handler. Ordering matters too, since the first matching catch wins and a `catch (Exception)` placed first would swallow everything."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "catch-cancellation-first",
+            "textMarkdown": "Catch `OperationCanceledException` (filtered on the request's token) before the general handler, and return without logging an error.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A cancelled request is an expected outcome, and the filter keeps genuine internal timeouts flowing to the error path."
+          },
+          {
+            "id": "stop-passing-token",
+            "textMarkdown": "Stop passing the cancellation token, so the export always runs to completion and no exception is thrown.",
+            "correct": false,
+            "explanationMarkdown": "That removes the feature to silence its symptom, and returns the server to doing expensive work nobody is waiting for."
+          },
+          {
+            "id": "lower-log-level",
+            "textMarkdown": "Change the general handler to log at warning level instead of error.",
+            "correct": false,
+            "explanationMarkdown": "It reduces the noise a little but still records a non-event, and it lowers the severity of genuine export failures at the same time."
+          },
+          {
+            "id": "catch-in-service",
+            "textMarkdown": "Catch and swallow the exception inside the export service so it never reaches the handler.",
+            "correct": false,
+            "explanationMarkdown": "Swallowing it deep in the stack hides cancellation from the layer that must choose a response, and would also mask genuine cancellations that need cleanup."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.cancellation-tokens",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c021",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Cooperative cancellation",
+      "conceptIds": [
+        "dotnet.cancellation-tokens"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what a cancellation token does and does not do.",
+      "lessonId": "v3-l11",
+      "type": "recall",
+      "promptMarkdown": "What does cancelling a `CancellationToken` actually do to running work, and what must the work do to participate?",
+      "answerMarkdown": "Nothing is forcibly stopped — cancellation is cooperative. The token's flag is set, and running work must notice: library calls that were given the token handle it, and your own loops check with `ct.ThrowIfCancellationRequested()` or `ct.IsCancellationRequested`. Work that never checks, or that was called without the token, runs to completion regardless.",
+      "explanationMarkdown": "Cooperative cancellation is what makes it safe — no operation is torn down mid-write — and it is why forgetting to forward a token has no symptom other than work continuing.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.cancellation-tokens"
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c022",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The silently severed chain",
+      "conceptIds": [
+        "dotnet.cancellation-tokens"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply chain reasoning to a method that accepts a token.",
+      "lessonId": "v3-l11",
+      "type": "transfer",
+      "promptMarkdown": "Every method in a three-layer chain accepts a `CancellationToken`, yet abandoning the request changes nothing. Where do you look, and why is the signature not enough?",
+      "answerMarkdown": "Look at the call sites inside each method, not the parameter lists. A layer can accept a token and then call the next thing without passing it — `ToListAsync()` instead of `ToListAsync(ct)` — which makes everything below uncancellable. Accepting a token you ignore is worse than not accepting one, because the signature advertises a capability that is not delivered.",
+      "explanationMarkdown": "Reviewing signatures gives a false sense of coverage: all three methods look cancellation-aware. Grep for calls that have a token-accepting overload and are not using it.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.cancellation-tokens"
+    },
+    {
+      "kind": "lesson",
+      "id": "v3-l12",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Exceptions across async boundaries",
+      "conceptIds": [
+        "dotnet.async-exceptions"
+      ],
+      "prerequisiteIds": [
+        "dotnet.tasks"
+      ],
+      "bodyMarkdown": "An exception thrown inside an asynchronous method does not travel up the stack the way a synchronous one does. It is captured, stored on the `Task`, and rethrown when somebody awaits it. That indirection is the source of every surprise in this lesson.\n\n**If nothing awaits the task, nothing observes the exception.** The method failed, the failure is sitting on an object nobody looked at, and the program carries on. No log entry, no crash, no evidence. Starting a task and discarding the handle — the C# equivalent of a floating promise — is how work disappears silently. If you genuinely want fire-and-forget, you still have to observe the outcome somewhere, which in practice means a continuation that logs, or a background service that owns the work properly.\n\n**`Task.WhenAll` aggregates but rethrows one.** If three tasks fail, the returned task holds all three exceptions in an `AggregateException`, but `await` rethrows only the first. Log the aggregate deliberately — inspect `task.Exception` after the await, or catch and walk `InnerExceptions` — or you will fix one failure at a time across three deployments.\n\n**A `try` around a call that is not awaited catches nothing.** The call returns a task immediately, control leaves the `try` block, and the exception arrives later with no handler in scope. This is the mechanism behind the `async void` hazard from the first lesson, and it is worth being able to explain rather than merely avoid.\n\n**`OperationCanceledException` is not a failure.** Distinguish it from genuine faults when logging, as the previous lesson set out.\n\nOne more distinction that matters when reading stack traces: an exception thrown *before* the first `await` in an async method still propagates synchronously to the caller in some contexts, whereas everything after the first `await` is captured on the task. Argument validation is therefore often written before the first await deliberately, so bad arguments fail fast and loudly.",
+      "chapterId": "v3-ch04",
+      "sortOrder": 2,
+      "objectives": [
+        "Explain why an exception on a task nobody awaits is never observed.",
+        "Retrieve every failure from a `Task.WhenAll` rather than only the first.",
+        "Recognise that a `try` around an un-awaited call cannot catch its failure."
+      ],
+      "estimatedMinutes": 10,
+      "workedExampleMarkdown": "Three ways a failure can disappear, and the fix for each.\n\n```csharp\n// 1. Nobody awaits it: the exception is stored and never seen.\n_ = _mailer.SendReceiptAsync(order);        // fails silently, forever\n\n// Observe it deliberately if it must be fire-and-forget:\n_ = _mailer.SendReceiptAsync(order)\n    .ContinueWith(t => _log.LogError(t.Exception, \"receipt send failed\"),\n                  TaskContinuationOptions.OnlyOnFaulted);\n\n// 2. WhenAll: three failures, one rethrown.\nvar all = Task.WhenAll(a, b, c);\ntry\n{\n    await all;\n}\ncatch (Exception)\n{\n    // all.Exception holds every failure; the await surfaced only the first\n    foreach (var inner in all.Exception!.InnerExceptions)\n    {\n        _log.LogError(inner, \"batch member failed\");\n    }\n    throw;\n}\n\n// 3. A try around a call that is not awaited.\ntry\n{\n    _ = ProcessAsync(order);   // returns immediately; exception arrives later\n}\ncatch (Exception ex)\n{\n    // never reached\n}\n```\n\nThe second pattern is the one most worth adopting as a habit, because the failure mode is so plausible: a batch of ten uploads, three of them fail, you fix the first cause, redeploy, and discover the second. Capturing the aggregate turns three deployments into one.",
+      "commonMistakes": [
+        "Discarding a task handle with `_ =` and assuming failures will surface somewhere. Nothing observes them.",
+        "Treating the exception from `await Task.WhenAll(...)` as the only failure, when it is merely the first of possibly many.",
+        "Wrapping an un-awaited call in `try`/`catch` and believing it is protected.",
+        "Catching `Exception` around asynchronous work without excluding `OperationCanceledException`, so cancellations are reported as faults."
+      ],
+      "summaryMarkdown": "An async exception is stored on its task and rethrown on await, so a task nobody awaits fails invisibly. `Task.WhenAll` collects every exception but `await` rethrows only the first — inspect the aggregate. A `try` around an un-awaited call catches nothing. Validate arguments before the first `await` so bad input fails fast.",
+      "exerciseIds": [
+        "v3-e034",
+        "v3-e035",
+        "v3-e036"
+      ],
+      "reviewCardIds": [
+        "v3-c023",
+        "v3-c024"
+      ],
+      "references": [
+        {
+          "label": "Exception handling in async code (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/asynchronous-programming/async-scenarios"
+        },
+        {
+          "label": "AggregateException (Microsoft Learn)",
+          "url": "https://learn.microsoft.com/en-us/dotnet/api/system.aggregateexception"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e034",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a failure that leaves no trace",
+      "conceptIds": [
+        "dotnet.async-exceptions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Receipts that are never sent and never logged.",
+      "lessonId": "v3-l12",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "Some customers never receive a receipt. There are no errors in the logs at all — not even a warning.\n\n```csharp\npublic async Task<IActionResult> Checkout(OrderRequest request, CancellationToken ct)\n{\n    var order = await _orders.PlaceAsync(request, ct);\n\n    try\n    {\n        _ = _mailer.SendReceiptAsync(order, ct);\n    }\n    catch (Exception ex)\n    {\n        _log.LogError(ex, \"receipt failed\");\n    }\n\n    return Ok(order);\n}\n```\n\nExplain why a failure inside `SendReceiptAsync` produces no log entry whatsoever.",
+      "hints": [
+        "Consider what `SendReceiptAsync` returns at the moment it is called, and where execution goes next.",
+        "It returns a task almost immediately; control leaves the `try` block long before the sending work completes.",
+        "The exception is captured on the discarded task and, because nothing ever awaits it, nothing observes it — the `catch` was never in scope when it arrived."
+      ],
+      "solution": {
+        "modelAnswer": "`SendReceiptAsync` returns a task as soon as it hits its first await, so the `try` block completes immediately and the handler returns `Ok`. When the send later fails, the exception is captured and stored on that task — the one discarded with `_ =`. Nothing awaits it, so nothing ever observes the failure, and the `catch` block was out of scope long before it happened. Either await it (`await _mailer.SendReceiptAsync(order, ct);`), which makes the existing `catch` work, or, if the response should not wait, attach a faulted continuation that logs, or hand the work to a background service that owns retries and logging.",
+        "explanationMarkdown": "The `try`/`catch` is what makes this so convincing in review: someone thought about failure and wrote a handler, so the code looks defensive. It protects only the synchronous act of starting the task, which is essentially incapable of failing. This is the .NET counterpart of a floating promise, and it is quieter than the JavaScript version — Node at least prints an unhandled rejection warning by default, whereas here a task whose exception is never observed simply passes out of scope. The choice between awaiting and backgrounding is a real design decision: awaiting couples the customer's response time to the mail server, which is often why someone reached for fire-and-forget in the first place."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "discarded-task-never-observed",
+            "textMarkdown": "The call returns a task immediately and control leaves the `try`; the failure is stored on the discarded task, and because nothing awaits it, nothing ever observes it.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Await it so the existing catch applies, attach a faulted continuation that logs, or move the work to a background service."
+          },
+          {
+            "id": "catch-too-narrow",
+            "textMarkdown": "`catch (Exception)` does not catch exceptions raised inside asynchronous methods; a `catch (AggregateException)` is required.",
+            "correct": false,
+            "explanationMarkdown": "`await` rethrows the underlying exception, which `catch (Exception)` would catch perfectly well. The problem is that no await ever happens."
+          },
+          {
+            "id": "token-cancels-it",
+            "textMarkdown": "The cancellation token fires when the response is returned, cancelling the send silently.",
+            "correct": false,
+            "explanationMarkdown": "A plausible hazard for background work started with a request token, and worth knowing — but it would affect all receipts, not some, and the question states the send genuinely fails."
+          },
+          {
+            "id": "logger-not-flushed",
+            "textMarkdown": "The logger is not flushed before the request ends, so the entry is lost.",
+            "correct": false,
+            "explanationMarkdown": "No log call is ever made, so there is nothing to flush. The catch block does not execute."
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.async-exceptions",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e035",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Collect every unobserved failure",
+      "conceptIds": [
+        "dotnet.async-exceptions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Identify which failures would go unnoticed in a batch.",
+      "lessonId": "v3-l12",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "A failure is only visible if something observes it. Implement the check that finds the invisible ones.\n\nImplement `unobservedFailures(tasks)` where each task is `{ id, faulted, awaited }`.\n\nReturn an array of the ids of tasks that **faulted** but were never **awaited** — those failures leave no trace. Preserve the order the tasks appear in.\n\nA task that faulted and was awaited is observed, and a task that did not fault has nothing to observe, so neither belongs in the result. Return an empty array when every failure was observed.\n\nDo not modify the input.",
+      "hints": [
+        "Both conditions must hold for a task to qualify — it has to have failed AND to have been ignored.",
+        "Preserve input order, so build the result as you walk the array rather than sorting at the end.",
+        "For each task, include its id when `faulted` is true and `awaited` is false."
+      ],
+      "solution": {
+        "code": "function unobservedFailures(tasks) {\n  const out = [];\n  for (const task of tasks) {\n    if (task.faulted === true && task.awaited === false) {\n      out.push(task.id);\n    }\n  }\n  return out;\n}",
+        "explanationMarkdown": "The two-condition test is the whole idea: faulting is not what makes a failure dangerous, being unobserved is. A task that failed and was awaited produced an exception somebody had to handle; a task that failed and was discarded produced nothing at all. Writing it out makes the audit concrete — in a real codebase the equivalent search is for discarded task handles (`_ =`), `async void` methods, and calls whose result is never awaited, and each one is a place where a failure can vanish. The empty result is the healthy case, not an edge case."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "unobservedFailures",
+        "starterCode": "function unobservedFailures(tasks) {\n  // Reports every fault, whether or not it was observed.\n  const out = [];\n  for (const task of tasks) {\n    if (task.faulted === true) {\n      out.push(task.id);\n    }\n  }\n  return out;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "only-the-unawaited-fault",
+            "args": [
+              [
+                {
+                  "id": "mail",
+                  "faulted": true,
+                  "awaited": false
+                },
+                {
+                  "id": "audit",
+                  "faulted": true,
+                  "awaited": true
+                }
+              ]
+            ],
+            "expected": [
+              "mail"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "everything-observed",
+            "args": [
+              [
+                {
+                  "id": "mail",
+                  "faulted": true,
+                  "awaited": true
+                },
+                {
+                  "id": "audit",
+                  "faulted": false,
+                  "awaited": false
+                }
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "healthy-batch",
+            "args": [
+              [
+                {
+                  "id": "a",
+                  "faulted": false,
+                  "awaited": true
+                },
+                {
+                  "id": "b",
+                  "faulted": false,
+                  "awaited": true
+                }
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "several-invisible-failures-in-order",
+            "args": [
+              [
+                {
+                  "id": "b",
+                  "faulted": true,
+                  "awaited": false
+                },
+                {
+                  "id": "a",
+                  "faulted": true,
+                  "awaited": false
+                }
+              ]
+            ],
+            "expected": [
+              "b",
+              "a"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "unawaited-but-successful",
+            "args": [
+              [
+                {
+                  "id": "metrics",
+                  "faulted": false,
+                  "awaited": false
+                }
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "empty-batch",
+            "args": [
+              []
+            ],
+            "expected": [],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "dotnet.async-exceptions",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v3-e036",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain what await hides from a WhenAll",
+      "conceptIds": [
+        "dotnet.async-exceptions",
+        "dotnet.tasks"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Account for a batch whose failures were discovered one deployment at a time.",
+      "lessonId": "v3-l12",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "A nightly job uploads ten files with `await Task.WhenAll(uploads);` inside a `try`/`catch` that logs the exception. Over three consecutive nights the team fixes a credentials error, then a timeout, then a malformed-file error — each discovered only after the previous fix shipped.\n\nExplain why the failures appeared one at a time, and what the code should do instead.",
+      "hints": [
+        "Ask how many exceptions the combined task is holding, and how many the `await` hands to the catch block.",
+        "`await` rethrows the first exception only; the task itself retains all of them.",
+        "The task's `Exception` property is an `AggregateException` whose `InnerExceptions` holds every failure — log all of them rather than the one that surfaced."
+      ],
+      "solution": {
+        "modelAnswer": "All three uploads were failing on the first night. `Task.WhenAll` waits for every task and collects every exception into an `AggregateException` on the combined task — but `await` unwraps and rethrows only the first, so the catch block saw one failure and logged one failure. Fixing it merely revealed the next. The job should keep a reference to the combined task and inspect it: `var all = Task.WhenAll(uploads); try { await all; } catch { foreach (var inner in all.Exception!.InnerExceptions) _log.LogError(inner, \"upload failed\"); throw; }`. Better still for a batch where partial success is acceptable, await each upload individually and record a per-file outcome, so the report says which files succeeded and which failed and why — three nights of work becomes one.",
+        "explanationMarkdown": "This is a good illustration of an API making the common case pleasant at the cost of hiding information. Rethrowing a single exception is the right default, because most callers want one thing to catch and `AggregateException` is awkward to handle; the cost is that the other failures are still there and are simply not shown to you. The deeper design point is about batches generally: `WhenAll` gives you one all-or-nothing outcome, and when partial success is meaningful — as it is for ten independent uploads — a per-item result is a better model than an exception at all."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that all three failures occurred on the first night and were present simultaneously.",
+          "Explains that `Task.WhenAll` collects every exception into an `AggregateException` on the combined task.",
+          "Explains that `await` rethrows only the first exception, so the catch block saw one of several.",
+          "Gives a concrete fix: retain the combined task and log `Exception.InnerExceptions`, or await per-item and record individual outcomes.",
+          "Notes that for a batch where partial success is meaningful, per-item results are a better model than a single exception."
+        ],
+        "modelAnswerMarkdown": "See the model answer: all three failed at once; the aggregate held them all; `await` surfaced only the first; inspect the aggregate or track per-item outcomes."
+      },
+      "primaryConceptId": "dotnet.async-exceptions",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c023",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The unobserved exception",
+      "conceptIds": [
+        "dotnet.async-exceptions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall where an async exception goes before anyone awaits.",
+      "lessonId": "v3-l12",
+      "type": "recall",
+      "promptMarkdown": "Where does an exception thrown inside an async method go, and what happens if the task is never awaited?",
+      "answerMarkdown": "It is captured and stored on the `Task`, then rethrown when something awaits that task. If nothing ever awaits it — a discarded handle, or an `async void` method — nothing observes the exception and the failure leaves no trace at all: no log, no crash, no evidence.",
+      "explanationMarkdown": "This is the .NET form of a floating promise, and it is quieter than the JavaScript one. Audit for discarded task handles and `async void` methods; each is a place a failure can vanish.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.async-exceptions"
+    },
+    {
+      "kind": "review_card",
+      "id": "v3-c024",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "WhenAll shows you one failure",
+      "conceptIds": [
+        "dotnet.async-exceptions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply aggregate exception behaviour to a batch job.",
+      "lessonId": "v3-l12",
+      "type": "debugging",
+      "promptMarkdown": "Five parallel uploads fail. You `await Task.WhenAll(uploads)` inside a try/catch and log the exception. How many failures do you learn about, and how do you see the rest?",
+      "answerMarkdown": "One. The combined task holds all five in an `AggregateException`, but `await` unwraps and rethrows only the first. Keep a reference to the combined task and walk `all.Exception.InnerExceptions` in the catch, or await each upload individually and record a per-item outcome so partial success is reportable.",
+      "explanationMarkdown": "Otherwise you fix failures one deployment at a time. Where partial success is meaningful, per-item results are a better model than a single exception.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "dotnet.async-exceptions"
+    },
+    {
+      "kind": "assessment",
+      "id": "v3-a04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Asynchronous C# placement check",
+      "conceptIds": [
+        "dotnet.tasks",
+        "dotnet.async-await",
+        "dotnet.cancellation-tokens",
+        "dotnet.async-exceptions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items on fan-out, blocking, token propagation, unobserved failures and aggregate exceptions. Explanations appear after you submit.",
+      "chapterId": "v3-ch04",
+      "items": [
+        {
+          "id": "v3-a04-i1",
+          "objectiveIds": [
+            "dotnet.async-await"
+          ],
+          "critical": true,
+          "promptMarkdown": "Three independent 100 ms calls are each awaited in turn. What is the total time, and what would `Task.WhenAll` give?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "300-then-100",
+                "textMarkdown": "About 300 ms sequentially; about 100 ms with `Task.WhenAll`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Each `await` suspends until that call finishes, so independent durations add up; fanning out overlaps them."
+              },
+              {
+                "id": "100-either-way",
+                "textMarkdown": "About 100 ms either way — `await` already runs the calls concurrently.",
+                "correct": false,
+                "explanationMarkdown": "`await` suspends the method until the awaited call completes. The next call does not start until then."
+              },
+              {
+                "id": "300-either-way",
+                "textMarkdown": "About 300 ms either way; `WhenAll` only tidies the syntax.",
+                "correct": false,
+                "explanationMarkdown": "`WhenAll` awaits tasks that were all started before it, so the work genuinely overlaps."
+              },
+              {
+                "id": "depends-on-cores",
+                "textMarkdown": "It depends on core count, since three tasks need three cores.",
+                "correct": false,
+                "explanationMarkdown": "These are I/O-bound calls that release their thread while waiting; they do not each occupy a core."
+              }
+            ]
+          },
+          "explanationMarkdown": "Consecutive awaits where no later call uses an earlier result is the structural signal for fan-out."
+        },
+        {
+          "id": "v3-a04-i2",
+          "objectiveIds": [
+            "dotnet.cancellation-tokens"
+          ],
+          "critical": true,
+          "promptMarkdown": "A repository method signature is `Task<List<Row>> AllAsync(string id, CancellationToken ct)` and its body calls `_db.Rows.Where(...).ToListAsync()`. What is the effect?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "query-uncancellable",
+                "textMarkdown": "The query cannot be cancelled — the token is accepted and then not passed on, so everything below this method is uncancellable.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Accepting a token you ignore advertises a capability the method does not provide."
+              },
+              {
+                "id": "compiler-warns",
+                "textMarkdown": "The compiler warns about the unused parameter, so it will be caught at build time.",
+                "correct": false,
+                "explanationMarkdown": "An unused parameter produces no error and generally no warning here, which is exactly why this defect survives."
+              },
+              {
+                "id": "ambient-token",
+                "textMarkdown": "It still works — EF Core picks up the ambient request token automatically.",
+                "correct": false,
+                "explanationMarkdown": "There is no ambient token. A token reaches a call only by being passed as an argument."
+              },
+              {
+                "id": "throws-at-runtime",
+                "textMarkdown": "It throws at run time, because a token-accepting method must forward its token.",
+                "correct": false,
+                "explanationMarkdown": "Nothing enforces forwarding. The silence is the whole problem."
+              }
+            ]
+          },
+          "explanationMarkdown": "Review call sites, not signatures — every layer in a broken chain can look cancellation-aware."
+        },
+        {
+          "id": "v3-a04-i3",
+          "objectiveIds": [
+            "dotnet.async-exceptions"
+          ],
+          "critical": true,
+          "promptMarkdown": "`try { _ = SendAsync(order); } catch (Exception ex) { Log(ex); }`. `SendAsync` fails. What is logged?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "nothing-logged",
+                "textMarkdown": "Nothing. The call returns a task immediately, control leaves the `try`, and the failure is stored on a task nobody awaits.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The catch only ever protected the synchronous act of starting the task."
+              },
+              {
+                "id": "aggregate-logged",
+                "textMarkdown": "An `AggregateException` wrapping the real failure.",
+                "correct": false,
+                "explanationMarkdown": "That shape appears when blocking on a task with `.Result` or `.Wait()`. Here the catch is never reached at all."
+              },
+              {
+                "id": "original-logged",
+                "textMarkdown": "The original exception, because `catch (Exception)` catches everything in scope.",
+                "correct": false,
+                "explanationMarkdown": "It catches everything thrown *while the try block is executing*. The failure happens after control has left it."
+              },
+              {
+                "id": "process-crashes",
+                "textMarkdown": "Nothing is logged and the process terminates on the unobserved exception.",
+                "correct": false,
+                "explanationMarkdown": "Modern .NET does not terminate on unobserved task exceptions — which is precisely why the failure is invisible rather than loud."
+              }
+            ]
+          },
+          "explanationMarkdown": "A `try` around an un-awaited call is one of the most convincing-looking defects in async C#."
+        },
+        {
+          "id": "v3-a04-i4",
+          "objectiveIds": [
+            "dotnet.async-exceptions",
+            "dotnet.tasks"
+          ],
+          "critical": false,
+          "promptMarkdown": "Four tasks awaited via `Task.WhenAll` all fail. How many exceptions does the `catch` block receive from the `await`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "one-of-four",
+                "textMarkdown": "One — `await` rethrows the first, while the combined task retains all four in an `AggregateException`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Inspect `task.Exception.InnerExceptions` to see the rest, or track per-item outcomes."
+              },
+              {
+                "id": "all-four-aggregate",
+                "textMarkdown": "Four, delivered as an `AggregateException` containing all of them.",
+                "correct": false,
+                "explanationMarkdown": "That is what the task holds, but `await` deliberately unwraps and rethrows only the first for the caller's convenience."
+              },
+              {
+                "id": "none",
+                "textMarkdown": "None — `WhenAll` completes successfully and records failures on the individual tasks.",
+                "correct": false,
+                "explanationMarkdown": "`WhenAll` faults when any of its tasks fault, so the await does throw."
+              },
+              {
+                "id": "first-two",
+                "textMarkdown": "Two — the first and last failures are surfaced, the middle ones are dropped.",
+                "correct": false,
+                "explanationMarkdown": "There is no such rule. Exactly one is rethrown, and none are dropped from the aggregate."
+              }
+            ]
+          },
+          "explanationMarkdown": "Otherwise you discover a batch's failures one deployment at a time."
+        },
+        {
+          "id": "v3-a04-i5",
+          "objectiveIds": [
+            "dotnet.tasks"
+          ],
+          "critical": false,
+          "promptMarkdown": "Why is `async void` unsuitable for a method that sends a receipt?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "no-handle-no-catch",
+                "textMarkdown": "It returns no task, so the caller cannot await completion or catch failures, and its exception is raised on the synchronization context.",
+                "correct": true,
+                "explanationMarkdown": "Correct. `async void` is for event handlers, where the framework's signature leaves no alternative."
+              },
+              {
+                "id": "slower",
+                "textMarkdown": "It is slower, because the compiler cannot optimise a void-returning state machine.",
+                "correct": false,
+                "explanationMarkdown": "Performance is not the issue; if anything it appears faster, because nothing waits to learn the outcome."
+              },
+              {
+                "id": "cannot-use-await",
+                "textMarkdown": "You cannot use `await` inside an `async void` method.",
+                "correct": false,
+                "explanationMarkdown": "You can. The problem is entirely on the caller's side, which has nothing to await in turn."
+              },
+              {
+                "id": "not-allowed",
+                "textMarkdown": "The compiler rejects `async void` outside event handlers.",
+                "correct": false,
+                "explanationMarkdown": "It compiles anywhere. The restriction is a convention precisely because the language does not enforce it."
+              }
+            ]
+          },
+          "explanationMarkdown": "Work that should not block a response still needs somewhere its outcome is observed."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

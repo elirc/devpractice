@@ -1,0 +1,47 @@
+{
+  "packageId": "devpractice-v2",
+  "packageVersion": "2.0.0",
+  "title": "DevPractice V2 — deeper Node.js and production practice",
+  "baseReleaseId": null,
+  "chapterFiles": [
+    "chapters/v1-ch01.json",
+    "chapters/v1-ch02.json",
+    "chapters/v1-ch03.json",
+    "chapters/v1-ch04.json",
+    "chapters/v1-ch05.json",
+    "chapters/v1-ch06.json",
+    "chapters/v1-ch07.json",
+    "chapters/v1-ch08.json",
+    "chapters/v1-ch09.json",
+    "chapters/v1-ch10.json",
+    "chapters/v1-ch11.json",
+    "chapters/v1-ch12.json",
+    "chapters/v2-ch13.json",
+    "chapters/v2-ch14.json",
+    "chapters/v2-ch15.json",
+    "chapters/v2-ch16.json",
+    "chapters/v2-ch17.json",
+    "chapters/v2-ch18.json",
+    "chapters/v2-ch19.json",
+    "chapters/v2-ch20.json",
+    "chapters/v1-missions.json",
+    "chapters/v2-missions.json"
+  ],
+  "assets": [
+    {
+      "id": "m01-starter-v1",
+      "path": "projects/m01-support-desk-web/starter",
+      "checksum": "sha256:be4f666e7c0a9b162cf886aad9eedbf568caef9ac1fd2b3778c0714855eaef61"
+    },
+    {
+      "id": "m02-starter-v1",
+      "path": "projects/m02-support-desk-api/starter",
+      "checksum": "sha256:454b850b07e6d0d58b398fc872625e261db9fdc9a1e33cad1fd8d44efad6fb9d"
+    },
+    {
+      "id": "m03-starter-v1",
+      "path": "projects/m03-ownership-defect/starter",
+      "checksum": "sha256:7fe4eb16d34a5a08dbcb0abde2654354d3ddf069cbf5bd167fdd90025c2ee377"
+    }
+  ]
+}

@@ -1,0 +1,937 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v3-ch09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Testing a .NET service",
+      "conceptIds": ["test.xunit", "test.aspnet-integration", "test.database-regression"],
+      "prerequisiteIds": ["test.boundary-cases", "test.mirroring-implementation", "test.database-backed"],
+      "objectiveIds": ["test.xunit", "test.aspnet-integration", "test.database-regression"],
+      "trackId": "v1-track",
+      "sortOrder": 28,
+      "lessonIds": ["v3-l25", "v3-l26", "v3-l27"],
+      "assessmentId": "v3-a09",
+      "missionIds": [],
+      "bodyMarkdown": "Larkspur's .NET service needs the same thing the Node one needed: tests that fail when the behaviour is wrong and pass when it is right. That sounds obvious until you notice how many tests achieve neither.\n\nV1 chapter 12 made the case that a test mirroring the implementation proves nothing — change the code and the test changes with it, so it can never disagree. That argument is unchanged here. What changes is the machinery: xUnit instead of Vitest, `WebApplicationFactory` instead of a supertest client, a real PostgreSQL database instead of a real PostgreSQL database. (That last one is not a typo. It was the right answer in Node and it is the right answer here.)\n\nThe chapter moves outward. Unit tests first, on the pure decision logic where exhaustive cases are cheap. Then integration tests that exercise the actual pipeline — routing, model binding, authorization, serialisation — because that pipeline is where a surprising share of real defects live, and no unit test can see it. Then the regression test: the one you write *after* a defect, whose entire job is to fail on the old code.\n\nOne warning worth having up front, because it cost this very project several hours. Tests that share a database are not independent. Two suites truncating the same tables produced failures that looked exactly like logic bugs and were not — and the cost of that confusion was far higher than the cost of giving each suite its own database would have been."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l25",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Unit tests with xUnit",
+      "conceptIds": ["test.xunit"],
+      "prerequisiteIds": ["test.boundary-cases", "test.testable-functions"],
+      "chapterId": "v3-ch09",
+      "sortOrder": 0,
+      "objectives": [
+        "Write a Fact and a Theory and say when each is appropriate.",
+        "Choose boundary cases for a rule rather than restating the implementation.",
+        "Recognise a test that cannot fail because it mirrors the code under test."
+      ],
+      "estimatedMinutes": 17,
+      "bodyMarkdown": "xUnit has two attributes you need on day one.\n\n`[Fact]` is a test with no parameters — one scenario, asserted once:\n\n```csharp\npublic class TicketPolicyTests\n{\n    [Fact]\n    public void Owner_can_edit_an_open_ticket()\n    {\n        var decision = TicketPolicy.AuthorizeEdit(\n            new Agent(7, \"agent\"),\n            new Ticket { Id = 42, OwnerId = 7, Status = \"open\" });\n\n        Assert.Equal(EditDecision.Allow, decision);\n    }\n}\n```\n\n`[Theory]` is the same test run over several inputs, each supplied by an `[InlineData]`:\n\n```csharp\n[Theory]\n[InlineData(0, false)]\n[InlineData(1, true)]\n[InlineData(5, true)]\n[InlineData(6, false)]\npublic void Page_size_is_accepted_only_within_range(int size, bool expected)\n{\n    Assert.Equal(expected, Paging.IsAcceptable(size));\n}\n```\n\nThose four rows are not arbitrary. The rule is 1 to 5 inclusive, so the interesting values are the ones **either side of each edge**: 0 and 1 at the bottom, 5 and 6 at the top. That set catches `<` written where `<=` was meant, in both directions. Testing 3 proves almost nothing — no plausible mistake makes 3 fail.\n\nThat is the whole of boundary-case selection, and it is worth stating as a habit: **for each edge in the rule, test the last value that passes and the first that fails.**\n\nTwo structural things differ from Vitest and will bite once each.\n\nxUnit creates **a new instance of the test class for every test method**. Fields initialised in the constructor are therefore fresh per test — which is good isolation, and means a field cannot be used to share setup cost. When setup is genuinely expensive, that is what `IClassFixture<T>` is for: one instance shared across the class, with the sharing made explicit rather than accidental.\n\nAnd there is no `[SetUp]`/`[TearDown]`. The constructor is setup; implementing `IDisposable` is teardown.\n\n```csharp\npublic class TicketQueryTests : IDisposable\n{\n    private readonly SupportContext _db;\n\n    public TicketQueryTests() => _db = TestContext.Create();   // per test\n\n    public void Dispose() => _db.Dispose();\n}\n```\n\nFinally, the failure this lesson shares with V1 chapter 12: a test that restates the implementation. If the production code computes `total * 1.2m` and the test asserts `total * 1.2m`, the test agrees with the code by construction and will keep agreeing after the rate changes, after a typo, after anything. Assert the **expected value** — `Assert.Equal(120m, ...)` — because a literal is the only thing that can disagree with the code."
+      ,
+      "workedExampleMarkdown": "The same rule, tested badly and then well.\n\nThe production code:\n\n```csharp\npublic static class Paging\n{\n    public const int MaxPageSize = 50;\n\n    public static int Clamp(int requested) =>\n        requested < 1 ? 1 : requested > MaxPageSize ? MaxPageSize : requested;\n}\n```\n\n**A test that cannot fail:**\n\n```csharp\n[Theory]\n[InlineData(0)]\n[InlineData(75)]\npublic void Clamp_matches_the_rule(int requested)\n{\n    var expected = requested < 1 ? 1 : requested > Paging.MaxPageSize ? Paging.MaxPageSize : requested;\n    Assert.Equal(expected, Paging.Clamp(requested));\n}\n```\n\nThe expectation is the implementation, pasted. Change `>` to `>=` in both places and this still passes. It also silently follows `MaxPageSize` wherever it goes, so a wrong constant is invisible.\n\n**A test that can:**\n\n```csharp\n[Theory]\n[InlineData(0, 1)]      // below the floor\n[InlineData(1, 1)]      // the floor itself\n[InlineData(25, 25)]    // untouched in the middle\n[InlineData(50, 50)]    // the ceiling itself\n[InlineData(51, 50)]    // just above the ceiling\n[InlineData(-4, 1)]     // well below\npublic void Clamp_holds_the_boundaries(int requested, int expected)\n{\n    Assert.Equal(expected, Paging.Clamp(requested));\n}\n```\n\nEvery expectation is a literal, so the test knows the answer independently of the code. The pairs 0/1 and 50/51 pin both edges: swapping either comparison to its non-strict form now fails a row. And `[InlineData(50, 50)]` is not redundant with `[InlineData(51, 50)]` — one asserts the ceiling is *included*, the other that it is *enforced*, and a single off-by-one distinguishes them.\n\nWhat this does not test is more interesting than what it does: it says nothing about routing, model binding or whether the endpoint even calls `Clamp`. That is the next lesson's job.",
+      "commonMistakes": [
+        "Computing the expected value with the same expression the implementation uses, producing a test that agrees with any version of the code.",
+        "Testing only comfortable middle values — 3 for a 1-to-5 rule — where no realistic mistake shows up.",
+        "Testing one side of a boundary but not the other, so `<` versus `<=` is only half pinned.",
+        "Expecting fields to persist between test methods. xUnit constructs a new instance per test, which is isolation rather than a bug.",
+        "Reaching for `[Theory]` with a single `[InlineData]`, which is a `[Fact]` with extra syntax.",
+        "Asserting against a public constant (`Paging.MaxPageSize`) instead of a literal, so changing the constant silently changes what the test demands."
+      ],
+      "summaryMarkdown": "`[Fact]` is one scenario; `[Theory]` plus `[InlineData]` is one scenario over many inputs. Choose those inputs by edge: the last value that passes and the first that fails, on both sides of every boundary. Assert literals, never the implementation's own expression, because a test that recomputes the code can never disagree with it. And remember xUnit builds a fresh class instance per test — constructor for setup, `IDisposable` for teardown.",
+      "exerciseIds": ["v3-e901", "v3-e902", "v3-e903"],
+      "reviewCardIds": ["v3-c901", "v3-c902"],
+      "references": [
+        { "label": "xUnit — Getting started with .NET", "url": "https://xunit.net/docs/getting-started/v3/getting-started" },
+        { "label": "xUnit — Shared context between tests", "url": "https://xunit.net/docs/shared-context" },
+        { "label": "Microsoft — Unit testing best practices", "url": "https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-best-practices" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e901",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Fact or Theory?",
+      "conceptIds": ["test.xunit"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Choosing the right attribute for the shape of what you are checking.",
+      "lessonId": "v3-l25",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 5,
+      "primaryConceptId": "test.xunit",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "You are testing `Paging.Clamp(int)`, which clamps a requested page size to the range 1 to 50. You want to check six specific input/output pairs. Which is the appropriate xUnit structure?",
+      "hints": [
+        "The six checks differ only in their numbers. Ask whether that is one test or six.",
+        "`[Theory]` exists precisely for one assertion repeated over varying data.",
+        "Each `[InlineData]` becomes its own reported test case, so a single failing boundary is named individually in the output."
+      ],
+      "solution": {
+        "modelAnswer": "A single [Theory] with six [InlineData(requested, expected)] rows.",
+        "explanationMarkdown": "The six checks share one assertion and differ only in data, which is exactly what `[Theory]` plus `[InlineData]` expresses. Each row is reported as its own test case, so a failure names the specific boundary that broke rather than a single opaque failure. Six separate `[Fact]` methods would work but duplicate the assertion six times, and one `[Fact]` containing six asserts is worse still — the first failure hides the rest."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "theory-six-rows",
+            "textMarkdown": "One `[Theory]` with six `[InlineData(requested, expected)]` rows.",
+            "correct": true,
+            "explanationMarkdown": "Correct. One assertion, six data rows, each reported separately so a failure identifies which boundary broke."
+          },
+          {
+            "id": "six-facts",
+            "textMarkdown": "Six `[Fact]` methods, one per pair.",
+            "correct": false,
+            "explanationMarkdown": "It works, but duplicates the same assertion six times. Adding a seventh case means writing another whole method rather than one line."
+          },
+          {
+            "id": "one-fact-six-asserts",
+            "textMarkdown": "One `[Fact]` containing six `Assert.Equal` calls.",
+            "correct": false,
+            "explanationMarkdown": "The first failing assertion stops the method, so you never learn whether the other five also broke — and the report names one test rather than the case that failed."
+          },
+          {
+            "id": "theory-no-expected",
+            "textMarkdown": "One `[Theory]` with six `[InlineData(requested)]` rows, computing the expected value inside the test.",
+            "correct": false,
+            "explanationMarkdown": "Computing the expectation inside the test is how you end up restating the implementation, which produces a test that cannot disagree with the code."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e902",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose the boundary values",
+      "conceptIds": ["test.xunit", "test.boundary-cases"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Generating the inputs a Theory should carry. The selection rule, as a function.",
+      "lessonId": "v3-l25",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "primaryConceptId": "test.xunit",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Implement `boundaryValues(range)`, which produces the integers worth putting in `[InlineData]` rows for an inclusive numeric rule.\n\n```js\n{ min: 1, max: 5 }\n```\n\nFor each edge, the interesting values are the last one that fails and the first that passes at the bottom, and the last that passes and the first that fails at the top. So return, **sorted ascending with no duplicates**:\n\n`min - 1`, `min`, `max`, `max + 1`\n\nExamples:\n\n- `{ min: 1, max: 5 }` → `[0, 1, 5, 6]`\n- `{ min: 3, max: 3 }` → `[2, 3, 4]` (min and max coincide, so the duplicate collapses)\n\nIf `max` is less than `min` the rule is unsatisfiable and there are no meaningful boundaries: return an empty array.\n\nDo not modify the input.",
+      "hints": [
+        "Build the four candidate values first, then deal with the two things that can go wrong: duplicates, and an impossible range.",
+        "When `min` and `max` are equal, two of your four candidates are the same number — a `Set` collapses them.",
+        "Guard the unsatisfiable range before generating anything, and remember that JavaScript's default sort is lexicographic: `[10, 9].sort()` gives `[10, 9]`, so pass a numeric comparator."
+      ],
+      "solution": {
+        "code": "function boundaryValues(range) {\n  if (range.max < range.min) return [];\n  const candidates = [range.min - 1, range.min, range.max, range.max + 1];\n  const unique = Array.from(new Set(candidates));\n  return unique.sort((a, b) => a - b);\n}",
+        "explanationMarkdown": "The four candidates are the whole idea: each edge contributes the last value on one side and the first on the other, which is what pins a comparison so that `<` and `<=` cannot be swapped without a failure. Two details stop it being naive. When `min === max` the candidate list contains the same number twice, and a duplicated `[InlineData]` row is noise, so a `Set` collapses it. And the numeric comparator is not optional — JavaScript sorts numbers as strings by default, so a range spanning `9` and `10` would come out in the wrong order and the generated rows would read confusingly. Returning `[]` for an impossible range is the honest answer: if no value can satisfy the rule, there is no boundary to probe, and inventing rows would suggest otherwise."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "boundaryValues",
+        "starterCode": "function boundaryValues(range) {\n  // Both sides of both edges, deduplicated and in numeric order.\n  return [range.min, range.max];\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "simple-range",
+            "args": [{ "min": 1, "max": 5 }],
+            "expected": [0, 1, 5, 6],
+            "hidden": false
+          },
+          {
+            "id": "single-value-range-collapses",
+            "args": [{ "min": 3, "max": 3 }],
+            "expected": [2, 3, 4],
+            "hidden": false
+          },
+          {
+            "id": "numeric-sort-not-lexicographic",
+            "args": [{ "min": 9, "max": 10 }],
+            "expected": [8, 9, 10, 11],
+            "hidden": false
+          },
+          {
+            "id": "impossible-range",
+            "args": [{ "min": 5, "max": 1 }],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "range-crossing-zero",
+            "args": [{ "min": -2, "max": 2 }],
+            "expected": [-3, -2, 2, 3],
+            "hidden": false
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e903",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The test that agrees with anything",
+      "conceptIds": ["test.xunit", "test.mirroring-implementation"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Reading a passing test and working out what it would take to make it fail.",
+      "lessonId": "v3-l25",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "primaryConceptId": "test.mirroring-implementation",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Production code:\n\n```csharp\npublic static decimal WithTax(decimal net) => net * 1.2m;\n```\n\nThe test:\n\n```csharp\n[Theory]\n[InlineData(100)]\n[InlineData(250)]\npublic void WithTax_applies_the_rate(decimal net)\n{\n    Assert.Equal(net * 1.2m, Pricing.WithTax(net));\n}\n```\n\nThe tax rate is then changed to 1.25m in production by mistake — the real rate is still 20%. What does the test do, and why?",
+      "hints": [
+        "Write out what both sides of the assertion evaluate to after the change.",
+        "The expected value is computed with the same expression the code uses — except it is not quite the same expression any more.",
+        "Look carefully: the test hardcodes `1.2m` while the implementation now uses `1.25m`. Does that make the test catch the change, or is the deeper problem that it was never checking the rate at all?"
+      ],
+      "solution": {
+        "modelAnswer": "It fails — but only by accident. The real problem is that the expected value is computed rather than stated, so if the rate lived in a shared constant the test would follow it and never fail.",
+        "explanationMarkdown": "As written, the test does catch this particular change, because the literal `1.2m` in the test happens to be duplicated rather than shared. That is luck, not design. The pattern is still wrong: the expectation is an expression rather than a value, and the moment someone tidies it into `Assert.Equal(net * Pricing.Rate, ...)` — which looks like an improvement — the test starts recomputing whatever the code does and can never disagree with it. Asserting literals (`Assert.Equal(120m, Pricing.WithTax(100m))`) removes the possibility entirely: the test states the answer, so the code has something to be wrong about."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "fails-by-luck",
+            "textMarkdown": "It fails, but only because the test happens to duplicate the literal rather than share it — the pattern would stop working the moment the rate became a shared constant.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The test catches this change by accident. Computing the expectation is the defect; a refactor to reference a shared constant would silently disable it."
+          },
+          {
+            "id": "always-passes",
+            "textMarkdown": "It passes, because the expected value is recomputed from the implementation.",
+            "correct": false,
+            "explanationMarkdown": "Close to the right instinct, but read the code: the test hardcodes `1.2m` of its own, so after the change the two sides genuinely differ. The vulnerability is latent rather than active."
+          },
+          {
+            "id": "compile-error",
+            "textMarkdown": "It no longer compiles, because `decimal` literals cannot be used in `[InlineData]`.",
+            "correct": false,
+            "explanationMarkdown": "`[InlineData(100)]` with a `decimal` parameter is fine — the int is converted. There is a real subtlety around `decimal` in attributes, but it is not what this question turns on."
+          },
+          {
+            "id": "rounding",
+            "textMarkdown": "It fails intermittently, because decimal multiplication introduces rounding differences.",
+            "correct": false,
+            "explanationMarkdown": "`decimal` is exact for these values and the operation is deterministic — the same inputs give the same result every run. Nothing here is intermittent."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c901",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which values go in InlineData?",
+      "conceptIds": ["test.xunit"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the boundary-selection rule.",
+      "lessonId": "v3-l25",
+      "type": "recall",
+      "primaryConceptId": "test.xunit",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "A rule accepts page sizes from 1 to 50 inclusive. Which values belong in the `[InlineData]` rows, and why those?",
+      "answerMarkdown": "`0, 1, 50, 51` at minimum — for each edge, the last value that fails and the first that passes. Those four pin both comparisons, so swapping `<` for `<=` on either side fails a row. A middle value like `25` is worth one row as a sanity check, but it catches no realistic mistake on its own.",
+      "explanationMarkdown": "The rule generalises: test where behaviour *changes*, not where it is obviously stable. Most off-by-one defects are invisible everywhere except within one of the value of an edge."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c902",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "A fresh instance per test",
+      "conceptIds": ["test.xunit"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer: what xUnit's lifecycle implies for setup.",
+      "lessonId": "v3-l25",
+      "type": "transfer",
+      "primaryConceptId": "test.xunit",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "xUnit constructs a new instance of the test class for every test method. What does that mean for setup, teardown, and sharing something expensive?",
+      "answerMarkdown": "The **constructor is setup** and it runs per test; implementing **`IDisposable`** gives teardown. There is no `[SetUp]`/`[TearDown]`. Because instances are not reused, a field cannot carry state between tests — good isolation, but it also means an expensive resource would be rebuilt every time. Sharing it is done explicitly with `IClassFixture<T>` (one instance per test class) or a collection fixture (across classes).",
+      "explanationMarkdown": "The design makes accidental sharing impossible and deliberate sharing visible — which is the right default, since shared mutable state between tests is the usual source of order-dependent failures."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l26",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "API integration tests",
+      "conceptIds": ["test.aspnet-integration"],
+      "prerequisiteIds": ["test.database-backed", "aspnet.middleware"],
+      "chapterId": "v3-ch09",
+      "sortOrder": 1,
+      "objectives": [
+        "Exercise the real request pipeline with WebApplicationFactory.",
+        "Say which defects an integration test can catch that a unit test cannot.",
+        "Recognise substitutions that quietly remove the thing under test."
+      ],
+      "estimatedMinutes": 19,
+      "bodyMarkdown": "A unit test of a handler calls a method. A request to your API does considerably more: it is routed, its body is bound and validated, it passes through authentication and authorization middleware, the result is serialised, and a status code is chosen. Every one of those steps is a place defects live, and none of them is exercised by calling the method directly.\n\n`WebApplicationFactory<TProgram>` starts your actual application in memory and hands you an `HttpClient` that talks to it:\n\n```csharp\npublic class TicketApiTests : IClassFixture<WebApplicationFactory<Program>>\n{\n    private readonly HttpClient _client;\n\n    public TicketApiTests(WebApplicationFactory<Program> factory) =>\n        _client = factory.CreateClient();\n\n    [Fact]\n    public async Task Unknown_ticket_returns_404()\n    {\n        var response = await _client.GetAsync(\"/tickets/999999\");\n        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);\n    }\n}\n```\n\nNo port is bound and no network is used; the request goes through the real pipeline in-process. That is what makes these tests fast enough to run constantly while still being honest.\n\nThe defects they catch are exactly the ones unit tests structurally cannot see: a route that never matched, a model binder that silently left a property at its default, an `[Authorize]` that was never applied, a 500 that should have been a 400, a serialised property name the client does not expect, and middleware registered in the wrong order — the bug from D08 that makes every authenticated request look anonymous.\n\nCustomising the host is done by overriding services:\n\n```csharp\npublic class TestFactory : WebApplicationFactory<Program>\n{\n    protected override void ConfigureWebHost(IWebHostBuilder builder)\n    {\n        builder.ConfigureTestServices(services =>\n        {\n            services.RemoveAll<DbContextOptions<SupportContext>>();\n            services.AddDbContext<SupportContext>(o =>\n                o.UseNpgsql(TestDatabase.ConnectionString));\n\n            services.AddAuthentication(\"Test\")\n                    .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(\"Test\", _ => { });\n        });\n    }\n}\n```\n\nAnd here is where these tests are most often quietly ruined. **Every substitution removes something from the test.** Replacing the database with an in-memory provider removes the constraints, the transactions, and the SQL translation — which is to say, most of what chapter D06 and D07 were about. Replacing authentication with a handler that always succeeds removes the authorization checks, so the D08 ownership defect passes cleanly.\n\nThat does not make substitution wrong. The test-auth handler above is a reasonable trade: it lets a hundred tests avoid a real login while a handful of dedicated tests exercise the genuine scheme. What matters is doing it deliberately and knowing what you gave up. The one substitution not worth making is the database: point at a real, disposable PostgreSQL instance. The V1 platform's own suites do this, and it is the reason its foreign keys, unique constraints and transaction boundaries are actually tested rather than assumed.\n\nOne caution that this project learned expensively. Integration tests share process-level state — the database especially. Two suites truncating the same tables will produce failures that look precisely like logic bugs. Give each suite its own database, or run them strictly sequentially, and make that arrangement explicit rather than hoping."
+      ,
+      "workedExampleMarkdown": "One integration test that would have caught the D08 ownership defect, and the substitution that would have hidden it.\n\n**The test:**\n\n```csharp\n[Fact]\npublic async Task Agent_cannot_read_another_agents_ticket()\n{\n    await using var db = _factory.NewDbContext();\n    var mine     = await db.SeedTicketAsync(ownerId: 7, subject: \"Mine\");\n    var theirs   = await db.SeedTicketAsync(ownerId: 9, subject: \"Not mine\");\n\n    var client = _factory.CreateClientAs(agentId: 7);\n\n    var ok = await client.GetAsync($\"/tickets/{mine.Id}\");\n    Assert.Equal(HttpStatusCode.OK, ok.StatusCode);\n\n    var refused = await client.GetAsync($\"/tickets/{theirs.Id}\");\n    Assert.Equal(HttpStatusCode.NotFound, refused.StatusCode);\n}\n```\n\nTwo assertions, and the pair is what matters. The first proves the endpoint works at all — without it, a handler that returns 404 for *everything* would pass the security assertion and look secure. The second proves the scope. A test that only checks the refusal is satisfied by a completely broken endpoint.\n\n**The substitution that hides it.** Suppose the test factory does this:\n\n```csharp\nservices.AddAuthentication(\"Test\")\n        .AddScheme<AuthenticationSchemeOptions, AlwaysAdminHandler>(\"Test\", _ => { });\n```\n\nEvery request now authenticates as an admin. Under the D08 rules an admin may see any ticket, so the second assertion's 404 never happens — and the test fails, which is at least loud. The worse variant is a handler that always authenticates as *agent 7*: then the test passes whether or not the endpoint scopes by owner, because ticket 9's owner is the only thing that differs and nothing checks it.\n\n**The database substitution.** Swap PostgreSQL for the in-memory provider and this test still passes — but the surrounding suite quietly stops testing the foreign key on `Comment.TicketId`, the unique constraint on `Ticket.Reference`, and every transaction boundary from D07. Those are precisely the invariants you added a database to enforce.",
+      "commonMistakes": [
+        "Asserting only the refusal and not the success, so an endpoint broken for everyone passes as 'secure'.",
+        "Replacing the real database with the in-memory provider, which removes constraints, transactions and SQL translation from every test in the suite.",
+        "Using a test authentication handler that always returns the same identity, so ownership scoping is never exercised.",
+        "Sharing one database between suites that truncate tables, producing order-dependent failures that read as logic bugs.",
+        "Creating a new `WebApplicationFactory` per test method instead of using `IClassFixture`, so the host is rebuilt for every case and the suite crawls.",
+        "Testing only the happy path, so the 400 and 404 branches — which are most of what the pipeline decides — are never exercised."
+      ],
+      "summaryMarkdown": "`WebApplicationFactory` runs the real pipeline in memory, which is the only way to test routing, binding, authorization, serialisation and middleware order. Every substitution you make removes something from the test, so make them deliberately: a test auth handler is usually a fair trade, an in-memory database usually is not. And assert both the allowed and the refused case, because a refusal-only test is satisfied by an endpoint that is broken for everybody.",
+      "exerciseIds": ["v3-e904", "v3-e905", "v3-e906"],
+      "reviewCardIds": ["v3-c903", "v3-c904"],
+      "references": [
+        { "label": "ASP.NET Core — Integration tests", "url": "https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests" },
+        { "label": "EF Core — Testing against your production database system", "url": "https://learn.microsoft.com/en-us/ef/core/testing/testing-with-the-database" },
+        { "label": "EF Core — Testing without your production database", "url": "https://learn.microsoft.com/en-us/ef/core/testing/testing-without-the-database" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e904",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The substitution that removed the test",
+      "conceptIds": ["test.aspnet-integration"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A green security test, and a factory that makes it meaningless.",
+      "lessonId": "v3-l26",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "primaryConceptId": "test.aspnet-integration",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "This test is intended to prove that an agent cannot read another agent's ticket.\n\n```csharp\n[Fact]\npublic async Task Agent_cannot_read_another_agents_ticket()\n{\n    var theirs = await SeedTicketAsync(ownerId: 9);\n    var response = await _client.GetAsync($\"/tickets/{theirs.Id}\");\n    Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);\n}\n```\n\nThe factory registers this:\n\n```csharp\nservices.AddAuthentication(\"Test\")\n        .AddScheme<AuthenticationSchemeOptions, NeverAuthenticatedHandler>(\"Test\", _ => { });\n```\n\nThe test passes. Why is it not evidence that ownership scoping works?",
+      "hints": [
+        "Ask what status code an unauthenticated request would receive, and whether the assertion can tell it apart from a scoped refusal.",
+        "If nothing ever authenticates, the request never reaches the ownership logic at all.",
+        "The test would pass identically against an endpoint with no ownership check whatsoever — and even against one that does not exist."
+      ],
+      "solution": {
+        "modelAnswer": "Nothing ever authenticates, so the request is rejected before reaching the handler. The test would pass against an endpoint with no ownership check at all.",
+        "explanationMarkdown": "With a handler that never authenticates, every request is anonymous and refused by the authorization middleware — so the ownership logic is never reached. The assertion sees a refusal and cannot tell which refusal it is. The same test would pass against a handler that returns every ticket to everyone, and against a route that was deleted. Two changes fix it: authenticate as a *specific* agent, and assert both halves — that agent 7 gets 200 for their own ticket and 404 for agent 9's. The success assertion is what proves the endpoint works at all, which is the part that makes the refusal meaningful."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "never-reaches-handler",
+            "textMarkdown": "Nothing authenticates, so the request is refused before the handler runs — the test would pass even with no ownership check at all.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The assertion cannot distinguish 'refused because unauthenticated' from 'refused because not yours', and only the first is happening."
+          },
+          {
+            "id": "seed-visible",
+            "textMarkdown": "The seeded ticket is not committed, so the endpoint genuinely cannot find it.",
+            "correct": false,
+            "explanationMarkdown": "Plausible in a different arrangement, but the seed helper commits. And even if it did not, the deeper problem — that nothing authenticates — would still make the assertion meaningless."
+          },
+          {
+            "id": "wrong-code",
+            "textMarkdown": "The correct status for an unauthenticated request is 401, so the assertion should fail rather than pass.",
+            "correct": false,
+            "explanationMarkdown": "A reasonable expectation, and it may well return 401 — in which case the test fails loudly, which is better. The question is why a *passing* run proves nothing, and that is because the handler is never reached either way."
+          },
+          {
+            "id": "needs-two-clients",
+            "textMarkdown": "A single `HttpClient` cannot represent two identities, so ownership can never be integration-tested.",
+            "correct": false,
+            "explanationMarkdown": "It can — create a client per identity, which is exactly the fix. The limitation described here is not real."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e905",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which layer catches it?",
+      "conceptIds": ["test.aspnet-integration"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Predicting where a specific defect would be caught.",
+      "lessonId": "v3-l26",
+      "sortOrder": 1,
+      "type": "predict-output",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "primaryConceptId": "test.aspnet-integration",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "A developer registers the middleware in this order:\n\n```csharp\napp.UseAuthorization();\napp.UseAuthentication();\n```\n\nThe handler methods themselves are correct and fully unit tested, with complete coverage of every branch.\n\nWhich kind of test catches this defect: a unit test of the handler, or an integration test through `WebApplicationFactory`? Answer with one word: `unit` or `integration`.",
+      "hints": [
+        "Ask what a unit test of the handler actually invokes — does the pipeline exist at all when a method is called directly?",
+        "The defect is not in any handler. It is in the arrangement of the application around them.",
+        "Only a test that sends a real request through the real pipeline can observe middleware ordering."
+      ],
+      "solution": {
+        "modelAnswer": "integration",
+        "explanationMarkdown": "A unit test calls the handler method directly, so no middleware runs at all — the pipeline it is misconfiguring simply is not part of the test. Every handler test can pass at 100% coverage while every real request returns 401. An integration test sends an actual request through the actual pipeline, so the reversed ordering shows up immediately as authenticated users being rejected. This is the clearest example of the category: defects in *composition* rather than in logic are invisible to unit tests by construction."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": { "trim": true, "collapseWhitespace": true, "caseSensitive": false },
+        "expected": "integration",
+        "acceptedAlternatives": ["an integration test", "integration test"]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e906",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Justify the substitutions",
+      "conceptIds": ["test.aspnet-integration"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written argument about a test factory. Two substitutions, and they are not equally defensible.",
+      "lessonId": "v3-l26",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "primaryConceptId": "test.aspnet-integration",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "A colleague's test factory makes two substitutions so the suite runs without external dependencies:\n\n```csharp\nservices.RemoveAll<DbContextOptions<SupportContext>>();\nservices.AddDbContext<SupportContext>(o => o.UseInMemoryDatabase(\"tests\"));\n\nservices.AddAuthentication(\"Test\")\n        .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(\"Test\", _ => { });\n```\n\nIn a few sentences: for **each** substitution, say what it removes from the tests and whether you would keep it. Name at least two specific defect types the database substitution would let through, and say what you would do instead.",
+      "hints": [
+        "For each substitution, ask what is no longer being exercised — what could now be wrong without any test noticing.",
+        "The in-memory provider is not a database: it has no foreign keys, no unique constraints, no transactions, and it does not translate LINQ to SQL.",
+        "The auth substitution removes a real login but keeps the authorization pipeline, provided the handler can represent different identities."
+      ],
+      "solution": {
+        "modelAnswer": "The auth substitution removes the real sign-in flow but keeps routing, middleware order and authorization checks, provided the handler can issue different identities — I would keep it for the bulk of the suite and cover the real cookie and bearer schemes in a few dedicated tests. The database substitution is different in kind: the in-memory provider enforces no foreign keys, no unique constraints and no transactions, and it never translates LINQ to SQL. So a missing FK on Comment.TicketId, a duplicate Ticket.Reference, a partial write from two SaveChanges calls, and an untranslatable query that would throw against PostgreSQL all pass silently. I would drop it and point the tests at a real disposable PostgreSQL database, giving each suite its own so they cannot truncate each other's fixtures.",
+        "explanationMarkdown": "The useful test for any substitution is: what class of defect can now exist without a single test noticing? A fake that removes incidental friction is usually fine; one that removes the component whose behaviour you are relying on is not."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Says what the auth substitution removes (the real sign-in flow) and what it retains (pipeline, middleware order, authorization decisions).",
+          "Accepts the auth substitution conditionally, noting it must be able to represent different identities and that the real schemes need dedicated coverage.",
+          "States that the in-memory provider enforces no constraints and no transactions and does not translate to SQL.",
+          "Names at least two concrete defect types the database substitution would let through, such as a violated foreign key or unique constraint, a partial write, or an untranslatable query.",
+          "Recommends a real disposable PostgreSQL database instead.",
+          "Mentions isolating suites so shared-database interference cannot produce phantom failures."
+        ],
+        "modelAnswerMarkdown": "**The authentication substitution — keep it, with conditions.** It removes only the real sign-in exchange: cookie issuance, token validation, the login endpoint. Everything that matters for most tests survives — routing, middleware ordering, `[Authorize]`, policy evaluation and the ownership checks that depend on the resolved identity. The condition is that `TestAuthHandler` must be able to issue *different* identities, because a handler that always authenticates as the same agent silently removes ownership scoping from every test. I would keep it for the bulk of the suite and write a handful of tests against the real cookie and bearer schemes so those are not entirely unexercised.\n\n**The database substitution — drop it.** The in-memory provider is not a database with a different address; it is a dictionary. It enforces no foreign keys, no unique constraints, no check constraints and no transactions, and it never translates LINQ into SQL. Concretely, all of these would pass in tests and fail in production:\n\n- a comment inserted against a non-existent `TicketId`, because there is no foreign key\n- a duplicate `Ticket.Reference`, because the unique index does not exist\n- a partial write from two `SaveChanges` calls, because there is nothing to roll back\n- a `Select` that PostgreSQL cannot translate, because nothing is being translated\n\nThose are precisely the invariants chapters D06 and D07 spent their time on.\n\n**What I would do instead.** Point the tests at a real, disposable PostgreSQL instance — a container, or a database created and dropped per run. Give each test suite **its own database** rather than sharing one, because suites that truncate shared tables produce order-dependent failures that look exactly like logic bugs and cost hours to diagnose."
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c903",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What only an integration test sees",
+      "conceptIds": ["test.aspnet-integration"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the category of defect unit tests cannot reach.",
+      "lessonId": "v3-l26",
+      "type": "recall",
+      "primaryConceptId": "test.aspnet-integration",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "Name four kinds of defect that an integration test through `WebApplicationFactory` can catch and a unit test of the handler cannot.",
+      "answerMarkdown": "Routing that never matches the URL; model binding that leaves a property at its default instead of failing; authorization that was never applied, or middleware registered in the wrong order; and serialisation producing property names or status codes the client does not expect. All of them live in the **composition** of the application rather than in any handler's logic, so calling the method directly cannot observe them.",
+      "explanationMarkdown": "The common thread is worth remembering: unit tests check the parts, integration tests check the wiring. A service can have complete branch coverage and still return 401 to every user, which is exactly the D08 middleware-ordering bug."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c904",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What did that fake remove?",
+      "conceptIds": ["test.aspnet-integration"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer: evaluating a substitution.",
+      "lessonId": "v3-l26",
+      "type": "transfer",
+      "primaryConceptId": "test.aspnet-integration",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "Before swapping a real component for a fake in an integration test, what single question should you ask?",
+      "answerMarkdown": "**What class of defect can now exist without any test noticing?** Every substitution removes something. A test auth handler removes the login exchange, which is usually a fair trade. An in-memory database removes foreign keys, unique constraints, transactions and SQL translation — which is most of what a database is for, so it is usually not.",
+      "explanationMarkdown": "Framing it as 'what did I stop testing' rather than 'is this fake convenient' turns an implicit decision into an explicit one, and it usually settles the database question immediately."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l27",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Database-backed regression tests",
+      "conceptIds": ["test.database-regression"],
+      "prerequisiteIds": ["test.database-backed", "test.failure-injection"],
+      "chapterId": "v3-ch09",
+      "sortOrder": 2,
+      "objectives": [
+        "Write a regression test that fails on the old code and passes on the fix.",
+        "Isolate tests that share a database so failures are real rather than interference.",
+        "Explain why a regression test is written before the fix, not after."
+      ],
+      "estimatedMinutes": 18,
+      "bodyMarkdown": "A regression test has one job: **fail on the old code**. If it has never done that, you do not know it tests the defect — you know it passes, which every test does at the moment you write it.\n\nSo the order matters, and it is the opposite of the tempting one:\n\n1. Reproduce the defect with a test. **Run it. Watch it fail.** Read the failure and confirm it fails *for the reason you think*, not because a fixture is missing.\n2. Fix the code.\n3. Run it again and watch it pass.\n\nWriting the test after the fix skips the only step that proves anything. A test written against already-correct code passes immediately, and a test that has only ever passed is indistinguishable from a test that asserts nothing — which, as this project discovered, is not a hypothetical: three tests here asserted behaviour they never exercised, including one whose route pattern never matched, so it 'verified' a network-failure path that had never once run.\n\nFor the D08 ownership defect, the regression test is the M03 test, in C#:\n\n```csharp\n[Fact]\npublic async Task Agent_cannot_read_another_agents_ticket()\n{\n    var mine   = await Seed.TicketAsync(_db, ownerId: 7);\n    var theirs = await Seed.TicketAsync(_db, ownerId: 9);\n\n    var client = _factory.CreateClientAs(agentId: 7);\n\n    Assert.Equal(HttpStatusCode.OK,       (await client.GetAsync($\"/tickets/{mine.Id}\")).StatusCode);\n    Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($\"/tickets/{theirs.Id}\")).StatusCode);\n}\n```\n\nAgainst the unscoped `FindAsync(id)` this fails on the second assertion — it returns 200. Against the scoped query it passes. It has earned its place.\n\nAnd it must cover **every affected endpoint**, not just the one in the bug report. The M03 defect appears on read, update and comment routes; a regression test covering only the read leaves the other two to be rediscovered.\n\nThe second half of this lesson is isolation, and it is the part people learn the hard way.\n\nTests that share a database are not independent. If two suites truncate the same tables, one suite's setup destroys another's fixtures, and the resulting failures look exactly like logic bugs. They move around between runs. They disappear when you run a single test. They come back in CI. Enormous amounts of time get spent debugging application code that was never wrong.\n\nThe fixes, in order of preference:\n\n- **A database per suite.** Cheap, complete, and it removes the failure mode rather than managing it.\n- **A transaction per test, rolled back at the end.** Elegant, but it cannot test anything that commits — which includes most of D07.\n- **Strictly sequential execution.** Works, and slow. Note that 'we run them with `&&`' is a convention, not a guarantee: anyone running two suites in parallel gets phantom failures back.\n\nAlso beware fixture id collisions *within* a shared database — two tests both seeding ticket `t-1` will interfere even without truncation. Generate unique ids, or scope every fixture to the test that owns it."
+      ,
+      "workedExampleMarkdown": "A real sequence, including the step that is usually skipped.\n\n**The report.** \"Closing a ticket sometimes leaves no audit row.\"\n\n**Step 1 — reproduce, and watch it fail.** The suspicion is D07's two-saves problem, so the test injects a failure between them:\n\n```csharp\n[Fact]\npublic async Task Closing_a_ticket_writes_an_audit_row_or_nothing()\n{\n    var ticket = await Seed.TicketAsync(_db, ownerId: 7, status: \"open\");\n\n    // Force the audit insert to fail: an oversized actor value violates the column length.\n    var actor = new string('x', 500);\n\n    await Assert.ThrowsAnyAsync<DbUpdateException>(\n        () => _service.CloseAsync(ticket.Id, actor));\n\n    // The invariant: status and audit must agree.\n    await using var fresh = _factory.NewDbContext();\n    var reloaded = await fresh.Tickets.SingleAsync(t => t.Id == ticket.Id);\n    var audits   = await fresh.AuditEntries.CountAsync(a => a.TicketId == ticket.Id);\n\n    Assert.Equal(\"open\", reloaded.Status);      // fails today: it is \"closed\"\n    Assert.Equal(0, audits);\n}\n```\n\nRun it. It fails on `Assert.Equal(\"open\", ...)` — the ticket is `closed` with no audit row. That failure is the proof that the test tests something.\n\nNote `_factory.NewDbContext()`: reading through a **fresh** context matters, because the original one still holds the modified entity in its change tracker and would report `closed` from memory regardless of what the database contains.\n\n**Step 2 — fix it.** Remove the intermediate `SaveChangesAsync` so the status update and the audit insert commit together.\n\n**Step 3 — run again.** It passes. The rollback restores `open`, and no audit row exists.\n\n**Then widen it.** The same two-save shape exists in `ReopenAsync` and `ReassignAsync`. The regression suite covers all three, because a defect found in one place is a report about a pattern, not about a line.",
+      "commonMistakes": [
+        "Writing the regression test after the fix, so it has never failed and cannot be known to test the defect.",
+        "Watching it fail but not reading *why* — a test failing because a fixture is missing proves nothing about the bug.",
+        "Covering only the endpoint named in the report and leaving the same defect on its siblings.",
+        "Asserting through the same context that performed the write, so the change tracker reports the in-memory value rather than what was committed.",
+        "Letting two suites share a database and truncate the same tables, then debugging application code to explain the interference.",
+        "Reusing fixed fixture ids across tests, so two tests collide even without truncation.",
+        "Deleting a regression test during a refactor because it looks redundant next to the unit tests."
+      ],
+      "summaryMarkdown": "A regression test that has never failed is not yet a regression test — reproduce first, watch it fail for the right reason, then fix. Cover every endpoint the defect touches, not just the reported one, and read committed state through a fresh context. Then keep the suites isolated: a database per suite removes an entire category of phantom failure that otherwise gets debugged as though it were a logic bug.",
+      "exerciseIds": ["v3-e907", "v3-e908", "v3-e909"],
+      "reviewCardIds": ["v3-c905", "v3-c906"],
+      "references": [
+        { "label": "EF Core — Testing against your production database system", "url": "https://learn.microsoft.com/en-us/ef/core/testing/testing-with-the-database" },
+        { "label": "xUnit — Shared context between tests", "url": "https://xunit.net/docs/shared-context" },
+        { "label": "Microsoft — Integration tests in ASP.NET Core", "url": "https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e907",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The test that passes in isolation",
+      "conceptIds": ["test.database-regression"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A failure that moves between runs and disappears when you investigate it.",
+      "lessonId": "v3-l27",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "primaryConceptId": "test.database-regression",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Two test classes, both against the same PostgreSQL database, each with this in its constructor:\n\n```csharp\npublic TicketQueryTests()\n{\n    _db = TestContext.Create();\n    _db.Database.ExecuteSqlRaw(\"TRUNCATE \\\"Tickets\\\", \\\"Comments\\\" CASCADE\");\n    Seed.Tickets(_db);\n}\n```\n\nRun on their own, both classes pass. Run together, between 3 and 14 tests fail, and a different set each time. Running any single failing test alone passes.\n\nWhat is happening, and which fix removes the failure mode rather than hiding it?",
+      "hints": [
+        "The symptom — a varying number of failures, all passing in isolation — points at interference rather than at logic.",
+        "xUnit runs different test classes in parallel by default. Both constructors truncate the same two tables.",
+        "One class's setup is deleting the other class's fixtures mid-test. Ask what would make that structurally impossible rather than merely less likely."
+      ],
+      "solution": {
+        "modelAnswer": "The two classes run in parallel and each truncates the shared tables, destroying the other's fixtures mid-run. The fix that removes the failure mode is a separate database per suite; disabling parallelism only hides it.",
+        "explanationMarkdown": "xUnit runs distinct test collections in parallel by default, so one class's `TRUNCATE` executes while the other's tests are running against rows it had just seeded. The varying failure count is the giveaway — timing decides how much overlap occurs — and running one test alone passes because nothing else is truncating. The strongest fix is a database per suite: the interference becomes impossible rather than merely unlikely. Disabling parallelism, or putting both classes in one collection, does work but preserves the coupling — anyone who later runs the suites concurrently gets the phantom failures back. This exact pattern cost the DevPractice project hours, with the interference initially diagnosed as application bugs."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "parallel-truncate",
+            "textMarkdown": "The classes run in parallel and each `TRUNCATE` destroys the other's fixtures; give each suite its own database.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A separate database removes the shared resource entirely, which is why it beats simply serialising the runs."
+          },
+          {
+            "id": "connection-pool",
+            "textMarkdown": "The connection pool is exhausted, so some tests get a stale connection with an uncommitted view of the data.",
+            "correct": false,
+            "explanationMarkdown": "Pool exhaustion surfaces as timeouts or connection errors, not as missing rows. And a pooled connection never carries another transaction's uncommitted state."
+          },
+          {
+            "id": "seed-race",
+            "textMarkdown": "`Seed.Tickets` uses fixed ids, so the second constructor's insert fails on a primary-key conflict.",
+            "correct": false,
+            "explanationMarkdown": "A key conflict would throw a visible exception in the constructor with a consistent message, not produce a varying number of assertion failures. Fixed ids are a real hazard, but not this symptom."
+          },
+          {
+            "id": "ef-cache",
+            "textMarkdown": "EF Core caches query results between contexts, so one class sees the other's stale data.",
+            "correct": false,
+            "explanationMarkdown": "There is no cross-context result cache. Change tracking is per-context and every query goes to the database."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e908",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Find the colliding fixtures",
+      "conceptIds": ["test.database-regression"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Auditing a suite for shared fixture ids before they cause a phantom failure.",
+      "lessonId": "v3-l27",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "primaryConceptId": "test.database-regression",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Tests that share a database must not share fixture ids. Implement `fixtureCollisions(tests)`.\n\nEach test declares the fixture ids it seeds:\n\n```js\n[\n  { name: \"reads_own_ticket\",   fixtureIds: [\"t-1\", \"t-2\"] },\n  { name: \"cannot_read_others\", fixtureIds: [\"t-2\"] }\n]\n```\n\nReturn the ids used by **more than one distinct test**, sorted alphabetically ascending.\n\n- An id repeated within a single test is not a collision — that test owns it.\n- Return an empty array when nothing collides.\n\nDo not modify the input.",
+      "hints": [
+        "You need to know, for each id, how many *different* tests use it — so build that mapping first, then filter it.",
+        "Deduplicate each test's own ids before counting, or a test listing the same id twice will look like a collision on its own.",
+        "A `Map` from id to a set or list of test names works well; afterwards keep the ids whose collection holds more than one name, then sort."
+      ],
+      "solution": {
+        "code": "function fixtureCollisions(tests) {\n  const owners = new Map();\n  for (const test of tests) {\n    const unique = new Set(test.fixtureIds);\n    for (const id of unique) {\n      const names = owners.get(id) ?? [];\n      names.push(test.name);\n      owners.set(id, names);\n    }\n  }\n\n  const collisions = [];\n  for (const [id, names] of owners) {\n    if (names.length > 1) collisions.push(id);\n  }\n  return collisions.sort();\n}",
+        "explanationMarkdown": "The per-test `Set` is the detail that makes this correct rather than nearly correct. Without it, a test that lists `t-1` twice — easy to do when fixtures are assembled from helpers — counts as two owners and is reported as colliding with itself, which sends someone hunting for a second test that does not exist. Counting *distinct owning tests* is the actual property: an id is dangerous precisely when two different tests both believe they control it, because whichever runs second overwrites or conflicts with the first. Sorting the output keeps the report stable between runs, which matters when it is used as a check — a set that reorders itself looks like a change when nothing has changed."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "fixtureCollisions",
+        "starterCode": "function fixtureCollisions(tests) {\n  // Which ids are claimed by more than one test?\n  return [];\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "one-shared-id",
+            "args": [
+              [
+                { "name": "reads_own_ticket", "fixtureIds": ["t-1", "t-2"] },
+                { "name": "cannot_read_others", "fixtureIds": ["t-2"] }
+              ]
+            ],
+            "expected": ["t-2"],
+            "hidden": false
+          },
+          {
+            "id": "no-collisions",
+            "args": [
+              [
+                { "name": "a", "fixtureIds": ["t-1"] },
+                { "name": "b", "fixtureIds": ["t-2"] }
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "repeat-within-one-test-is-fine",
+            "args": [[{ "name": "solo", "fixtureIds": ["t-1", "t-1", "t-1"] }]],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "several-collisions-sorted",
+            "args": [
+              [
+                { "name": "a", "fixtureIds": ["t-9", "t-1", "t-5"] },
+                { "name": "b", "fixtureIds": ["t-5", "t-9"] },
+                { "name": "c", "fixtureIds": ["t-1"] }
+              ]
+            ],
+            "expected": ["t-1", "t-5", "t-9"],
+            "hidden": false
+          },
+          {
+            "id": "empty-suite",
+            "args": [[]],
+            "expected": [],
+            "hidden": false
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e909",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Write the regression plan",
+      "conceptIds": ["test.database-regression"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written plan. A defect has been found; describe how you would pin it.",
+      "lessonId": "v3-l27",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "primaryConceptId": "test.database-regression",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "A security review finds that `GET /tickets/{id}` returns any ticket to any authenticated agent. Investigating, you discover `PATCH /tickets/{id}` and `POST /tickets/{id}/comments` have the same problem, while `GET /tickets` is correctly scoped.\n\nDescribe the regression tests you would write. Cover: what you would do **before** touching the production code and why; which endpoints the tests must cover; what each test asserts; and one thing about how you read the result back that would otherwise give a false pass.",
+      "hints": [
+        "The sequence matters more than the assertions. What must happen before the fix, and what does it prove that a post-fix test cannot?",
+        "The bug report names one endpoint; the investigation named three. A regression suite covering only the reported one leaves the rest to be rediscovered.",
+        "Each test needs both halves — the owner succeeding and the non-owner being refused — or an endpoint broken for everyone would pass. And reading back through the same context can report in-memory state rather than what was committed."
+      ],
+      "solution": {
+        "modelAnswer": "First, write the tests and run them against the unfixed code, confirming they fail and that they fail because the endpoint returns another agent's data rather than because a fixture is missing. Only then fix the code, and re-run to see them pass — a test that has never failed is not known to test anything. The tests must cover all three broken endpoints plus the already-correct list endpoint, so a future change cannot silently unscope it. Each test seeds a ticket owned by agent 7 and one owned by agent 9, authenticates as agent 7, and asserts both halves: 200 or 204 for their own ticket and 404 for the other, because a refusal-only assertion would also pass against an endpoint broken for everybody. It should also assert the same status code across all endpoints so the API does not become an existence oracle. Finally, read committed state back through a fresh DbContext — the context that performed the write still holds the modified entity in its change tracker and would report the in-memory value, giving a false pass.",
+        "explanationMarkdown": "The three ideas worth carrying: fail first or you have proved nothing; cover the pattern rather than the reported instance; and assert both the allowed and the refused case, because half a test is satisfied by a completely broken endpoint."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Writes and runs the tests against the unfixed code first, and states that a test which has never failed proves nothing.",
+          "Checks that the failure occurs for the intended reason rather than from a missing fixture or setup error.",
+          "Covers all three defective endpoints, not just the one in the report.",
+          "Includes the already-correct list endpoint so it cannot regress silently.",
+          "Asserts both halves — the owner succeeds and the non-owner is refused — explaining that a refusal-only test passes against a wholly broken endpoint.",
+          "Mentions consistent status codes across endpoints to avoid an existence oracle.",
+          "Reads committed state through a fresh DbContext rather than the one that performed the write."
+        ],
+        "modelAnswerMarkdown": "**Before touching the production code.** Write the tests and run them against the current build. They must fail, and I need to read each failure to confirm it fails *for the right reason* — `200` returned where `404` was expected, not a missing fixture or a 500 from a broken helper. This step is the entire value of a regression test: one written after the fix has never failed, and a test that has only ever passed is indistinguishable from one that asserts nothing.\n\n**Which endpoints.** All three that are broken — `GET /tickets/{id}`, `PATCH /tickets/{id}`, `POST /tickets/{id}/comments` — because the report describes a *pattern*, and fixing only the reported instance leaves the others to be found by someone less friendly. I would also cover `GET /tickets`, which is currently correct, so that a later refactor cannot quietly unscope it.\n\n**What each test asserts.** Seed one ticket owned by agent 7 and one owned by agent 9. Authenticate as agent 7. Then assert **both halves**: the endpoint succeeds for agent 7's own ticket, and returns 404 for agent 9's. The success assertion is not padding — without it, an endpoint that returns 404 to everybody passes the security check while being entirely broken. I would also assert the *same* status code across all three endpoints, since a 404 from one and a 403 from another lets an attacker distinguish a real id from a fake one.\n\n**The false pass to avoid.** Read the committed state back through a **fresh `DbContext`**. The context that performed the write still holds the modified entity in its change tracker, so querying it returns the in-memory value regardless of whether the transaction committed — a `PATCH` test that reloads through the same context can report success against a write that rolled back."
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c905",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why fail first?",
+      "conceptIds": ["test.database-regression"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the ordering that makes a regression test meaningful.",
+      "lessonId": "v3-l27",
+      "type": "recall",
+      "primaryConceptId": "test.database-regression",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "Why must a regression test be run against the unfixed code before the fix is applied?",
+      "answerMarkdown": "Because that failure is the only evidence the test actually detects the defect. A test written after the fix passes immediately and is indistinguishable from a test that asserts nothing — it may be checking the wrong endpoint, the wrong condition, or nothing at all. Watching it fail, **and reading why it failed**, proves it is wired to the behaviour in question.",
+      "explanationMarkdown": "The second half matters as much as the first: a test failing because a fixture is missing has failed without testing the bug. This is not theoretical — this project shipped three tests that asserted behaviour they never exercised, including one whose route pattern never matched."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c906",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Failures that move between runs",
+      "conceptIds": ["test.database-regression"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Debugging recall: reading a symptom as interference rather than logic.",
+      "lessonId": "v3-l27",
+      "type": "debugging",
+      "primaryConceptId": "test.database-regression",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "A suite fails a different number of tests on each run, and every failing test passes when run alone. What should you suspect first, and what is the strongest fix?",
+      "answerMarkdown": "Shared mutable state between tests — most often a shared database where setup truncates tables other tests are using, combined with parallel execution. Suspect interference before logic: a defect in the code would fail the same tests every time. The strongest fix is **a database per suite**, which makes the interference impossible; serialising the runs works but keeps the coupling, so anyone running the suites concurrently gets the phantom failures back.",
+      "explanationMarkdown": "The tell is the *variability*. Deterministic code plus deterministic tests produce deterministic results, so a moving failure set points at something shared and timing-dependent. Recognising that early saves debugging application code that was never wrong."
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v3-a09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Testing placement check",
+      "conceptIds": ["test.xunit", "test.aspnet-integration", "test.database-regression"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering chapter D09. Ask what each test could actually detect; no hints are shown until you submit.",
+      "chapterId": "v3-ch09",
+      "qualification": { "minimumCorrect": 4, "requireAllCritical": true },
+      "items": [
+        {
+          "id": "v3-a09-i1",
+          "objectiveIds": ["test.xunit"],
+          "critical": false,
+          "promptMarkdown": "A rule accepts quantities from 1 to 20 inclusive. Which `[InlineData]` set best pins it?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "boundaries",
+                "textMarkdown": "`0, 1, 20, 21`",
+                "correct": true,
+                "explanationMarkdown": "Correct. Both sides of both edges, so swapping `<` for `<=` in either comparison fails a row."
+              },
+              {
+                "id": "middles",
+                "textMarkdown": "`5, 10, 15`",
+                "correct": false,
+                "explanationMarkdown": "All comfortably inside the range. No realistic off-by-one changes the result for any of them, so the set cannot detect the most likely defect."
+              },
+              {
+                "id": "one-side",
+                "textMarkdown": "`1, 20`",
+                "correct": false,
+                "explanationMarkdown": "It confirms the endpoints are accepted but never checks that anything is rejected — widening the rule to 0-21 would still pass."
+              },
+              {
+                "id": "extremes",
+                "textMarkdown": "`-1000, 1000`",
+                "correct": false,
+                "explanationMarkdown": "Far outside the range, so they only exercise the obviously-wrong case. A boundary that is off by one still passes both."
+              }
+            ]
+          },
+          "explanationMarkdown": "Test where behaviour changes. Values far from an edge exercise nothing that is likely to be wrong."
+        },
+        {
+          "id": "v3-a09-i2",
+          "objectiveIds": ["test.aspnet-integration"],
+          "critical": true,
+          "promptMarkdown": "Every handler method has 100% branch coverage from unit tests. Which defect can still reach production?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "pipeline",
+                "textMarkdown": "`UseAuthorization()` registered before `UseAuthentication()`, so every authenticated request is rejected.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The defect is in how the application is composed, and a unit test never constructs the pipeline at all."
+              },
+              {
+                "id": "off-by-one",
+                "textMarkdown": "An off-by-one in a clamp function.",
+                "correct": false,
+                "explanationMarkdown": "That is squarely in a unit test's reach — if the branch is covered with boundary values, it is caught."
+              },
+              {
+                "id": "null-check",
+                "textMarkdown": "A missing null check inside a handler.",
+                "correct": false,
+                "explanationMarkdown": "A branch inside the method, so full branch coverage of that method exercises it."
+              },
+              {
+                "id": "wrong-message",
+                "textMarkdown": "An incorrect validation message returned by a handler.",
+                "correct": false,
+                "explanationMarkdown": "The handler returns it directly, so a unit test asserting the message catches it without any pipeline."
+              }
+            ]
+          },
+          "explanationMarkdown": "Unit tests check the parts; integration tests check the wiring. Coverage of the parts says nothing about the wiring."
+        },
+        {
+          "id": "v3-a09-i3",
+          "objectiveIds": ["test.aspnet-integration"],
+          "critical": true,
+          "promptMarkdown": "An integration suite swaps PostgreSQL for the EF Core in-memory provider. Which defect now passes the suite silently?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "constraint",
+                "textMarkdown": "A duplicate value inserted into a column with a unique index.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The in-memory provider enforces no unique constraints, so the insert succeeds in tests and fails in production."
+              },
+              {
+                "id": "null-ref",
+                "textMarkdown": "A `NullReferenceException` in a handler.",
+                "correct": false,
+                "explanationMarkdown": "That happens in C# before any provider is involved, and the test would fail identically either way."
+              },
+              {
+                "id": "bad-route",
+                "textMarkdown": "A route template that never matches.",
+                "correct": false,
+                "explanationMarkdown": "Routing is part of the pipeline, not the database provider. A 404 shows up regardless of which store is behind it."
+              },
+              {
+                "id": "wrong-status",
+                "textMarkdown": "A handler returning 200 where it should return 400.",
+                "correct": false,
+                "explanationMarkdown": "The status code is chosen by the handler and asserted directly; the provider has no bearing on it."
+              }
+            ]
+          },
+          "explanationMarkdown": "Every substitution removes something. The in-memory provider removes constraints, transactions and SQL translation."
+        },
+        {
+          "id": "v3-a09-i4",
+          "objectiveIds": ["test.database-regression"],
+          "critical": true,
+          "promptMarkdown": "A developer fixes a bug, then writes a test for it. The test passes. What is missing?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "never-failed",
+                "textMarkdown": "The test has never failed, so there is no evidence it detects the defect at all.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A test written against already-correct code passes immediately whether or not it asserts anything relevant."
+              },
+              {
+                "id": "coverage",
+                "textMarkdown": "Nothing is missing, provided the new test raises overall coverage.",
+                "correct": false,
+                "explanationMarkdown": "Coverage records which lines executed, not whether the assertions could ever fail. A test asserting nothing useful still adds coverage."
+              },
+              {
+                "id": "slow",
+                "textMarkdown": "The test should be a unit test rather than an integration test, for speed.",
+                "correct": false,
+                "explanationMarkdown": "Speed is a real consideration but unrelated. A fast test that has never failed is exactly as unproven as a slow one."
+              },
+              {
+                "id": "docs",
+                "textMarkdown": "The fix has not been documented in the changelog.",
+                "correct": false,
+                "explanationMarkdown": "Worth doing, but it says nothing about whether the test would catch a regression."
+              }
+            ]
+          },
+          "explanationMarkdown": "Reproduce first, watch it fail, then fix. Skipping the failure skips the only step that proves the test works."
+        },
+        {
+          "id": "v3-a09-i5",
+          "objectiveIds": ["test.database-regression"],
+          "critical": false,
+          "promptMarkdown": "A `PATCH` test writes through `_db`, then reloads the entity through the same `_db` and asserts the new value. It passes even when the transaction rolls back. Why?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "change-tracker",
+                "textMarkdown": "The context still holds the modified entity in its change tracker, so the reload returns the in-memory value rather than querying.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Identity resolution returns the tracked instance, and after a rollback the database and the tracker disagree. Read through a fresh context."
+              },
+              {
+                "id": "autocommit",
+                "textMarkdown": "EF Core auto-commits the change when the entity is re-read.",
+                "correct": false,
+                "explanationMarkdown": "Reading never writes. A rolled-back change is gone from the database and no query re-applies it."
+              },
+              {
+                "id": "isolation",
+                "textMarkdown": "The test's transaction isolation level makes uncommitted data visible to itself.",
+                "correct": false,
+                "explanationMarkdown": "A transaction does see its own uncommitted writes, but after a *rollback* there is nothing left to see. The stale value here comes from memory, not from the database."
+              },
+              {
+                "id": "cache",
+                "textMarkdown": "PostgreSQL caches the row and serves the pre-rollback version until the cache expires.",
+                "correct": false,
+                "explanationMarkdown": "A rollback removes the change; no database serves rolled-back data from a cache."
+              }
+            ]
+          },
+          "explanationMarkdown": "Asserting committed state requires a context that has not been party to the write."
+        }
+      ]
+    }
+  ]
+}

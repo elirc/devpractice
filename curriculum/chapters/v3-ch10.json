@@ -1,0 +1,1003 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v3-ch10",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Running it, and comparing the two stacks",
+      "conceptIds": [
+        "ops.dotnet-configuration",
+        "ops.dotnet-logging",
+        "dotnet.background-services",
+        "ops.dotnet-deployment",
+        "compare.node-vs-dotnet"
+      ],
+      "prerequisiteIds": ["ops.configuration", "ops.log-hygiene", "ops.deployment-order", "jobs.idempotency"],
+      "objectiveIds": [
+        "ops.dotnet-configuration",
+        "ops.dotnet-logging",
+        "dotnet.background-services",
+        "ops.dotnet-deployment",
+        "compare.node-vs-dotnet"
+      ],
+      "trackId": "v1-track",
+      "sortOrder": 29,
+      "lessonIds": ["v3-l28", "v3-l29", "v3-l30"],
+      "assessmentId": "v3-a10",
+      "missionIds": [],
+      "bodyMarkdown": "The last chapter of the track, and the one where the point of having built the same product twice becomes usable.\n\nFirst the operational surface: configuration, logging, background work and deployment. These are the parts that look like boilerplate in a tutorial and turn out to be where production incidents actually originate — a setting that resolved to the wrong layer, a log line carrying a token, a background job that stopped without telling anyone.\n\nThen the comparison. You have now built a ticket service in Node and in .NET, and the interesting question is not which is better. It is **where they differ in kind rather than in syntax**. Most of what you know transfers directly: HTTP is HTTP, a foreign key is a foreign key, a lost update is a lost update, and an unscoped query leaks data in both. Those are not framework facts, and recognising that is most of what senior judgement consists of.\n\nBut some differences are real. A .NET process is long-lived and multi-threaded, so in-memory state is shared across concurrent requests in a way a single-threaded Node process never forced you to think about. Dependency injection with explicit lifetimes makes a whole class of accidental sharing visible — and introduces its own failure, the captive dependency. Background work lives inside the same process rather than in a separate worker you deployed alongside.\n\nThe goal of the final lesson is to be able to say, about any given piece of a design, whether it changed because the platform changed or only because the syntax did — and to be right."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l28",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Configuration and logs",
+      "conceptIds": ["ops.dotnet-configuration", "ops.dotnet-logging"],
+      "prerequisiteIds": ["ops.configuration", "ops.log-hygiene", "ops.request-id"],
+      "chapterId": "v3-ch10",
+      "sortOrder": 0,
+      "objectives": [
+        "Predict which configuration source wins for a given key.",
+        "Keep secrets out of source, out of logs, and out of error responses.",
+        "Emit structured logs that let one request be traced afterwards."
+      ],
+      "estimatedMinutes": 18,
+      "bodyMarkdown": "Configuration in .NET is **layered**, and the whole model is that later sources override earlier ones for the same key. The default order a web host sets up is:\n\n1. `appsettings.json`\n2. `appsettings.{Environment}.json`\n3. User secrets (Development only)\n4. Environment variables\n5. Command-line arguments\n\nSo a value in `appsettings.json` is a default, and an environment variable of the same name replaces it. That is exactly what you want for deployment — the image carries sensible defaults, the environment supplies the specifics — and it is also the source of a specific confusion, because *nothing tells you which layer won*. A setting that looks wrong is usually a setting being overridden somewhere you did not look, and the fix is to ask the configuration system rather than to reason about it.\n\nNested keys flatten with colons, and because colons are not portable in environment variable names, double underscores work too:\n\n```\nConnectionStrings:Support   ->   ConnectionStrings__Support\n```\n\nBind whole sections to typed options rather than reading loose strings:\n\n```csharp\npublic class SupportOptions\n{\n    public int PageSize { get; set; } = 25;\n    public string QueueName { get; set; } = \"tickets\";\n}\n\nbuilder.Services.Configure<SupportOptions>(builder.Configuration.GetSection(\"Support\"));\n```\n\nTyped options give you one place to see what is configurable, and a validation hook (`ValidateOnStart`) that turns a missing required setting into a startup failure instead of a `NullReferenceException` at 3am on the one code path that reads it.\n\n**Secrets** follow one rule with no exceptions: they never live in source control. `appsettings.json` is committed, so it holds no passwords. Development uses user secrets, which live outside the repository; production uses environment variables or a secret store. And note that anything reaching a client bundle is public by definition — the V1 platform's configuration contract says exactly this, and it did not stop being true because the language changed.\n\n**Logging** is structured, and the distinction that matters is between a formatted string and a message template:\n\n```csharp\n// string interpolation: the values are gone, baked into text\n_logger.LogInformation($\"Closed ticket {ticketId} for agent {agentId}\");\n\n// message template: ticketId and agentId survive as queryable fields\n_logger.LogInformation(\"Closed ticket {TicketId} for agent {AgentId}\", ticketId, agentId);\n```\n\nThe second lets you later ask 'every event for ticket 42' and get an answer. The first produces a sentence you can only grep.\n\nLog levels are a contract with whoever is on call. `Debug` for development detail, `Information` for events worth seeing in production, `Warning` for something recoverable that should not be routine, `Error` for a failed operation, `Critical` for the process being unable to continue. Logging every request at `Information` and every handled validation failure at `Error` produces a stream nobody reads, which is the same as having no logs.\n\nAnd what must never be logged: passwords, tokens, session cookies, CSRF tokens, connection strings, full request bodies by default, and anything a user typed that you have no business retaining. Correlate with a **request id** instead — ASP.NET Core supplies `HttpContext.TraceIdentifier`, and `ILogger` scopes attach it to every line the request produces, which is what turns a pile of log lines into a story you can follow."
+      ,
+      "workedExampleMarkdown": "A setting that is 'not working', diagnosed properly.\n\n`appsettings.json`:\n\n```json\n{ \"Support\": { \"PageSize\": 25 } }\n```\n\n`appsettings.Production.json`:\n\n```json\n{ \"Support\": { \"PageSize\": 50 } }\n```\n\nand the deployment sets `Support__PageSize=10`.\n\nSomeone edits `appsettings.Production.json` to `100`, deploys, and the page size stays at 10. Reasoning about it produces theories about caching. Asking the configuration system produces the answer:\n\n```csharp\napp.MapGet(\"/debug/config\", (IConfiguration config) =>\n{\n    var root = (IConfigurationRoot)config;\n    return Results.Text(root.GetDebugView());   // every key, and which provider supplied it\n});\n```\n\n`GetDebugView()` prints each key with the winning provider, and the environment variable is plainly above the JSON file. (Guard an endpoint like that behind an admin policy, or keep it to a startup log line — it prints configuration, some of which is sensitive.)\n\nNow logging the same operation, badly and well:\n\n```csharp\n// bad: interpolated, over-levelled, and leaking\n_logger.LogError($\"Closing ticket {ticketId} with token {accessToken} for {user.Email}\");\n```\n\nThree faults in one line. `Error` for a routine success trains everyone to ignore errors; the interpolation destroys the fields; and it writes a token and an email address into a log that is retained for months and read by people who do not need either.\n\n```csharp\nusing (_logger.BeginScope(new Dictionary<string, object>\n       {\n           [\"RequestId\"] = context.TraceIdentifier,\n           [\"AgentId\"]   = agentId\n       }))\n{\n    _logger.LogInformation(\"Closing ticket {TicketId}\", ticketId);\n    // ...\n    _logger.LogInformation(\"Closed ticket {TicketId} in {ElapsedMs}ms\", ticketId, elapsed);\n}\n```\n\nEvery line inside the scope carries the request id and the agent id, the values stay queryable, the level matches the significance, and nothing secret is written down. Given a support ticket that says 'it failed at about 2pm', that is the difference between an answer and a shrug.",
+      "commonMistakes": [
+        "Editing `appsettings.Production.json` and not realising an environment variable of the same key overrides it.",
+        "Committing a connection string with a password to `appsettings.json` because it 'only points at staging'.",
+        "Using string interpolation in a log call, which destroys the structured fields and leaves only text.",
+        "Logging handled validation failures at `Error`, until nobody trusts the error stream.",
+        "Writing tokens, cookies or whole request bodies into logs that are retained far longer than anyone expects.",
+        "Reading configuration with `config[\"Support:PageSize\"]` scattered through the code instead of binding typed options once.",
+        "Exposing a configuration debug endpoint without protecting it, which publishes exactly the settings you were careful about."
+      ],
+      "summaryMarkdown": "Configuration is layered and later sources win, so a setting that looks wrong is usually being overridden — ask `GetDebugView()` rather than reasoning. Bind typed options and validate them at startup. Keep secrets out of the repository entirely. Log with message templates so fields survive, pick levels that mean something to whoever is paged, attach a request id via a scope, and never write down a token.",
+      "exerciseIds": ["v3-e1001", "v3-e1002", "v3-e1003"],
+      "reviewCardIds": ["v3-c1001", "v3-c1002"],
+      "references": [
+        { "label": ".NET — Configuration", "url": "https://learn.microsoft.com/en-us/dotnet/core/extensions/configuration" },
+        { "label": "ASP.NET Core — Safe storage of app secrets in development", "url": "https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets" },
+        { "label": ".NET — Logging and log message templates", "url": "https://learn.microsoft.com/en-us/dotnet/core/extensions/logging" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e1001",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which layer wins?",
+      "conceptIds": ["ops.dotnet-configuration"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Establishing precedence before debugging anything that depends on it.",
+      "lessonId": "v3-l28",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 5,
+      "primaryConceptId": "ops.dotnet-configuration",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "In Production, `Support:PageSize` is set in three places:\n\n- `appsettings.json` → `25`\n- `appsettings.Production.json` → `50`\n- environment variable `Support__PageSize` → `10`\n\nWhat value does the application read?",
+      "hints": [
+        "The sources form an ordered chain, and a later one replaces an earlier one for the same key.",
+        "Environment-specific JSON is loaded after the base JSON — so it beats 25.",
+        "Environment variables are added after both JSON files, precisely so a deployment can override what the image ships with."
+      ],
+      "solution": {
+        "modelAnswer": "10 — the environment variable, because it is added last.",
+        "explanationMarkdown": "The default chain is `appsettings.json`, then `appsettings.{Environment}.json`, then user secrets (Development only), then environment variables, then command-line arguments. Later sources override earlier ones for the same key, so `10` wins over both files. This is the intended design — the container image carries defaults, the deployment supplies the environment-specific value — but it is also why editing a JSON file and seeing no change is such a common confusion. `IConfigurationRoot.GetDebugView()` reports which provider supplied each key."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "ten",
+            "textMarkdown": "`10`, from the environment variable.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Environment variables are registered after both JSON files, so they take precedence."
+          },
+          {
+            "id": "fifty",
+            "textMarkdown": "`50`, from `appsettings.Production.json`, because environment-specific files are the most specific source.",
+            "correct": false,
+            "explanationMarkdown": "It is more specific than the base file and does override it — but the chain does not stop there, and environment variables are added afterwards."
+          },
+          {
+            "id": "twentyfive",
+            "textMarkdown": "`25`, from `appsettings.json`, since the base file establishes the value.",
+            "correct": false,
+            "explanationMarkdown": "The base file is the *default*, first in the chain and therefore the easiest to override. It only wins when nothing later defines the key."
+          },
+          {
+            "id": "throws",
+            "textMarkdown": "Startup throws, because the same key is defined by three providers.",
+            "correct": false,
+            "explanationMarkdown": "Multiple providers defining a key is the normal, intended case — that is what layering means. Nothing treats it as a conflict."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e1002",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Resolve a key across layers",
+      "conceptIds": ["ops.dotnet-configuration"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The precedence rule as a function — including the case that trips people up.",
+      "lessonId": "v3-l28",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "primaryConceptId": "ops.dotnet-configuration",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Implement `resolveConfig(layers, key)`.\n\n`layers` is ordered from **lowest to highest precedence** — the same order the host registers providers:\n\n```js\n[\n  { name: \"appsettings.json\", values: { \"Support:PageSize\": \"25\" } },\n  { name: \"environment\",      values: { \"Support:PageSize\": \"10\" } }\n]\n```\n\nReturn an object naming the winning value and where it came from:\n\n```js\n{ value: \"10\", source: \"environment\" }\n```\n\nRules:\n\n- The **last** layer that defines the key wins.\n- Return `null` when no layer defines it.\n- A layer that defines the key as an empty string **has** defined it. An explicit blank is a deliberate override — it must win over a lower layer, not fall through.\n\nDo not modify the input.",
+      "hints": [
+        "Precedence is positional: walking the layers in order and keeping the most recent hit gives you the winner without any comparison logic.",
+        "Report the source alongside the value — knowing *which* layer won is the thing that actually resolves configuration confusion.",
+        "Deciding whether a layer 'defines' the key by truthiness would treat an empty string as absent. Ask whether the key is present instead, with `Object.prototype.hasOwnProperty.call(layer.values, key)`."
+      ],
+      "solution": {
+        "code": "function resolveConfig(layers, key) {\n  let winner = null;\n  for (const layer of layers) {\n    if (Object.prototype.hasOwnProperty.call(layer.values, key)) {\n      winner = { value: layer.values[key], source: layer.name };\n    }\n  }\n  return winner;\n}",
+        "explanationMarkdown": "Walking low-to-high and overwriting means the last definition survives, which is precedence expressed directly rather than reconstructed from indices. Returning the `source` alongside the value is the part with real operational weight: 'the page size is 10' does not help anyone, while 'the page size is 10 and it came from the environment' immediately explains why editing the JSON file changed nothing.\n\nThe presence check is the subtle requirement. Testing `if (layer.values[key])` would treat an empty string as undefined and fall through to a lower layer — so a deployment that deliberately blanks a setting would silently get the committed default back, which is the opposite of what was asked for. `hasOwnProperty` distinguishes 'defined as empty' from 'not defined', and that distinction is exactly what an override needs."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "resolveConfig",
+        "starterCode": "function resolveConfig(layers, key) {\n  // The last layer that defines the key wins.\n  const first = layers[0];\n  if (!first) return null;\n  return { value: first.values[key], source: first.name };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "environment-overrides-json",
+            "args": [
+              [
+                { "name": "appsettings.json", "values": { "Support:PageSize": "25" } },
+                { "name": "environment", "values": { "Support:PageSize": "10" } }
+              ],
+              "Support:PageSize"
+            ],
+            "expected": { "value": "10", "source": "environment" },
+            "hidden": false
+          },
+          {
+            "id": "falls-back-to-base",
+            "args": [
+              [
+                { "name": "appsettings.json", "values": { "Support:PageSize": "25" } },
+                { "name": "environment", "values": { "Other:Key": "x" } }
+              ],
+              "Support:PageSize"
+            ],
+            "expected": { "value": "25", "source": "appsettings.json" },
+            "hidden": false
+          },
+          {
+            "id": "undefined-everywhere",
+            "args": [
+              [
+                { "name": "appsettings.json", "values": {} },
+                { "name": "environment", "values": {} }
+              ],
+              "Support:PageSize"
+            ],
+            "expected": null,
+            "hidden": false
+          },
+          {
+            "id": "explicit-blank-still-wins",
+            "args": [
+              [
+                { "name": "appsettings.json", "values": { "Support:QueueName": "tickets" } },
+                { "name": "environment", "values": { "Support:QueueName": "" } }
+              ],
+              "Support:QueueName"
+            ],
+            "expected": { "value": "", "source": "environment" },
+            "hidden": false
+          },
+          {
+            "id": "highest-of-three",
+            "args": [
+              [
+                { "name": "appsettings.json", "values": { "Support:PageSize": "25" } },
+                { "name": "appsettings.Production.json", "values": { "Support:PageSize": "50" } },
+                { "name": "environment", "values": { "Support:PageSize": "10" } }
+              ],
+              "Support:PageSize"
+            ],
+            "expected": { "value": "10", "source": "environment" },
+            "hidden": false
+          },
+          {
+            "id": "no-layers-at-all",
+            "args": [[], "Support:PageSize"],
+            "expected": null,
+            "hidden": false
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e1003",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a log line",
+      "conceptIds": ["ops.dotnet-logging"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "One line, several independent faults.",
+      "lessonId": "v3-l28",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "primaryConceptId": "ops.dotnet-logging",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "This line runs on every successful ticket close:\n\n```csharp\n_logger.LogError($\"Closed ticket {ticketId} for {user.Email} using token {accessToken}\");\n```\n\nWhich single change would you insist on **first** in review, and why that one before the others?",
+      "hints": [
+        "There are at least three problems here. Rank them by what happens if the line ships unchanged for a month.",
+        "Two of the faults make the logs less useful. One of them puts something in durable storage that should never be written down at all.",
+        "A credential in a log is retained, replicated to wherever logs go, and readable by anyone with log access — and it cannot be un-written after the fact."
+      ],
+      "solution": {
+        "modelAnswer": "Remove the access token (and the email). A leaked credential in retained logs is the only fault here that cannot be undone later.",
+        "explanationMarkdown": "All three faults are real: the level is wrong (`Error` for a routine success trains people to ignore errors), the interpolation destroys the structured fields so `TicketId` cannot be queried, and the line writes a credential and personal data into storage. But the first two make the logs *less useful* and can be fixed at any time with no lasting consequence. The token cannot: once written, it is retained, shipped to wherever logs are aggregated, backed up, and readable by everyone with log access — and fixing the line later does not remove it from the last month of history. Fix the leak first, then the level and the template."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "remove-secret",
+            "textMarkdown": "Remove the access token and the email address — a credential written to retained logs cannot be un-written.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The other faults degrade log quality and are fixable at leisure; this one creates a lasting exposure the moment it ships."
+          },
+          {
+            "id": "template",
+            "textMarkdown": "Convert the interpolated string to a message template so `TicketId` stays queryable.",
+            "correct": false,
+            "explanationMarkdown": "A genuine improvement and it should happen — but it makes logs more useful, whereas the token makes them dangerous. Order matters in review."
+          },
+          {
+            "id": "level",
+            "textMarkdown": "Change `LogError` to `LogInformation`, since closing a ticket is a routine success.",
+            "correct": false,
+            "explanationMarkdown": "Also correct and also secondary. A noisy error stream is a real cost, but it is reversible and harms no one outside the team."
+          },
+          {
+            "id": "remove-line",
+            "textMarkdown": "Delete the line — a successful close does not need logging.",
+            "correct": false,
+            "explanationMarkdown": "Overcorrection. A ticket being closed is exactly the kind of business event worth recording; the problem is what this line carries, not that it exists."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c1001",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why did my setting not change?",
+      "conceptIds": ["ops.dotnet-configuration"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the precedence chain and the tool that answers it.",
+      "lessonId": "v3-l28",
+      "type": "recall",
+      "primaryConceptId": "ops.dotnet-configuration",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "You edit `appsettings.Production.json`, deploy, and the value does not change. What is the likely cause, and what would you run to confirm it rather than guess?",
+      "answerMarkdown": "A **later provider is overriding it** — most often an environment variable, since those are registered after both JSON files (the full default chain is base JSON, environment JSON, user secrets in Development, environment variables, then command-line arguments). To confirm rather than theorise, call `((IConfigurationRoot)configuration).GetDebugView()`, which lists every key with the provider that supplied the winning value.",
+      "explanationMarkdown": "The habit worth forming is asking the configuration system instead of reasoning about the chain — the answer is one call away and reasoning about layering is where people lose an afternoon. Protect any endpoint that exposes it, since it prints configuration."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c1002",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Template or interpolation?",
+      "conceptIds": ["ops.dotnet-logging"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer: what the two logging styles cost you later.",
+      "lessonId": "v3-l28",
+      "type": "transfer",
+      "primaryConceptId": "ops.dotnet-logging",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "What is lost by writing `_logger.LogInformation($\"Closed ticket {id}\")` instead of `_logger.LogInformation(\"Closed ticket {TicketId}\", id)`?",
+      "answerMarkdown": "The **structure**. Interpolation happens in C# before the logger sees anything, so the logger receives a finished sentence and `id` is no longer a field — you can grep the text but you cannot query `TicketId = 42`, aggregate by it, or filter a dashboard on it. The message template keeps the value as a named property alongside the rendered text. It is also marginally cheaper, since the string is only formatted if that level is enabled.",
+      "explanationMarkdown": "The distinction only matters once, and it matters a lot: during an incident, when you need every event for one ticket or one request. That is precisely when grep across a month of unstructured lines stops being viable."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l29",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Background services and deployment",
+      "conceptIds": ["dotnet.background-services", "ops.dotnet-deployment"],
+      "prerequisiteIds": ["jobs.idempotency", "jobs.retry-backoff", "ops.deployment-order"],
+      "chapterId": "v3-ch10",
+      "sortOrder": 1,
+      "objectives": [
+        "Implement a hosted service that respects cancellation and does not die silently.",
+        "Explain why background work must be idempotent when a deployment can interrupt it.",
+        "Order a release so migrations and code changes do not break the running version."
+      ],
+      "estimatedMinutes": 19,
+      "bodyMarkdown": "In the Node service, recurring work meant a separate worker process. In .NET it usually lives **inside the web application** as a hosted service — the same process, started by the host and stopped when it shuts down.\n\n```csharp\npublic class ReportSweeper : BackgroundService\n{\n    private readonly IServiceScopeFactory _scopes;\n    private readonly ILogger<ReportSweeper> _logger;\n\n    public ReportSweeper(IServiceScopeFactory scopes, ILogger<ReportSweeper> logger)\n    {\n        _scopes = scopes;\n        _logger = logger;\n    }\n\n    protected override async Task ExecuteAsync(CancellationToken stoppingToken)\n    {\n        while (!stoppingToken.IsCancellationRequested)\n        {\n            try\n            {\n                using var scope = _scopes.CreateScope();\n                var jobs = scope.ServiceProvider.GetRequiredService<IReportJobs>();\n                await jobs.RunDueAsync(stoppingToken);\n            }\n            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)\n            {\n                break;                                   // shutting down: expected\n            }\n            catch (Exception ex)\n            {\n                _logger.LogError(ex, \"Report sweep failed; continuing\");\n            }\n\n            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);\n        }\n    }\n}\n```\n\nFour things in there are the lesson.\n\n**The scope.** A `BackgroundService` is a singleton, and a `DbContext` is scoped — per request, and there are no requests here. Injecting the context directly into the constructor is the **captive dependency** problem: a scoped object captured by a singleton lives for the life of the process, accumulating tracked entities and eventually failing in ways that are very hard to read. Create a scope per iteration and resolve from it.\n\n**The cancellation token, threaded all the way down.** `stoppingToken` is passed to `RunDueAsync` and to `Task.Delay`. Without that, shutdown waits for a sleeping loop, the host gives up after its timeout, and the process is killed mid-work.\n\n**Catching, and continuing.** An unhandled exception in `ExecuteAsync` ends the service. On modern .NET it can also stop the host — but the older, worse behaviour is what makes this worth stating: a background service that dies quietly while the web application keeps serving traffic is a genuinely nasty failure, because nothing looks broken. Catch, log, keep looping.\n\n**Distinguishing the expected cancellation.** `OperationCanceledException` during shutdown is normal and should not be logged as an error, or every clean restart produces a false alarm.\n\nNow the part that connects to V2. If a deployment can stop the process at any moment — and it can, since deploying is exactly that — then **every job must be safe to run again**. Interrupted work is a normal event, not an exception, and that makes idempotency a requirement rather than a nicety. Persist job state, make effects idempotent (an upsert keyed on the job's identity rather than a blind insert), and record completion in the same transaction as the effect. If those two are separate commits, an interruption between them means the work is done and unrecorded, and the rerun does it twice.\n\nAnd deployment ordering is what you already know from V1 chapter 12, with one .NET-specific note. Additive migrations first, then the new code, then destructive migrations once nothing refers to the old shape. The .NET note: `dotnet ef database update` is convenient in development and a poor fit for production, where several instances may start simultaneously and race to apply the same migration. Generate a script (`dotnet ef migrations script --idempotent`) and apply it as a distinct, single deployment step instead."
+      ,
+      "workedExampleMarkdown": "A nightly report job, and what a deployment does to it.\n\n**The unsafe version:**\n\n```csharp\npublic async Task RunDueAsync(CancellationToken ct)\n{\n    var due = await _db.ReportJobs\n        .Where(j => j.Status == \"pending\" && j.DueAt <= _clock.UtcNow)\n        .ToListAsync(ct);\n\n    foreach (var job in due)\n    {\n        var report = await _builder.BuildAsync(job, ct);   // expensive\n        _db.Reports.Add(report);\n        await _db.SaveChangesAsync(ct);                     // commit 1: the effect\n\n        job.Status = \"done\";\n        await _db.SaveChangesAsync(ct);                     // commit 2: the record\n    }\n}\n```\n\nDeploy between the two saves and the report exists while the job still says `pending`. The next instance picks it up and builds a **second** report. Nobody sees an error; the customer sees duplicate reports, which is worse than a failure because it is not obviously wrong.\n\n**The safe version:**\n\n```csharp\npublic async Task RunDueAsync(CancellationToken ct)\n{\n    var due = await _db.ReportJobs\n        .Where(j => j.Status == \"pending\" && j.DueAt <= _clock.UtcNow)\n        .ToListAsync(ct);\n\n    foreach (var job in due)\n    {\n        ct.ThrowIfCancellationRequested();\n\n        var report = await _builder.BuildAsync(job, ct);\n        report.JobId = job.Id;                 // unique index on Reports.JobId\n\n        _db.Reports.Add(report);\n        job.Status = \"done\";\n        job.CompletedAt = _clock.UtcNow;\n\n        await _db.SaveChangesAsync(ct);        // one transaction: effect AND record\n    }\n}\n```\n\nTwo defences, deliberately overlapping. The single save means the report and the completion commit together, so an interruption leaves the job `pending` with no report — the correct state to retry from. And the unique index on `Reports.JobId` means that even if something contrives to run the job twice, the second insert is rejected by the database rather than producing a duplicate. The transaction is the design; the constraint is what catches the case the design did not anticipate.\n\nNote also `ThrowIfCancellationRequested()` between jobs: shutdown stops the loop at a job boundary rather than halfway through building a report.",
+      "commonMistakes": [
+        "Injecting a `DbContext` straight into a `BackgroundService` constructor — a captive dependency that lives for the whole process.",
+        "Not passing the stopping token to `Task.Delay`, so shutdown waits out the full interval and the process is eventually killed.",
+        "Letting an exception escape `ExecuteAsync`, so the service stops while the web application carries on looking healthy.",
+        "Logging shutdown's `OperationCanceledException` as an error, producing a false alarm on every clean restart.",
+        "Committing the effect and the completion record separately, so an interruption between them causes the work to be repeated.",
+        "Relying only on job state for safety with no unique constraint behind it, so a race produces a duplicate the database would have refused.",
+        "Running `dotnet ef database update` from application startup, so simultaneously starting instances race to apply the same migration."
+      ],
+      "summaryMarkdown": "A hosted service is a singleton, so create a scope per iteration rather than capturing a `DbContext`. Thread the stopping token everywhere, catch and continue so the service does not die quietly, and treat shutdown cancellation as normal. Because a deployment can interrupt work at any point, jobs must be rerunnable: commit the effect and its completion record in one transaction, and back it with a unique constraint. Apply migrations as their own deployment step, not from startup.",
+      "exerciseIds": ["v3-e1004", "v3-e1005", "v3-e1006"],
+      "reviewCardIds": ["v3-c1003", "v3-c1004"],
+      "references": [
+        { "label": ".NET — Background tasks with hosted services", "url": "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/host/hosted-services" },
+        { "label": ".NET — Dependency injection guidelines", "url": "https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection-guidelines" },
+        { "label": "EF Core — Applying migrations at deployment", "url": "https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e1004",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The service that stops without telling anyone",
+      "conceptIds": ["dotnet.background-services"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Two defects in a hosted service, one of which hides the other.",
+      "lessonId": "v3-l29",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "primaryConceptId": "dotnet.background-services",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Reports stopped being generated four days ago. The web application has been healthy throughout and no alert fired.\n\n```csharp\npublic class ReportSweeper : BackgroundService\n{\n    private readonly SupportContext _db;\n\n    public ReportSweeper(SupportContext db) => _db = db;\n\n    protected override async Task ExecuteAsync(CancellationToken stoppingToken)\n    {\n        while (!stoppingToken.IsCancellationRequested)\n        {\n            var due = await _db.ReportJobs\n                .Where(j => j.Status == \"pending\")\n                .ToListAsync(stoppingToken);\n\n            foreach (var job in due) await BuildAsync(job, stoppingToken);\n\n            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);\n        }\n    }\n}\n```\n\nName the two defects, and say which one explains the silence.",
+      "hints": [
+        "One defect is about what this class holds; the other is about what happens the first time something throws.",
+        "`BackgroundService` is registered as a singleton. What lifetime does `SupportContext` have, and what happens when a singleton captures it?",
+        "There is no try/catch: one exception ends `ExecuteAsync`, the loop is gone, and the web application keeps serving traffic as though nothing happened."
+      ],
+      "solution": {
+        "modelAnswer": "A captive DbContext (scoped captured by a singleton) and no exception handling in the loop. The missing try/catch explains the silence: one exception ended ExecuteAsync and the service simply stopped while the app stayed healthy.",
+        "explanationMarkdown": "**Captive dependency.** `BackgroundService` is a singleton, so injecting the scoped `SupportContext` keeps one instance alive for the entire process — accumulating tracked entities, holding a connection, and eventually failing in confusing ways. The fix is `IServiceScopeFactory`, creating a scope per iteration and resolving the context inside it.\n\n**No error handling.** This is what explains the four days of silence. The first exception — very likely thrown *by* the captive context — propagates out of `ExecuteAsync`, which ends the service. The host keeps running and the web application keeps serving traffic, so every health check passes while the background work has simply ceased. Wrapping the body in try/catch, logging, and continuing keeps the loop alive; treating `OperationCanceledException` during shutdown as expected avoids a false alarm on every restart."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "captive-and-nocatch",
+            "textMarkdown": "A captive `DbContext` (scoped captured by a singleton) and no try/catch — the missing catch explains the silence, since one exception ended the loop while the app stayed healthy.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The captive context is very likely what threw; the absent error handling is why nobody found out for four days."
+          },
+          {
+            "id": "delay-token",
+            "textMarkdown": "The `Task.Delay` interval is too long and the stopping token is misused, so the loop never runs a second time.",
+            "correct": false,
+            "explanationMarkdown": "A one-minute delay with the token passed is exactly right — that part is correct. The token is used properly here."
+          },
+          {
+            "id": "no-async",
+            "textMarkdown": "`ExecuteAsync` should not be `async`, so the service never actually starts.",
+            "correct": false,
+            "explanationMarkdown": "`ExecuteAsync` is designed to be awaited and returning a `Task` is the intended shape. The service started fine — it ran until it threw."
+          },
+          {
+            "id": "missing-filter",
+            "textMarkdown": "The query is missing a `DueAt` filter, so it rebuilds every pending report on every pass.",
+            "correct": false,
+            "explanationMarkdown": "A real inefficiency worth fixing, but it would cause too *much* work rather than none — and it does not explain a service that stopped entirely."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e1005",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Select the jobs that are due",
+      "conceptIds": ["dotnet.background-services"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The scheduling decision a sweep makes on every pass, as pure logic.",
+      "lessonId": "v3-l29",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "primaryConceptId": "dotnet.background-services",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "Implement `dueJobs(jobs, now)`.\n\nEach job is:\n\n```js\n{ id: \"nightly-report\", nextRunAt: 1700, enabled: true }\n```\n\n`nextRunAt` and `now` are integer timestamps.\n\nReturn the ids of the jobs that should run on this pass, **in the order given**. A job is due when it is `enabled` **and** its `nextRunAt` is less than or equal to `now` — a job scheduled for exactly this instant is due, not deferred.\n\nA disabled job is never due, however overdue it looks.\n\nDo not modify the input.",
+      "hints": [
+        "Two conditions decide inclusion, and then you report identifiers rather than whole jobs.",
+        "Think about the exact-match case deliberately: `nextRunAt === now` must be included, which decides whether you write `<` or `<=`.",
+        "`jobs.filter(...)` with both conditions, then `.map(j => j.id)`."
+      ],
+      "solution": {
+        "code": "function dueJobs(jobs, now) {\n  const due = jobs.filter(j => j.enabled === true && j.nextRunAt <= now);\n  return due.map(j => j.id);\n}",
+        "explanationMarkdown": "The boundary is the part worth being deliberate about. Using `<` instead of `<=` means a job scheduled for exactly this timestamp is skipped, and on a sweep that ticks on a regular interval that is not a harmless rounding difference — a job scheduled precisely on the boundary can be deferred every single pass and never run at all. Checking `enabled` first reflects intent: disabling a job is an operator decision that overrides its schedule entirely, so an overdue disabled job stays untouched rather than firing the moment it is re-enabled. Returning ids rather than job objects keeps the caller from mutating scheduling state through a reference it was only supposed to read."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "dueJobs",
+        "starterCode": "function dueJobs(jobs, now) {\n  // Enabled, and scheduled at or before now.\n  return jobs.map(j => j.id);\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "some-are-due",
+            "args": [
+              [
+                { "id": "nightly-report", "nextRunAt": 1700, "enabled": true },
+                { "id": "weekly-digest", "nextRunAt": 9000, "enabled": true }
+              ],
+              1800
+            ],
+            "expected": ["nightly-report"],
+            "hidden": false
+          },
+          {
+            "id": "exactly-now-is-due",
+            "args": [[{ "id": "on-the-boundary", "nextRunAt": 1800, "enabled": true }], 1800],
+            "expected": ["on-the-boundary"],
+            "hidden": false
+          },
+          {
+            "id": "disabled-never-runs",
+            "args": [[{ "id": "paused-sweep", "nextRunAt": 100, "enabled": false }], 1800],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "nothing-due-yet",
+            "args": [
+              [
+                { "id": "a", "nextRunAt": 5000, "enabled": true },
+                { "id": "b", "nextRunAt": 6000, "enabled": true }
+              ],
+              1800
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "order-is-preserved",
+            "args": [
+              [
+                { "id": "second-in-list", "nextRunAt": 10, "enabled": true },
+                { "id": "disabled-one", "nextRunAt": 10, "enabled": false },
+                { "id": "first-in-list", "nextRunAt": 20, "enabled": true }
+              ],
+              1800
+            ],
+            "expected": ["second-in-list", "first-in-list"],
+            "hidden": false
+          },
+          {
+            "id": "no-jobs",
+            "args": [[], 1800],
+            "expected": [],
+            "hidden": false
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e1006",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Order the release",
+      "conceptIds": ["ops.dotnet-deployment"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Sequencing a release with a background service in the process.",
+      "lessonId": "v3-l29",
+      "sortOrder": 2,
+      "type": "predict-output",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "primaryConceptId": "ops.dotnet-deployment",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "A release adds a `Reports.JobId` column with a unique index, and new code that writes it. Instances are replaced one at a time, so old and new run together during the rollout.\n\nThe steps, out of order:\n\n```\nA  deploy the new code, which writes Reports.JobId\nB  apply the migration adding Reports.JobId as nullable, with the unique index\nC  apply the migration making Reports.JobId NOT NULL\nD  backfill Reports.JobId for existing rows\n```\n\nGive the safe order as four letters separated by commas, for example `A, B, C, D`.",
+      "hints": [
+        "Additive first, and constraints that every row must satisfy only once every row does satisfy them.",
+        "A nullable column with a unique index is invisible to the old code, so it is safe to add before anything is deployed.",
+        "`NOT NULL` can only be applied after both the backfill and the deployment of code that always populates the column."
+      ],
+      "solution": {
+        "modelAnswer": "B, D, A, C",
+        "explanationMarkdown": "`B` first: a nullable column is invisible to the running old code, and adding the unique index now is fine because NULLs do not conflict with each other in PostgreSQL. `D` next: backfill the existing rows while nothing depends on the column yet. `A` then deploys code that populates it — during the overlap, old instances write NULL and new instances write a real value, which the nullable column still permits. `C` last, once every instance is on the new version and every row has a value. Applying `C` any earlier fails, because old instances are still inserting rows with no `JobId`."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": { "trim": true, "collapseWhitespace": true, "caseSensitive": false },
+        "expected": "B, D, A, C",
+        "acceptedAlternatives": ["B,D,A,C", "B D A C", "b, d, a, c"]
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c1003",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The captive dependency",
+      "conceptIds": ["dotnet.background-services"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall why a hosted service cannot simply inject a DbContext.",
+      "lessonId": "v3-l29",
+      "type": "recall",
+      "primaryConceptId": "dotnet.background-services",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "Why is injecting a `DbContext` into a `BackgroundService` constructor wrong, and what do you do instead?",
+      "answerMarkdown": "`BackgroundService` is registered as a **singleton** and `DbContext` is **scoped**, so the singleton captures one context for the entire process lifetime — a *captive dependency*. It accumulates tracked entities, holds a connection, and starts failing in ways that are hard to trace back. Instead inject `IServiceScopeFactory`, and per iteration do `using var scope = _scopes.CreateScope();` then resolve the context from `scope.ServiceProvider`.",
+      "explanationMarkdown": "The general rule is that a longer-lived service must never capture a shorter-lived one. Recognising the singleton-captures-scoped shape is what stops this being an obscure runtime mystery — and it matters more in .NET than it did in Node, where a single-threaded process gave you fewer chances to build one."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c1004",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why must a job be rerunnable?",
+      "conceptIds": ["dotnet.background-services"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer: connecting deployment reality to job design.",
+      "lessonId": "v3-l29",
+      "type": "transfer",
+      "primaryConceptId": "dotnet.background-services",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "Why is idempotency a requirement rather than a nicety for background work in a service that gets deployed regularly?",
+      "answerMarkdown": "Because a deployment stops the process at an arbitrary point, so **interruption is a routine event**, not an exceptional one. Any job interrupted between doing its work and recording that it did will be picked up again by the next instance and repeated. Committing the effect and the completion record in **one transaction** makes an interruption leave a clean retryable state, and a **unique constraint** on the effect catches the cases the transaction design did not anticipate.",
+      "explanationMarkdown": "Reframing interruption as normal rather than exceptional changes the design: you stop asking 'how do I avoid being interrupted' and start asking 'what does a rerun do', which is a question with a reliable answer."
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v3-l30",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Comparing the Node and .NET designs",
+      "conceptIds": ["compare.node-vs-dotnet"],
+      "prerequisiteIds": ["compare.node-vs-dotnet", "node.route-boundaries", "aspnet.dependency-injection"],
+      "chapterId": "v3-ch10",
+      "sortOrder": 2,
+      "objectives": [
+        "Distinguish differences of kind from differences of syntax between the two stacks.",
+        "Explain what a long-lived multi-threaded process changes about shared state.",
+        "Review an equivalent feature in both stacks and justify where each is stronger."
+      ],
+      "estimatedMinutes": 20,
+      "bodyMarkdown": "You have built the same product twice. This lesson is about extracting the return on that.\n\nStart with what **did not** change, because it is most of it. HTTP semantics. The database and every constraint in it. The lost update and the concurrency token that detects it. The N+1 pattern. Transaction boundaries and partial writes. Ownership scoping and the 404-versus-403 decision. Layered configuration. Additive-then-destructive deployment ordering. Boundary-case selection. The rule that a regression test must fail first.\n\nNone of those is a framework fact. They are properties of HTTP, of relational databases, of concurrency, and of deployment — and carrying them across intact is the main thing that separates someone who *knows a framework* from someone who can pick one up. If you catch yourself relearning one of these, you have mistaken syntax for substance.\n\nNow the genuine differences, of which there are four worth naming.\n\n**The process model.** Node is single-threaded with an event loop; ASP.NET Core is multi-threaded, handling concurrent requests on a thread pool within one long-lived process. In Node, a module-level `let cache = {}` is touched by one request at a time, and the worst you get is stale data. In .NET, a `static Dictionary` is touched by several threads simultaneously, and the failure is corruption or an infinite loop inside the dictionary — which is why `ConcurrentDictionary` exists and why 'is this shared mutable state?' is a sharper question here.\n\n**Dependency injection with explicit lifetimes.** Node code typically wires modules by importing them; ASP.NET Core has a container where every service declares singleton, scoped, or transient. That makes accidental sharing visible — and creates the captive dependency, a failure Node's model does not really offer you.\n\n**Static typing at the boundary.** TypeScript checks your code; C# checks it and enforces it at runtime through model binding. But the rule from V1 chapter 9 is untouched: **neither validates HTTP input.** A well-typed `TicketRequest` says nothing about whether the JSON that arrived matches it, which is why `[Required]`, `[StringLength]` and friends exist. A type is a promise about your code, not about the network.\n\n**Where background work lives.** In Node it was a separate process you deployed and monitored separately. In .NET it is usually a hosted service inside the web application — simpler to deploy, and it introduces the failure from the last lesson where the background half dies while the HTTP half keeps answering health checks.\n\nAnd a difference in *character* rather than capability: EF Core does considerably more for you than a query builder does, which is a real productivity gain and a real distance from the SQL. Both stacks let you write an accidental N+1; EF Core makes it easier to write one without noticing, and gives you better tools for finding it once you look. That is a trade, not a defect.\n\nThe useful skill at the end of this track is being able to look at any part of a design and say which category it falls into. Most things are the same problem. A few are genuinely different. Being confident about which is which is what lets you evaluate an unfamiliar stack in an afternoon instead of a quarter."
+      ,
+      "workedExampleMarkdown": "The same feature — 'list this agent's open tickets, newest first, paginated' — in both stacks, with the differences classified.\n\n**Node:**\n\n```ts\napp.get('/tickets', async (req, res) => {\n  const agentId = req.session.agentId;\n  const limit = Math.min(Number(req.query.limit ?? 25), 50);\n\n  const tickets = await db\n    .selectFrom('tickets')\n    .select(['id', 'subject', 'created_at'])\n    .where('owner_id', '=', agentId)\n    .where('status', '!=', 'closed')\n    .orderBy('created_at', 'desc')\n    .limit(limit)\n    .execute();\n\n  res.json({ data: tickets });\n});\n```\n\n**.NET:**\n\n```csharp\napp.MapGet(\"/tickets\", async (\n    ClaimsPrincipal user, SupportContext db, int? limit) =>\n{\n    var agentId = long.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);\n    var take = Math.Min(limit ?? 25, 50);\n\n    var tickets = await db.Tickets\n        .Where(t => t.OwnerId == agentId && t.Status != \"closed\")\n        .OrderByDescending(t => t.CreatedAt)\n        .Take(take)\n        .Select(t => new TicketRow(t.Id, t.Subject, t.CreatedAt))\n        .ToListAsync();\n\n    return Results.Ok(new { data = tickets });\n}).RequireAuthorization();\n```\n\n**Same in both — do not relearn these:**\n\n- Ownership is in the **query predicate**, not checked afterwards. Identical reasoning, identical failure if omitted.\n- The page size is clamped, because the client's number is input rather than instruction.\n- Only the needed columns are selected.\n- A deterministic sort — and both would need a tiebreaker on `id` for stable pagination.\n\n**Genuinely different:**\n\n- **Where the identity comes from.** `req.session` versus a `ClaimsPrincipal` produced by an authentication scheme. The .NET version is more structured and more configurable; both are 'the framework resolved who this is'.\n- **What produces the SQL.** The query builder is close to the SQL; the LINQ is translated, which is more expressive and further away. This is where the habit of reading the generated SQL earns its place.\n- **Binding and validation.** `int? limit` is bound and converted by the framework, where the Node version does `Number(...)` by hand. Neither *validates* — both clamp explicitly, because a type conversion is not a range check.\n\n**A difference that is only syntax:** `Results.Ok(...)` versus `res.json(...)`, `Where` versus `.where`, `Take` versus `.limit`. Nothing to learn beyond the spelling.",
+      "commonMistakes": [
+        "Treating a rule you learned in V1 as Node-specific and relearning it — most of them were properties of HTTP or the database.",
+        "Assuming a module-level cache is as safe in .NET as it was in Node, when several threads now touch it at once.",
+        "Believing C#'s static types validate HTTP input. Model binding converts; it does not check ranges, formats or business rules.",
+        "Arguing about which stack is better rather than about where each is stronger for a specific problem.",
+        "Concluding EF Core is worse because it hides SQL — the trade is expressiveness for distance, and the distance is manageable if you read the generated queries.",
+        "Forgetting that a hosted service can die while the web application stays healthy, because in Node the worker was a separate process you monitored."
+      ],
+      "summaryMarkdown": "Most of what you learned transfers untouched: HTTP, the database, concurrency, ownership, deployment ordering and test discipline are not framework facts. Four things genuinely differ — the threading model and therefore shared state, explicit DI lifetimes and the captive dependency, where background work lives, and how far the query layer sits from the SQL. Being able to sort any given design decision into 'same problem' or 'genuinely different' is the transferable skill this track was for.",
+      "exerciseIds": ["v3-e1007", "v3-e1008", "v3-e1009"],
+      "reviewCardIds": ["v3-c1005", "v3-c1006"],
+      "references": [
+        { "label": "ASP.NET Core — Dependency injection", "url": "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/dependency-injection" },
+        { "label": ".NET — Thread-safe collections", "url": "https://learn.microsoft.com/en-us/dotnet/standard/collections/thread-safe/" },
+        { "label": "ASP.NET Core — Model validation", "url": "https://learn.microsoft.com/en-us/aspnet/core/mvc/models/validation" }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e1007",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The cache that was fine in Node",
+      "conceptIds": ["compare.node-vs-dotnet"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A direct translation that was safe in one process model and is not in the other.",
+      "lessonId": "v3-l30",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "primaryConceptId": "compare.node-vs-dotnet",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "The Node service had a module-level cache that worked without incident for two years:\n\n```ts\nconst cache: Record<string, Team> = {};\n\nexport function getTeam(id: string): Team | undefined {\n  return cache[id];\n}\n\nexport function putTeam(team: Team): void {\n  cache[team.id] = team;\n}\n```\n\nTranslated to C#:\n\n```csharp\npublic static class TeamCache\n{\n    private static readonly Dictionary<string, Team> Cache = new();\n\n    public static Team? Get(string id) =>\n        Cache.TryGetValue(id, out var team) ? team : null;\n\n    public static void Put(Team team) => Cache[team.id] = team;\n}\n```\n\nUnder load the service occasionally pins a CPU core at 100% and stops responding. What changed?",
+      "hints": [
+        "The code is a faithful translation. What differs is the environment it runs in.",
+        "Node handles one request at a time on the event loop; ASP.NET Core handles many concurrently on thread-pool threads.",
+        "`Dictionary<TKey,TValue>` is not thread-safe. Concurrent writes can corrupt its internal buckets, and a corrupted bucket chain makes a lookup loop forever."
+      ],
+      "solution": {
+        "modelAnswer": "The process model. Node serialised access on the event loop; ASP.NET Core runs requests on many threads at once, and Dictionary is not thread-safe — concurrent writes corrupt it, and a corrupted bucket makes a read spin forever.",
+        "explanationMarkdown": "Nothing about the *logic* changed; the concurrency around it did. In Node, `putTeam` could never run while another `putTeam` was midway through, because there is one thread and no `await` inside the function. In ASP.NET Core, several requests genuinely execute `Put` simultaneously. `Dictionary` makes no thread-safety guarantee: concurrent writes during a resize can leave a bucket chain pointing at itself, and a later `TryGetValue` follows that chain forever — which is the pinned core. Use `ConcurrentDictionary`, or a lock, or `IMemoryCache` which is built for this. The general lesson is that 'is this shared mutable state?' is a much sharper question in a multi-threaded process, and translated code carries the old assumption invisibly."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "threading",
+            "textMarkdown": "The threading model — ASP.NET Core serves requests concurrently, and `Dictionary` is not thread-safe, so concurrent writes can corrupt it and make a read loop forever.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Node's event loop serialised the writes for free; the .NET translation inherits the assumption without the guarantee."
+          },
+          {
+            "id": "gc",
+            "textMarkdown": "The static dictionary is never collected, so memory grows until garbage collection consumes the CPU.",
+            "correct": false,
+            "explanationMarkdown": "An unbounded cache is a genuine problem worth fixing, but it presents as rising memory and GC pressure, not as one core pinned while the rest idle."
+          },
+          {
+            "id": "boxing",
+            "textMarkdown": "String keys are boxed on every lookup, which becomes expensive under load.",
+            "correct": false,
+            "explanationMarkdown": "`string` is a reference type and is not boxed. Lookup cost would in any case scale smoothly with load rather than causing a hang."
+          },
+          {
+            "id": "static-init",
+            "textMarkdown": "Static initialisation is not thread-safe, so two threads can create two dictionaries.",
+            "correct": false,
+            "explanationMarkdown": "The runtime guarantees static field initialisation happens once and is thread-safe. The danger is the concurrent *use* afterwards."
+          }
+        ]
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e1008",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Sort the differences",
+      "conceptIds": ["compare.node-vs-dotnet"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written classification. The skill the whole track was building toward.",
+      "lessonId": "v3-l30",
+      "sortOrder": 1,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 15,
+      "primaryConceptId": "compare.node-vs-dotnet",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "You are handing the ticket service to a developer who knows Node but not .NET. They ask which of their existing instincts still apply.\n\nSort these six items into **transfers unchanged** and **genuinely different**, with a one-line reason for each:\n\n1. Scoping a query by owner so an unowned row is never returned\n2. Keeping a module-level cache of lookup data\n3. Choosing 404 rather than 403 for a resource the caller may not see\n4. Wiring dependencies by importing a module directly\n5. Clamping a client-supplied page size\n6. Running recurring work in a separate deployed process\n\nBe specific about *why* each one falls where it does — 'it is different because C# is typed' is not a reason.",
+      "hints": [
+        "For each item, ask what it depends on: HTTP, the database, or the runtime and framework?",
+        "Anything that follows from HTTP semantics, relational constraints, or the fact that clients send arbitrary input will transfer untouched.",
+        "The three that differ all depend on the runtime: threads, the DI container's lifetimes, and where background work is hosted."
+      ],
+      "solution": {
+        "modelAnswer": "Transfers unchanged: (1) ownership scoping, because an unscoped query leaks in any language — it is a property of the query, not the framework; (3) 404 versus 403, because it is an HTTP semantics and information-disclosure decision, unrelated to the stack; (5) clamping page size, because the client sends arbitrary input regardless of language and a type conversion is not a range check. Genuinely different: (2) a module-level cache, because ASP.NET Core is multi-threaded and shared mutable state is now touched concurrently, so Dictionary must become ConcurrentDictionary or IMemoryCache; (4) wiring by import, because .NET uses a DI container with explicit singleton/scoped/transient lifetimes, which makes sharing visible and introduces the captive dependency; (6) a separate worker process, because recurring work usually becomes a hosted service inside the web application, which changes both deployment and the failure mode — the background half can die while HTTP keeps answering health checks.",
+        "explanationMarkdown": "The classification test is what each item depends on. Items grounded in HTTP, the database, or the untrustworthiness of client input are stack-independent. Items grounded in the runtime — threads, the container, the process — are where real relearning is required."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Places items 1, 3 and 5 in 'transfers unchanged' and items 2, 4 and 6 in 'genuinely different'.",
+          "Justifies ownership scoping by it being a property of the query rather than of the framework.",
+          "Justifies 404-versus-403 as an HTTP semantics and information-disclosure decision.",
+          "Justifies page-size clamping by client input being untrustworthy in any stack, noting that type conversion is not range validation.",
+          "Explains the cache difference by the multi-threaded process model and names a thread-safe alternative.",
+          "Explains the DI difference in terms of explicit lifetimes and mentions the captive dependency.",
+          "Explains that background work moves inside the web application and that this changes the failure mode.",
+          "Articulates the general test — whether the item depends on HTTP and the database or on the runtime."
+        ],
+        "modelAnswerMarkdown": "**Transfers unchanged**\n\n1. **Ownership scoping.** An unscoped query returns rows the caller should not have, in any language. The rule is a property of the query and the data, and the M03 defect looks identical in both stacks.\n3. **404 rather than 403.** This is an HTTP semantics and information-disclosure decision. Whichever you choose, the requirement is consistency across every endpoint — a 404 from one and a 403 from another is an existence oracle regardless of implementation.\n5. **Clamping page size.** Clients send arbitrary numbers everywhere. Worth stressing to a newcomer: C# will *convert* `?limit=9999` into an `int` for you, and that is not validation — the clamp is still yours to write.\n\n**Genuinely different**\n\n2. **The module-level cache.** Node's event loop serialised access to it; ASP.NET Core serves requests on many threads at once, so a plain `Dictionary` is now shared mutable state under real concurrency. Concurrent writes can corrupt it badly enough to hang a lookup. Use `ConcurrentDictionary` or `IMemoryCache`.\n4. **Wiring by import.** .NET resolves dependencies through a container with explicit singleton, scoped and transient lifetimes. That is genuinely better — accidental sharing becomes visible — and it introduces a failure Node barely offers: the captive dependency, where a singleton captures a scoped `DbContext` and holds it for the life of the process.\n6. **The separate worker process.** Recurring work usually moves *inside* the web application as a hosted service. Simpler to deploy, and it changes the failure mode: the background half can stop while the HTTP half keeps answering health checks, so nothing looks broken.\n\n**The test I would give them.** Ask what the item depends on. HTTP, the database, or the fact that clients send whatever they like? It transfers. The runtime — threads, the container, the process? Expect to relearn it."
+      }
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v3-e1009",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Recommend a stack, honestly",
+      "conceptIds": ["compare.node-vs-dotnet"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written recommendation. The failure mode here is a confident answer that ignores what actually decides it.",
+      "lessonId": "v3-l30",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 15,
+      "primaryConceptId": "compare.node-vs-dotnet",
+      "requiredForLessonCompletion": true,
+      "promptMarkdown": "A small team is starting a new internal service: CRUD over a relational database, a few background jobs, an internal web UI, moderate traffic. Two of the four developers know TypeScript well; none has used .NET. There is an existing Node service in production that this one will sit alongside.\n\nWrite the recommendation you would give. It must include: which you would choose and why; at least one thing the *other* stack would genuinely have done better; and an honest statement of what would change your recommendation.\n\nAvoid the two failure modes — declaring one stack simply better, and refusing to recommend anything.",
+      "hints": [
+        "Both stacks can clearly do this job. So the deciding factors are not technical capability — what are they?",
+        "Team familiarity and operational consistency with an existing production service usually outweigh framework preference for a workload neither stack finds difficult.",
+        "Be specific about what .NET would have given you here — EF Core's migrations and change tracking, in-process hosted services, and explicit DI lifetimes are real advantages, not consolation."
+      ],
+      "solution": {
+        "modelAnswer": "I would choose Node. The workload is unremarkable for either stack, so the deciding factors are team familiarity — half the team is productive on day one and nobody knows .NET — and operational consistency with the existing production service, which means one set of deployment, logging and monitoring conventions rather than two. What .NET would genuinely have done better: EF Core's migrations and change tracking are more mature than most Node equivalents, hosted services would put the background jobs in the same process with no extra deployment unit, and explicit DI lifetimes would make shared state visible rather than implicit. What would change my mind: if the background jobs were CPU-bound, .NET's real threading would matter and Node's single thread would be a genuine constraint; if the team were going to be maintaining .NET services anyway, paying the learning cost once on a low-risk internal service would be sensible; and if strong typing at the data layer mattered more than delivery speed here, EF Core plus C# is a stronger story than most TypeScript ORMs.",
+        "explanationMarkdown": "The mark of a real recommendation is that it names the conditions under which it would be wrong. Both stacks handle this workload comfortably, so the decision is about people and operations — and saying so plainly is more useful than a capability comparison that does not decide anything."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Makes a definite recommendation rather than declining to choose.",
+          "Grounds the decision in team familiarity and operational consistency rather than framework capability.",
+          "Acknowledges that both stacks handle this workload comfortably.",
+          "Names at least one specific thing the other stack would genuinely have done better, with a concrete example such as EF Core migrations, in-process hosted services, or explicit DI lifetimes.",
+          "States at least one concrete condition that would change the recommendation.",
+          "Avoids declaring either stack simply superior."
+        ],
+        "modelAnswerMarkdown": "**Recommendation: Node.**\n\nThis workload — CRUD over a relational database, a few background jobs, an internal UI, moderate traffic — is unremarkable for either stack. Both would do it well, which means the technical comparison does not decide anything, and pretending otherwise would be the first mistake.\n\nWhat decides it is people and operations. Two of four developers are already productive in TypeScript and none has written .NET, so choosing .NET means paying a learning curve on a service someone will need to support at 3am. And there is already a Node service in production: matching it keeps one set of deployment, logging and monitoring conventions instead of two, which matters more for a small team than any framework feature.\n\n**What .NET would genuinely have done better.** EF Core's migration tooling and change tracking are more mature than most Node equivalents — versioned, reviewable schema changes with a real story for concurrency tokens. Hosted services would put the background jobs in the same process as the web application, one deployment unit instead of two. And explicit DI lifetimes would make shared state a declared decision rather than an implicit one, which is exactly the class of bug that bites a growing codebase. These are real advantages; I am trading them away knowingly.\n\n**What would change my mind.**\n\n- **CPU-bound background work.** If those jobs do serious computation, .NET's real threading is a genuine advantage and Node's single thread becomes a constraint you work around.\n- **A team direction toward .NET.** If the organisation expects to maintain .NET services anyway, a low-risk internal service is a good place to pay the learning cost deliberately.\n- **Data-layer complexity.** If the schema is going to be intricate and heavily concurrent, EF Core plus C# is a stronger story than most TypeScript ORMs, and I would weigh that above familiarity."
+      }
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c1005",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Same problem or different?",
+      "conceptIds": ["compare.node-vs-dotnet"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the classification test.",
+      "lessonId": "v3-l30",
+      "type": "recall",
+      "primaryConceptId": "compare.node-vs-dotnet",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "What question tells you whether something you learned in the Node track still applies in .NET?",
+      "answerMarkdown": "**What does it depend on?** If it follows from HTTP semantics, from the relational database, or from the fact that clients send arbitrary input — ownership scoping, 404-versus-403, lost updates, N+1, transaction boundaries, deployment ordering, input validation — it transfers unchanged. If it depends on the **runtime** — the threading model, the DI container's lifetimes, where background work is hosted — expect a real difference.",
+      "explanationMarkdown": "Having this test explicit is what stops you relearning things that never changed, and stops you assuming things did not change when they did. It is also how you evaluate a third stack quickly."
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v3-c1006",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Do types validate input?",
+      "conceptIds": ["compare.node-vs-dotnet"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer: the V1 rule that survives the move to C#.",
+      "lessonId": "v3-l30",
+      "type": "transfer",
+      "primaryConceptId": "compare.node-vs-dotnet",
+      "gradingOrigin": "self_reported",
+      "promptMarkdown": "A handler takes a strongly-typed `TicketRequest` parameter and C# is statically typed. Is the request body validated?",
+      "answerMarkdown": "**No.** Model binding *converts* the incoming JSON into the type and will fail on something structurally impossible, such as a letter where an `int` is expected. It checks nothing about ranges, formats, lengths or business rules — a `Subject` of 40,000 characters or a `Quantity` of `-5` binds perfectly. Validation is separate: data annotations such as `[Required]` and `[StringLength]`, `FluentValidation`, or explicit checks in the handler.",
+      "explanationMarkdown": "This is V1 chapter 9's rule — TypeScript does not validate HTTP input — arriving intact in a language with stronger types. The intuition that a better type system might close the gap is exactly the one to resist: a type is a promise about your code, never about the network."
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v3-a10",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Operation and comparison placement check",
+      "conceptIds": [
+        "ops.dotnet-configuration",
+        "ops.dotnet-logging",
+        "dotnet.background-services",
+        "ops.dotnet-deployment",
+        "compare.node-vs-dotnet"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering chapter D10. Reason about what runs where and what survives a restart; no hints are shown until you submit.",
+      "chapterId": "v3-ch10",
+      "qualification": { "minimumCorrect": 4, "requireAllCritical": true },
+      "items": [
+        {
+          "id": "v3-a10-i1",
+          "objectiveIds": ["ops.dotnet-configuration"],
+          "critical": false,
+          "promptMarkdown": "`Support:Timeout` is `30` in `appsettings.json` and the deployment sets the environment variable `Support__Timeout=5`. What does the application read, and why is the double underscore used?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "five",
+                "textMarkdown": "`5` — environment variables are registered after the JSON files, and `__` stands in for the `:` separator, which is not portable in environment variable names.",
+                "correct": true,
+                "explanationMarkdown": "Correct on both counts: later providers win, and the double underscore is the portable spelling of the section separator."
+              },
+              {
+                "id": "thirty",
+                "textMarkdown": "`30` — the JSON file is the canonical source and environment variables only supply missing keys.",
+                "correct": false,
+                "explanationMarkdown": "That inverts the chain. JSON provides defaults precisely so that the environment can override them at deployment time."
+              },
+              {
+                "id": "five-wrong-reason",
+                "textMarkdown": "`5` — and `__` is required because environment variables cannot contain lowercase letters.",
+                "correct": false,
+                "explanationMarkdown": "The value is right but the reason is not: environment variables handle lowercase fine. The substitution is for the `:` separator."
+              },
+              {
+                "id": "error",
+                "textMarkdown": "Neither — the mismatch between `:` and `__` means the environment variable is ignored entirely.",
+                "correct": false,
+                "explanationMarkdown": "The environment variable provider translates `__` into `:` specifically so this mapping works, which is what makes the override effective."
+              }
+            ]
+          },
+          "explanationMarkdown": "Later sources win, and the double underscore exists to make nested keys expressible in environments that dislike colons."
+        },
+        {
+          "id": "v3-a10-i2",
+          "objectiveIds": ["ops.dotnet-logging"],
+          "critical": true,
+          "promptMarkdown": "Which of these log calls should not survive code review?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "token",
+                "textMarkdown": "`_logger.LogInformation(\"Refreshed session {SessionToken}\", token);`",
+                "correct": true,
+                "explanationMarkdown": "Correct. It uses a proper template and a sensible level, and it still writes a credential into retained, aggregated, backed-up storage."
+              },
+              {
+                "id": "ticket",
+                "textMarkdown": "`_logger.LogInformation(\"Closed ticket {TicketId}\", ticketId);`",
+                "correct": false,
+                "explanationMarkdown": "A business event at an appropriate level with a queryable field. This is what a good log line looks like."
+              },
+              {
+                "id": "warning",
+                "textMarkdown": "`_logger.LogWarning(\"Retrying report build for {JobId}, attempt {Attempt}\", jobId, attempt);`",
+                "correct": false,
+                "explanationMarkdown": "A retry is exactly the recoverable-but-not-routine situation `Warning` is for, and both fields are useful."
+              },
+              {
+                "id": "duration",
+                "textMarkdown": "`_logger.LogInformation(\"Query took {ElapsedMs}ms\", elapsed);`",
+                "correct": false,
+                "explanationMarkdown": "A numeric field at an appropriate level. Whether it is too chatty depends on volume, but nothing about it is unsafe."
+              }
+            ]
+          },
+          "explanationMarkdown": "A correct template and level do not redeem logging a secret. Logs are retained and widely readable."
+        },
+        {
+          "id": "v3-a10-i3",
+          "objectiveIds": ["dotnet.background-services"],
+          "critical": true,
+          "promptMarkdown": "A `BackgroundService` constructor takes a `SupportContext` directly. What is the problem?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "captive",
+                "textMarkdown": "A captive dependency — the singleton service holds one scoped `DbContext` for the life of the process.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Resolve `IServiceScopeFactory` and create a scope per iteration instead."
+              },
+              {
+                "id": "thread-safe",
+                "textMarkdown": "Nothing, provided the service only ever reads and never writes.",
+                "correct": false,
+                "explanationMarkdown": "Reading still accumulates tracked entities and holds the connection. The lifetime mismatch is the problem, not the direction of the operation."
+              },
+              {
+                "id": "not-registered",
+                "textMarkdown": "`SupportContext` cannot be injected into a hosted service at all — the container refuses to resolve it.",
+                "correct": false,
+                "explanationMarkdown": "The container does throw for a scoped-into-singleton injection with scope validation enabled, but the conceptual problem — and what happens when validation is off — is the captive dependency itself."
+              },
+              {
+                "id": "async",
+                "textMarkdown": "`DbContext` cannot be used from a background thread, only from a request thread.",
+                "correct": false,
+                "explanationMarkdown": "It is usable from any thread, just not from several at once. There is no request-thread requirement."
+              }
+            ]
+          },
+          "explanationMarkdown": "Longer-lived services must never capture shorter-lived ones."
+        },
+        {
+          "id": "v3-a10-i4",
+          "objectiveIds": ["ops.dotnet-deployment"],
+          "critical": true,
+          "promptMarkdown": "During a rolling deployment, a background job is interrupted after writing its output but before marking itself complete. What does the next instance do, and what prevents harm?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "reruns",
+                "textMarkdown": "It reruns the job, so the effect and the completion record must commit in one transaction — with a unique constraint as a backstop.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Interruption is routine during deployment, so the design question is what a rerun does, and one transaction makes the answer safe."
+              },
+              {
+                "id": "resumes",
+                "textMarkdown": "It resumes the job from where it stopped, because the hosted service checkpoints progress automatically.",
+                "correct": false,
+                "explanationMarkdown": "There is no automatic checkpointing. Any resumability is something you build and persist yourself."
+              },
+              {
+                "id": "skips",
+                "textMarkdown": "It skips the job, since the output already exists and the sweep detects it.",
+                "correct": false,
+                "explanationMarkdown": "The job is still marked pending, which is the only thing the sweep looks at — so it is selected again."
+              },
+              {
+                "id": "alerts",
+                "textMarkdown": "It raises an error, because the job is in an inconsistent state.",
+                "correct": false,
+                "explanationMarkdown": "Nothing detects the inconsistency: a pending job with output already written looks exactly like a pending job. That silence is the danger."
+              }
+            ]
+          },
+          "explanationMarkdown": "Treat interruption as normal and ask what a rerun does, rather than trying to avoid being interrupted."
+        },
+        {
+          "id": "v3-a10-i5",
+          "objectiveIds": ["compare.node-vs-dotnet"],
+          "critical": false,
+          "promptMarkdown": "Which of these instincts from the Node track requires genuine rethinking in ASP.NET Core?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "module-cache",
+                "textMarkdown": "Keeping a module-level mutable cache, because requests are now served concurrently on multiple threads.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The event loop serialised access for free; a thread pool does not, so a plain `Dictionary` becomes unsafe."
+              },
+              {
+                "id": "scope-query",
+                "textMarkdown": "Scoping a query by owner so an unowned row is never returned.",
+                "correct": false,
+                "explanationMarkdown": "Identical in both stacks — a property of the query and the data, not of the runtime."
+              },
+              {
+                "id": "validate-input",
+                "textMarkdown": "Validating request bodies rather than trusting the declared types.",
+                "correct": false,
+                "explanationMarkdown": "Unchanged. C#'s stronger types still describe your code, not the bytes that arrived over the network."
+              },
+              {
+                "id": "additive-migrations",
+                "textMarkdown": "Applying additive migrations before deploying the code that uses them.",
+                "correct": false,
+                "explanationMarkdown": "Unchanged. It follows from old and new code running simultaneously during a rollout, which no framework alters."
+              }
+            ]
+          },
+          "explanationMarkdown": "Runtime-dependent instincts need rethinking; HTTP- and database-dependent ones transfer intact."
+        }
+      ]
+    }
+  ]
+}

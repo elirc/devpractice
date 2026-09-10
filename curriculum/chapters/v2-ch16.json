@@ -1,0 +1,1544 @@
+{
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v2-ch16",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Background work",
+      "conceptIds": [
+        "jobs.state-machine",
+        "jobs.retry-backoff",
+        "jobs.idempotency",
+        "jobs.interrupted-work"
+      ],
+      "prerequisiteIds": [
+        "db.idempotent-submission",
+        "http.retryable-failure",
+        "ops.request-id"
+      ],
+      "bodyMarkdown": "Fernwood emails a depot report every night. It is a function, called on a timer, and for eighteen months it worked. Then a mail provider had a slow evening, the function hung, the container was recycled mid-run, and the following morning some depots had two reports, some had none, and nobody could say which.\n\nWork that happens outside a request has no user watching it fail. That changes what 'done' has to mean. A request can afford to be a function call, because the caller observes the outcome; a background job cannot, because the only record of what happened is whatever the job itself wrote down.\n\nThis chapter is about writing that down. You will model a job as an explicit state machine so its progress is a fact in the database rather than a position in a call stack; distinguish failures worth retrying from failures that will never succeed, and back off so a retry does not amplify an outage; and make a rerun safe, so a job interrupted halfway can be resumed without duplicating what it already did.\n\nThe link back to the previous chapter is direct. A background job is a submission with no client to retry it thoughtfully, so it has to carry its own idempotency.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v2-l10",
+        "v2-l11",
+        "v2-l12"
+      ],
+      "assessmentId": "v2-a16",
+      "objectiveIds": [
+        "jobs.state-machine",
+        "jobs.retry-backoff",
+        "jobs.idempotency",
+        "jobs.interrupted-work"
+      ],
+      "missionIds": [],
+      "sortOrder": 15
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l10",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Jobs as explicit state machines",
+      "conceptIds": [
+        "jobs.state-machine"
+      ],
+      "prerequisiteIds": [
+        "sql.transactions"
+      ],
+      "bodyMarkdown": "The nightly report started as this:\n\n```js\nsetInterval(async () => { await sendDepotReports(); }, ONE_DAY);\n```\n\nThe job's state lives entirely in the call stack of a running function. Ask 'did last night's report go out?' and the honest answer is that nobody knows — the process that knew has exited.\n\nMaking the state **explicit** means the job is a row, and running it is a sequence of committed transitions:\n\n```\nqueued -> running -> succeeded\n                  -> failed -> queued        (retry)\n                            -> dead          (retries exhausted)\n```\n\nNow every question has an answer you can query: what is running, what failed, what is waiting, how long has it been in that state.\n\nThree design rules make this work.\n\n**Transitions are guarded.** A job moves `queued -> running` only *from* `queued`, and that guard belongs in the UPDATE, exactly like a revision check:\n\n```sql\nUPDATE jobs SET state = 'running', started_at = now(), worker_id = $1\n WHERE id = $2 AND state = 'queued';\n```\n\nZero rows means another worker claimed it first. This one statement is what stops two workers running the same job, and it is why a `SELECT ... then UPDATE` claim is wrong.\n\n**Terminal states are terminal.** `succeeded` and `dead` have no outgoing transitions. Anything that would move a job out of a terminal state is a bug, and encoding that explicitly means it is caught rather than absorbed.\n\n**Every transition is a committed fact, not a variable.** If the worker dies immediately after `running` is committed, the row still says `running` — which is the point. That stuck row is the evidence you need, and recovering it is a decision you can make deliberately.\n\nThe last rule has a cost worth stating plainly: a job in `running` whose worker has died will sit there forever unless something notices. That is not a flaw in the model, it is the model surfacing a fact the `setInterval` version simply lost — and the final lesson of this chapter is what to do about it.",
+      "chapterId": "v2-ch16",
+      "sortOrder": 0,
+      "objectives": [
+        "Model background work as explicit states with guarded transitions rather than as a running function.",
+        "Claim a job atomically so two workers cannot run it at once.",
+        "Explain why a committed 'running' state is more useful than an in-memory one."
+      ],
+      "estimatedMinutes": 17,
+      "workedExampleMarkdown": "Claiming and completing one job.\n\n```sql\nCREATE TABLE report_jobs (\n  id          bigserial PRIMARY KEY,\n  depot_id    bigint NOT NULL,\n  run_on      date   NOT NULL,\n  state       text   NOT NULL DEFAULT 'queued',\n  attempts    int    NOT NULL DEFAULT 0,\n  started_at  timestamptz,\n  worker_id   text,\n  last_error  text,\n  UNIQUE (depot_id, run_on)          -- one report per depot per day, enforced\n);\n```\n\nThat unique constraint is doing quiet work: it makes 'two reports for one depot on one day' unrepresentable, whatever the scheduler does.\n\n**The claim:**\n\n```js\nconst claimed = await db.$queryRaw`\n  UPDATE report_jobs SET state = 'running', started_at = now(),\n         worker_id = ${workerId}, attempts = attempts + 1\n   WHERE id = (SELECT id FROM report_jobs\n                WHERE state = 'queued'\n                ORDER BY id\n                FOR UPDATE SKIP LOCKED\n                LIMIT 1)\n  RETURNING *;\n`;\n```\n\n`FOR UPDATE SKIP LOCKED` is what makes several workers usable: each takes a different row instead of queueing behind the same one. The `state = 'queued'` predicate is the guard — a job already claimed is invisible to the next worker.\n\n**The completion:**\n\n```js\nawait db.reportJob.updateMany({\n  where: { id: job.id, state: 'running' },      // guard: still ours\n  data:  { state: 'succeeded', finishedAt: new Date() },\n});\n```\n\nGuarding the completion too seems redundant and is not: if a recovery sweep decided this job was abandoned and re-queued it, the guard stops a late-finishing worker from marking a job succeeded that another worker is now running.\n\n**What you can now ask:**\n\n```sql\nSELECT state, count(*) FROM report_jobs WHERE run_on = current_date GROUP BY state;\nSELECT * FROM report_jobs WHERE state = 'running' AND started_at < now() - interval '15 minutes';\n```\n\nNeither question was answerable when the state lived in a call stack.",
+      "commonMistakes": [
+        "Keeping job state in memory, so a restart loses all knowledge of what was in flight.",
+        "Claiming a job with a SELECT followed by an UPDATE, letting two workers claim the same row.",
+        "Omitting the state guard on the completion update, so a late worker can overwrite a job another worker has taken over.",
+        "Allowing transitions out of a terminal state, so a retried job can resurrect a succeeded one.",
+        "Relying on the scheduler to avoid duplicates instead of a unique constraint on the job's natural key.",
+        "Recording only success and failure, with no 'running' state, so an interrupted job is indistinguishable from one that never started."
+      ],
+      "summaryMarkdown": "Background work needs its state written down, because no caller is watching and the process that knew may be gone. Model a job as a row with explicit states and guard every transition inside the UPDATE, so claiming is atomic and two workers cannot run the same job. Keep terminal states terminal, enforce the job's natural uniqueness with a constraint, and accept that a stuck `running` row is evidence rather than a defect.",
+      "exerciseIds": [
+        "v2-e028",
+        "v2-e029",
+        "v2-e030"
+      ],
+      "reviewCardIds": [
+        "v2-c019",
+        "v2-c020"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: SELECT ... FOR UPDATE SKIP LOCKED",
+          "url": "https://www.postgresql.org/docs/current/sql-select.html#SQL-FOR-UPDATE-SHARE"
+        },
+        {
+          "label": "PostgreSQL: UPDATE",
+          "url": "https://www.postgresql.org/docs/current/sql-update.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e028",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Claim a job without racing",
+      "conceptIds": [
+        "jobs.state-machine"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Four ways to pick up the next job. One of them cannot be claimed twice.",
+      "lessonId": "v2-l10",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "Four workers poll the same `report_jobs` table. Which claim strategy guarantees that a job is run by exactly one worker?",
+      "hints": [
+        "You have seen this shape three times now. Which options separate the decision from the write?",
+        "The guarantee has to come from the database evaluating a condition as part of the write, not from timing or from luck.",
+        "An UPDATE whose WHERE clause includes the current state, returning the row it changed, is atomic; anything that reads first is not."
+      ],
+      "solution": {
+        "modelAnswer": "guarded-update",
+        "explanationMarkdown": "`UPDATE ... SET state='running' WHERE id=$1 AND state='queued' RETURNING *` either returns the row — you own it — or returns nothing, meaning someone else claimed it. The check and the claim are one operation, so there is no interval in which two workers can both believe they won."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "guarded-update",
+            "textMarkdown": "`UPDATE report_jobs SET state='running' WHERE id=$1 AND state='queued' RETURNING *`, treating an empty result as 'someone else got it'.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The guard is inside the write, so the claim is atomic and the empty result is a definite answer rather than a guess."
+          },
+          {
+            "id": "select-then-update",
+            "textMarkdown": "`SELECT` the oldest queued job, then `UPDATE` it to running.",
+            "correct": false,
+            "explanationMarkdown": "Two statements, so two workers can select the same row before either updates. This is the read-check-write race in yet another costume."
+          },
+          {
+            "id": "random-delay",
+            "textMarkdown": "Have each worker sleep a random interval before selecting, so they rarely collide.",
+            "correct": false,
+            "explanationMarkdown": "Timing is not a correctness mechanism. It reduces the collision rate, makes the remaining failures harder to reproduce, and slows every job down."
+          },
+          {
+            "id": "worker-modulo",
+            "textMarkdown": "Give each worker a number and have it take only jobs where `id % 4` equals that number.",
+            "correct": false,
+            "explanationMarkdown": "It does prevent overlap, but it also means a job is stuck if its assigned worker is down, and the partitioning breaks whenever the worker count changes. It buys exclusivity at the cost of availability."
+          }
+        ]
+      },
+      "primaryConceptId": "jobs.state-machine",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e029",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Implement the guarded transition",
+      "conceptIds": [
+        "jobs.state-machine"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The state machine as a pure function, so every illegal transition is a test rather than an incident.",
+      "lessonId": "v2-l10",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `nextState(job, event)`.\n\n`job` is `{ id, state, attempts, maxAttempts }`. `event` is `{ kind }` where `kind` is `'claim'`, `'succeed'`, `'fail'` or `'requeue'`.\n\nReturn `{ accepted: true, job: <updated job> }` or `{ accepted: false, reason: 'illegal transition' }`.\n\nThe legal transitions:\n\n- `'claim'`: only from `'queued'` -> `'running'`, and `attempts` increases by one.\n- `'succeed'`: only from `'running'` -> `'succeeded'`.\n- `'fail'`: only from `'running'`. If the job's `attempts` has reached `maxAttempts`, go to `'dead'`; otherwise go to `'failed'`.\n- `'requeue'`: only from `'failed'` -> `'queued'`.\n\nRules:\n\n- `'succeeded'` and `'dead'` are terminal: every event from them is illegal.\n- An unknown event kind is illegal from any state.\n- Only `state` and `attempts` ever change; everything else is carried through unchanged.\n- **Do not modify `job`.**",
+      "hints": [
+        "Each event is legal from exactly one state. Check the pair, not the event alone.",
+        "Only `claim` changes `attempts`, and it changes it *before* the failure comparison ever matters — so a job's attempt count already reflects the run that is failing.",
+        "Write one branch per event kind, each testing the required source state first and returning the refusal otherwise; build a fresh object for the accepted case."
+      ],
+      "solution": {
+        "code": "function nextState(job, event) {\n  const refuse = { accepted: false, reason: 'illegal transition' };\n  function moved(state, attempts) {\n    return {\n      accepted: true,\n      job: {\n        id: job.id,\n        state: state,\n        attempts: attempts,\n        maxAttempts: job.maxAttempts,\n      },\n    };\n  }\n  if (event.kind === 'claim') {\n    if (job.state !== 'queued') return refuse;\n    return moved('running', job.attempts + 1);\n  }\n  if (event.kind === 'succeed') {\n    if (job.state !== 'running') return refuse;\n    return moved('succeeded', job.attempts);\n  }\n  if (event.kind === 'fail') {\n    if (job.state !== 'running') return refuse;\n    if (job.attempts >= job.maxAttempts) return moved('dead', job.attempts);\n    return moved('failed', job.attempts);\n  }\n  if (event.kind === 'requeue') {\n    if (job.state !== 'failed') return refuse;\n    return moved('queued', job.attempts);\n  }\n  return refuse;\n}",
+        "explanationMarkdown": "Every branch tests the **pair** of current state and event. That is what makes the terminal states terminal without needing a special case for them: nothing lists `succeeded` or `dead` as a legal source, so every event from there falls through to the refusal.\n\nThis mirrors the SQL directly. `if (job.state !== 'queued') return refuse` is `WHERE ... AND state = 'queued'`, and the refusal is the zero-row result. Writing it as a pure function first is worth doing precisely because you can then exhaustively test transitions that are awkward to provoke against a real database.\n\nThe `attempts >= maxAttempts` comparison uses `>=` rather than `===` deliberately. If a bug or an operator edit ever pushes `attempts` past the limit, `===` would miss it and the job would return to `failed` and be retried forever; `>=` fails safe."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "nextState",
+        "starterCode": "function nextState(job, event) {\n  // Applies the event without checking which state the job is in.\n  const map = { claim: 'running', succeed: 'succeeded', fail: 'failed', requeue: 'queued' };\n  return {\n    accepted: true,\n    job: { id: job.id, state: map[event.kind], attempts: job.attempts, maxAttempts: job.maxAttempts },\n  };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "claim-from-queued",
+            "args": [
+              {
+                "id": 1,
+                "state": "queued",
+                "attempts": 0,
+                "maxAttempts": 3
+              },
+              {
+                "kind": "claim"
+              }
+            ],
+            "expected": {
+              "accepted": true,
+              "job": {
+                "id": 1,
+                "state": "running",
+                "attempts": 1,
+                "maxAttempts": 3
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "claim-from-running-is-illegal",
+            "args": [
+              {
+                "id": 1,
+                "state": "running",
+                "attempts": 1,
+                "maxAttempts": 3
+              },
+              {
+                "kind": "claim"
+              }
+            ],
+            "expected": {
+              "accepted": false,
+              "reason": "illegal transition"
+            },
+            "hidden": false
+          },
+          {
+            "id": "succeed-from-running",
+            "args": [
+              {
+                "id": 2,
+                "state": "running",
+                "attempts": 1,
+                "maxAttempts": 3
+              },
+              {
+                "kind": "succeed"
+              }
+            ],
+            "expected": {
+              "accepted": true,
+              "job": {
+                "id": 2,
+                "state": "succeeded",
+                "attempts": 1,
+                "maxAttempts": 3
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "fail-with-retries-left",
+            "args": [
+              {
+                "id": 3,
+                "state": "running",
+                "attempts": 1,
+                "maxAttempts": 3
+              },
+              {
+                "kind": "fail"
+              }
+            ],
+            "expected": {
+              "accepted": true,
+              "job": {
+                "id": 3,
+                "state": "failed",
+                "attempts": 1,
+                "maxAttempts": 3
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "fail-at-max-attempts-is-dead",
+            "args": [
+              {
+                "id": 4,
+                "state": "running",
+                "attempts": 3,
+                "maxAttempts": 3
+              },
+              {
+                "kind": "fail"
+              }
+            ],
+            "expected": {
+              "accepted": true,
+              "job": {
+                "id": 4,
+                "state": "dead",
+                "attempts": 3,
+                "maxAttempts": 3
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "requeue-from-failed",
+            "args": [
+              {
+                "id": 5,
+                "state": "failed",
+                "attempts": 1,
+                "maxAttempts": 3
+              },
+              {
+                "kind": "requeue"
+              }
+            ],
+            "expected": {
+              "accepted": true,
+              "job": {
+                "id": 5,
+                "state": "queued",
+                "attempts": 1,
+                "maxAttempts": 3
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "succeeded-is-terminal",
+            "args": [
+              {
+                "id": 6,
+                "state": "succeeded",
+                "attempts": 1,
+                "maxAttempts": 3
+              },
+              {
+                "kind": "requeue"
+              }
+            ],
+            "expected": {
+              "accepted": false,
+              "reason": "illegal transition"
+            },
+            "hidden": false
+          },
+          {
+            "id": "dead-is-terminal",
+            "args": [
+              {
+                "id": 7,
+                "state": "dead",
+                "attempts": 3,
+                "maxAttempts": 3
+              },
+              {
+                "kind": "claim"
+              }
+            ],
+            "expected": {
+              "accepted": false,
+              "reason": "illegal transition"
+            },
+            "hidden": false
+          },
+          {
+            "id": "unknown-event",
+            "args": [
+              {
+                "id": 8,
+                "state": "queued",
+                "attempts": 0,
+                "maxAttempts": 3
+              },
+              {
+                "kind": "cancel"
+              }
+            ],
+            "expected": {
+              "accepted": false,
+              "reason": "illegal transition"
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "jobs.state-machine",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e030",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the double-sent report",
+      "conceptIds": [
+        "jobs.state-machine"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Two workers, one job, two emails. Find the line that allowed it.",
+      "lessonId": "v2-l10",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "```js\n// line 1\nconst job = await db.reportJob.findFirst({ where: { state: 'queued' }, orderBy: { id: 'asc' } });\n// line 2\nif (!job) return;\n// line 3\nawait db.reportJob.update({ where: { id: job.id }, data: { state: 'running' } });\n// line 4\nawait sendReport(job);\n// line 5\nawait db.reportJob.update({ where: { id: job.id }, data: { state: 'succeeded' } });\n```\n\nTwo workers poll this loop. A depot received the same report twice.\n\nWhich change prevents it?",
+      "hints": [
+        "Trace two workers arriving at line 1 at the same moment. What does each get?",
+        "Line 3 updates by id alone, so it succeeds no matter what state the row is actually in.",
+        "The claim must assert the state it expects and report whether it won — the update needs a state guard and a count, and the worker must stop when the count is zero."
+      ],
+      "solution": {
+        "modelAnswer": "guarded-claim",
+        "explanationMarkdown": "Both workers ran line 1 and found the same queued job. Line 3 updates by `id` with no condition, so both succeeded in marking it running, and both went on to line 4. The row's state never prevented anything, because nothing ever checked it during a write.\n\n```js\nconst { count } = await db.reportJob.updateMany({\n  where: { id: job.id, state: 'queued' },\n  data:  { state: 'running', workerId, attempts: { increment: 1 } },\n});\nif (count === 0) return;   // another worker claimed it; nothing to do\n```\n\nNow exactly one worker's update matches, and the loser stops before sending anything.\n\nWorth noting what this does *not* fix: if the worker dies between line 3 and line 5, the job stays `running` forever. A guarded claim makes concurrent duplication impossible, but interrupted work is a separate problem needing a separate mechanism — which is the last lesson of this chapter."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "guarded-claim",
+            "textMarkdown": "Make line 3 a conditional update guarded on `state: 'queued'` and return when it affects zero rows.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The guard makes the claim atomic, so only one worker proceeds past it and the loser exits before sending."
+          },
+          {
+            "id": "transaction",
+            "textMarkdown": "Wrap lines 1 to 3 in a transaction.",
+            "correct": false,
+            "explanationMarkdown": "Under Read Committed both transactions still find the same queued job and both still update by id. Atomicity of the pair does not make the read stable."
+          },
+          {
+            "id": "single-worker",
+            "textMarkdown": "Run only one worker, so no two can poll at once.",
+            "correct": false,
+            "explanationMarkdown": "It avoids this bug by removing concurrency, and with it any ability to scale or tolerate a worker failing. It also breaks again the moment a deploy briefly runs two instances."
+          },
+          {
+            "id": "check-before-send",
+            "textMarkdown": "Re-read the job before line 4 and skip sending if it is no longer queued.",
+            "correct": false,
+            "explanationMarkdown": "Another unguarded read with its own window, and by line 4 both workers have already set the state to running — so the re-read tells them both to continue."
+          }
+        ]
+      },
+      "primaryConceptId": "jobs.state-machine",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c019",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why write job state to the database?",
+      "conceptIds": [
+        "jobs.state-machine"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what explicit state buys over a running function.",
+      "lessonId": "v2-l10",
+      "type": "recall",
+      "promptMarkdown": "A nightly task runs as a function on a timer. Name two questions you cannot answer about it, which an explicit job row would answer.",
+      "answerMarkdown": "Whether last night's run actually completed, and whether anything is currently in flight — along with how many times a given piece of work has been attempted and why it last failed. When the state lives in a call stack, the process that knew has exited, so none of it is recoverable.",
+      "explanationMarkdown": "The deeper point is that background work has no observer. A request that fails tells a user; a nightly job that fails tells nobody unless it wrote something down. Explicit state turns 'did it work?' from an archaeology exercise across logs into a query, and it is also the precondition for retrying and for recovering interrupted work — neither of which is possible if you cannot tell what was in progress.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "jobs.state-machine"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c020",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why guard the completion update?",
+      "conceptIds": [
+        "jobs.state-machine"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Debug a guard that looks unnecessary.",
+      "lessonId": "v2-l10",
+      "type": "debugging",
+      "promptMarkdown": "A worker marks its job succeeded with `WHERE id = $1 AND state = 'running'`. A colleague says the state check is redundant since the worker only reaches that line after claiming the job. When are they wrong?",
+      "answerMarkdown": "When a recovery sweep has already decided the job was abandoned — because the worker stalled past its lease — and re-queued it. Another worker may now be running it. Without the guard, the slow original worker would mark succeeded a job that is currently in progress elsewhere, and the second run's outcome would be lost.",
+      "explanationMarkdown": "The colleague's reasoning assumes the worker is the only thing that can change the row, which stops being true the moment recovery exists. Guarding every transition on its expected source state costs nothing and means a worker that has lost ownership finds out rather than corrupting the record. It is the same instinct as a revision check: assert what you believe at the moment you write, not at the moment you decided.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "jobs.state-machine"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l11",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Retries that help instead of piling on",
+      "conceptIds": [
+        "jobs.retry-backoff"
+      ],
+      "prerequisiteIds": [
+        "http.retryable-failure"
+      ],
+      "bodyMarkdown": "Retrying is not free, and retrying the wrong thing is worse than not retrying at all.\n\nThe first question is always **is this failure worth retrying?** Failures come in two kinds. A **transient** failure might succeed next time: a timeout, a connection reset, a `503`, a `429`, a deadlock. A **permanent** failure will not: a `400` because the payload is malformed, a `404` because the depot was deleted, a `401` because the credential is wrong. Retrying a permanent failure burns capacity and delays the moment someone finds out. Twenty attempts at a malformed payload is twenty identical rejections and a job that reaches `dead` an hour later than it should have.\n\nThe second question is **how long to wait**. Retrying immediately, and in a tight loop, is how a brief outage becomes a sustained one: the provider is struggling, and you respond by increasing your request rate. **Exponential backoff** — 1s, 2s, 4s, 8s — gives a recovering dependency room, and caps out so a job is not scheduled a week away.\n\nThe third question is the one people miss: **what happens when everything retries at once?** If a provider is down for two minutes, every job that failed retries at the same computed instant, and the recovery is met with a synchronised spike — a **thundering herd**. The fix is **jitter**: randomise each delay within a range so the retries spread out. Backoff without jitter merely moves the spike; it does not flatten it.\n\nFinally, retries need an end. `maxAttempts` and a `dead` state — a dead-letter queue in any other vocabulary — mean a job that cannot succeed stops consuming capacity and starts being visible. A dead job with its `last_error` recorded is a work item; a job retrying forever is invisible.\n\nOne caution that connects to the next lesson: **retrying is only safe if the work is idempotent**. A job that sends an email and then fails while recording success will, on retry, send a second email. Backoff controls *when* you retry; it says nothing about whether retrying is safe.",
+      "chapterId": "v2-ch16",
+      "sortOrder": 1,
+      "objectives": [
+        "Distinguish transient failures worth retrying from permanent ones that should fail fast.",
+        "Compute an exponential backoff delay with a cap, and explain why jitter is required.",
+        "Explain why retries need a maximum and a terminal dead state."
+      ],
+      "estimatedMinutes": 17,
+      "workedExampleMarkdown": "The report job's retry policy, and what each part is for.\n\n```js\nconst BASE_MS = 1000;\nconst CAP_MS  = 60_000;\n\nfunction retryDelay(attempt) {\n  const exponential = Math.min(CAP_MS, BASE_MS * 2 ** (attempt - 1));\n  return Math.random() * exponential;         // full jitter\n}\n```\n\n```\nattempt 1 -> up to  1s      attempt 4 -> up to  8s\nattempt 2 -> up to  2s      attempt 5 -> up to 16s\nattempt 3 -> up to  4s      attempt 9 -> up to 60s (capped)\n```\n\n**Why the cap.** Without it, attempt 20 is scheduled eleven days out. A job nobody will see again is functionally dead, but it occupies a queue slot and reports as pending.\n\n**Why full jitter rather than a fixed delay.** Picture 500 jobs failing during a two-minute outage. With plain backoff every one of them retries at exactly `t + 4s`, so the recovering provider is hit by 500 simultaneous requests and fails again — and the synchronisation gets *worse* each round, because the survivors are now perfectly in step. Spreading each retry uniformly across its window turns that spike into a trickle.\n\n**Why classify first.**\n\n```js\nfunction isRetryable(failure) {\n  if (failure.kind === 'timeout' || failure.kind === 'connection-reset') return true;\n  if (failure.kind === 'http') {\n    return failure.status === 429 || failure.status >= 500;\n  }\n  return false;\n}\n```\n\nA `400` means the request itself is wrong; sending it again cannot change that. Failing fast to `dead` puts it in front of a person while the context is fresh, instead of an hour of pointless attempts later.\n\n**The special case worth knowing:** a `429` often carries `Retry-After`. When a server tells you when to come back, that instruction beats your computed backoff — it is the only party that knows how overloaded it is.",
+      "commonMistakes": [
+        "Retrying every failure, so malformed payloads are attempted twenty times and the real problem surfaces an hour late.",
+        "Retrying immediately in a tight loop, converting a brief dependency blip into a sustained overload.",
+        "Using exponential backoff with no jitter, so every failed job retries at the same instant and the herd stays synchronised.",
+        "Omitting a cap, scheduling later attempts so far out that the job is effectively abandoned while still counted as pending.",
+        "Retrying forever with no maximum, so a permanently broken job is invisible instead of dead and actionable.",
+        "Adding retries to work that is not idempotent, turning one failure into several duplicated side effects."
+      ],
+      "summaryMarkdown": "Classify before you retry: transient failures deserve another attempt, permanent ones should fail fast so a human sees them sooner. Back off exponentially with a cap, and add jitter, because backoff alone only relocates the thundering herd. Give retries a maximum and a terminal dead state so broken work becomes visible. And remember that backoff controls when you retry, never whether retrying is safe — that is idempotency's job.",
+      "exerciseIds": [
+        "v2-e031",
+        "v2-e032",
+        "v2-e033"
+      ],
+      "reviewCardIds": [
+        "v2-c021",
+        "v2-c022"
+      ],
+      "references": [
+        {
+          "label": "MDN: HTTP Retry-After",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Retry-After"
+        },
+        {
+          "label": "MDN: HTTP response status codes",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e031",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which failures should be retried?",
+      "conceptIds": [
+        "jobs.retry-backoff"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Sort four real failures into retryable and permanent.",
+      "lessonId": "v2-l11",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "The report job calls a mail provider. Which of these failures are worth retrying? Select all that apply.",
+      "hints": [
+        "Ask of each: could sending exactly the same request again succeed, without anything else changing?",
+        "A failure caused by the content of the request will reproduce identically every time.",
+        "Timeouts and server-side overload are temporary conditions; malformed input and a deleted resource are not."
+      ],
+      "solution": {
+        "modelAnswer": "timeout, 503, 429",
+        "explanationMarkdown": "A timeout, a `503` and a `429` are all conditions on the other side that may clear. A `400` for a malformed payload will reproduce exactly, so retrying it wastes capacity and delays the alert."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "timeout",
+            "textMarkdown": "The request timed out after 30 seconds.",
+            "correct": true,
+            "explanationMarkdown": "Retryable. The request may not have been processed, or the provider may simply have been slow; either way another attempt can succeed. Note this one also needs idempotency, since the work may have happened."
+          },
+          {
+            "id": "503",
+            "textMarkdown": "The provider returned `503 Service Unavailable`.",
+            "correct": true,
+            "explanationMarkdown": "Retryable. A 5xx is the server saying the problem is on its side, which is the definition of a condition that may clear."
+          },
+          {
+            "id": "429",
+            "textMarkdown": "The provider returned `429 Too Many Requests`.",
+            "correct": true,
+            "explanationMarkdown": "Retryable, and the clearest case: the server is explicitly asking you to come back later. If it sends `Retry-After`, honour that instead of your computed backoff."
+          },
+          {
+            "id": "400",
+            "textMarkdown": "The provider returned `400 Bad Request` — the recipient address is malformed.",
+            "correct": false,
+            "explanationMarkdown": "Permanent. The request is wrong and will be wrong every time. Fail fast to dead with the error recorded, so someone can correct the address."
+          }
+        ]
+      },
+      "primaryConceptId": "jobs.retry-backoff",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e032",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Decide the retry and its delay",
+      "conceptIds": [
+        "jobs.retry-backoff"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Classification, backoff, cap and ceiling in one decision function.",
+      "lessonId": "v2-l11",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `retryDecision(job, failure)`.\n\n`job` is `{ attempts, maxAttempts }` — `attempts` counts the run that has just failed.\n\n`failure` is one of:\n\n- `{ kind: 'timeout' }` or `{ kind: 'connection-reset' }` — retryable\n- `{ kind: 'http', status, retryAfterMs }` — retryable when `status` is `429` or `>= 500`; `retryAfterMs` may be absent\n- anything else — not retryable\n\nReturn:\n\n- `{ retry: false, reason: 'permanent' }` when the failure is not retryable.\n- `{ retry: false, reason: 'exhausted' }` when it is retryable but `attempts` has reached `maxAttempts`.\n- `{ retry: true, delayMs }` otherwise, where `delayMs` is:\n  - `failure.retryAfterMs` when that is present and the failure is an `http` one — a server's own instruction wins;\n  - otherwise `min(60000, 1000 * 2 ** (attempts - 1))`.\n\nRules:\n\n- Check permanence **before** exhaustion: a permanent failure on the last attempt reports `'permanent'`.\n- Return a deterministic delay; jitter is applied by the caller.\n- Do not modify either argument.",
+      "hints": [
+        "Three outcomes, and the order you test them in is specified. Decide retryability first.",
+        "`retryAfterMs` overrides your computed backoff, but only for an http failure and only when it is actually present.",
+        "Work out `retryable` as a boolean, return 'permanent' if it is false, return 'exhausted' if attempts have run out, then choose between the server's instruction and the capped exponential."
+      ],
+      "solution": {
+        "code": "function retryDecision(job, failure) {\n  let retryable = false;\n  if (failure.kind === 'timeout' || failure.kind === 'connection-reset') {\n    retryable = true;\n  } else if (failure.kind === 'http') {\n    retryable = failure.status === 429 || failure.status >= 500;\n  }\n  if (!retryable) {\n    return { retry: false, reason: 'permanent' };\n  }\n  if (job.attempts >= job.maxAttempts) {\n    return { retry: false, reason: 'exhausted' };\n  }\n  if (failure.kind === 'http' && failure.retryAfterMs !== undefined && failure.retryAfterMs !== null) {\n    return { retry: true, delayMs: failure.retryAfterMs };\n  }\n  let delay = 1000;\n  for (let i = 1; i < job.attempts; i += 1) {\n    delay = delay * 2;\n  }\n  delay = Math.min(delay, 60000);\n  return { retry: true, delayMs: delay };\n}",
+        "explanationMarkdown": "Testing permanence before exhaustion is not cosmetic. Both produce `retry: false`, so it would be easy to think the order does not matter — but the *reason* is what an operator reads, and 'exhausted' on a malformed payload sends them looking for a capacity problem that does not exist.\n\n`retryAfterMs` winning over the computed backoff reflects who knows more. Your exponential curve is a guess about a system you cannot see; `Retry-After` is that system telling you directly. Checking explicitly for `undefined`/`null` rather than truthiness matters because `retryAfterMs: 0` is a legitimate instruction meaning 'immediately', and a truthiness test would silently discard it.\n\nThe delay is returned deterministically and jitter is left to the caller, which keeps this function testable — a function returning a random value cannot be asserted against, and pushing the randomness to the edge is what makes the policy reviewable."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "retryDecision",
+        "starterCode": "function retryDecision(job, failure) {\n  // Retries everything, with a fixed delay.\n  if (job.attempts >= job.maxAttempts) {\n    return { retry: false, reason: 'exhausted' };\n  }\n  return { retry: true, delayMs: 1000 };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "timeout-first-attempt",
+            "args": [
+              {
+                "attempts": 1,
+                "maxAttempts": 5
+              },
+              {
+                "kind": "timeout"
+              }
+            ],
+            "expected": {
+              "retry": true,
+              "delayMs": 1000
+            },
+            "hidden": false
+          },
+          {
+            "id": "backoff-doubles",
+            "args": [
+              {
+                "attempts": 4,
+                "maxAttempts": 8
+              },
+              {
+                "kind": "connection-reset"
+              }
+            ],
+            "expected": {
+              "retry": true,
+              "delayMs": 8000
+            },
+            "hidden": false
+          },
+          {
+            "id": "backoff-is-capped",
+            "args": [
+              {
+                "attempts": 12,
+                "maxAttempts": 20
+              },
+              {
+                "kind": "timeout"
+              }
+            ],
+            "expected": {
+              "retry": true,
+              "delayMs": 60000
+            },
+            "hidden": false
+          },
+          {
+            "id": "bad-request-is-permanent",
+            "args": [
+              {
+                "attempts": 1,
+                "maxAttempts": 5
+              },
+              {
+                "kind": "http",
+                "status": 400
+              }
+            ],
+            "expected": {
+              "retry": false,
+              "reason": "permanent"
+            },
+            "hidden": false
+          },
+          {
+            "id": "server-error-is-retryable",
+            "args": [
+              {
+                "attempts": 2,
+                "maxAttempts": 5
+              },
+              {
+                "kind": "http",
+                "status": 503
+              }
+            ],
+            "expected": {
+              "retry": true,
+              "delayMs": 2000
+            },
+            "hidden": false
+          },
+          {
+            "id": "retry-after-wins",
+            "args": [
+              {
+                "attempts": 3,
+                "maxAttempts": 5
+              },
+              {
+                "kind": "http",
+                "status": 429,
+                "retryAfterMs": 7500
+              }
+            ],
+            "expected": {
+              "retry": true,
+              "delayMs": 7500
+            },
+            "hidden": false
+          },
+          {
+            "id": "exhausted-when-attempts-reach-max",
+            "args": [
+              {
+                "attempts": 5,
+                "maxAttempts": 5
+              },
+              {
+                "kind": "timeout"
+              }
+            ],
+            "expected": {
+              "retry": false,
+              "reason": "exhausted"
+            },
+            "hidden": false
+          },
+          {
+            "id": "permanent-checked-before-exhausted",
+            "args": [
+              {
+                "attempts": 5,
+                "maxAttempts": 5
+              },
+              {
+                "kind": "http",
+                "status": 400
+              }
+            ],
+            "expected": {
+              "retry": false,
+              "reason": "permanent"
+            },
+            "hidden": false
+          },
+          {
+            "id": "unknown-kind-is-permanent",
+            "args": [
+              {
+                "attempts": 1,
+                "maxAttempts": 5
+              },
+              {
+                "kind": "serialisation-error"
+              }
+            ],
+            "expected": {
+              "retry": false,
+              "reason": "permanent"
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "jobs.retry-backoff",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e033",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the retry loop after an outage",
+      "conceptIds": [
+        "jobs.retry-backoff"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The provider recovered and immediately fell over again. Read the retry policy.",
+      "lessonId": "v2-l11",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "A mail provider was down for two minutes. 800 report jobs failed. When it recovered it was knocked over again immediately, three times in a row.\n\n```js\nasync function runJob(job) {\n  for (let attempt = 1; attempt <= 5; attempt += 1) {\n    try {\n      return await sendReport(job);\n    } catch (err) {\n      await sleep(1000 * 2 ** (attempt - 1));\n    }\n  }\n  throw new Error('giving up');\n}\n```\n\nThe backoff is exponential. Why did the provider keep falling over?",
+      "hints": [
+        "All 800 jobs failed at roughly the same moment. What does that mean for when they each retry?",
+        "The delay depends only on the attempt number, which is the same for every job — so every job waits the same amount of time.",
+        "Without randomisation the retries stay synchronised, so the provider is hit by 800 simultaneous requests each round."
+      ],
+      "solution": {
+        "modelAnswer": "no-jitter",
+        "explanationMarkdown": "The delay is a pure function of the attempt number, so all 800 jobs — which failed together — wait exactly 1s, then 2s, then 4s together. The provider recovers and receives 800 simultaneous requests, falls over, and the survivors are now even more tightly synchronised for the next round.\n\n```js\nawait sleep(Math.random() * Math.min(60_000, 1000 * 2 ** (attempt - 1)));\n```\n\nFull jitter spreads each round across its window, converting a spike into a ramp. Exponential backoff without jitter controls the *average* rate while leaving the *instantaneous* rate untouched, and it is the instantaneous rate that knocks a recovering service over.\n\nTwo further defects worth noting in the same review. The loop retries every exception, so a malformed address is attempted five times. And the retries happen in-process with `sleep`, so a worker restart during the backoff loses the job entirely — the delay belongs in the job row as a `run_after` timestamp, not in a sleeping call stack."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "no-jitter",
+            "textMarkdown": "Every job computes the same delay from the same attempt number, so all 800 retry simultaneously; the backoff needs jitter to spread them out.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Backoff without randomisation relocates the herd rather than dispersing it, and each failed round leaves the survivors more tightly synchronised."
+          },
+          {
+            "id": "too-few-attempts",
+            "textMarkdown": "Five attempts is not enough to outlast a two-minute outage; the maximum should be higher.",
+            "correct": false,
+            "explanationMarkdown": "More attempts against a synchronised herd means more simultaneous rounds. The problem is the shape of the traffic, not its duration."
+          },
+          {
+            "id": "delay-too-short",
+            "textMarkdown": "The base delay of one second is too short for a mail provider.",
+            "correct": false,
+            "explanationMarkdown": "Lengthening it delays the spike without flattening it — 800 requests arriving together is the issue whether they arrive at 4 seconds or 40."
+          },
+          {
+            "id": "should-not-retry",
+            "textMarkdown": "Report sending should not be retried at all; failures should go straight to a human.",
+            "correct": false,
+            "explanationMarkdown": "That would turn every transient blip into manual work. Retrying is right here; retrying in lockstep is what caused the harm."
+          }
+        ]
+      },
+      "primaryConceptId": "jobs.retry-backoff",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c021",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why is jitter necessary?",
+      "conceptIds": [
+        "jobs.retry-backoff"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what exponential backoff alone does not solve.",
+      "lessonId": "v2-l11",
+      "type": "recall",
+      "promptMarkdown": "Exponential backoff is already in place. What does adding jitter fix that backoff alone does not?",
+      "answerMarkdown": "Synchronisation. Jobs that failed together compute identical delays and therefore retry together, so a recovering dependency is hit by the whole herd at once. Jitter randomises each delay within its window so the retries spread out over time.",
+      "explanationMarkdown": "Backoff controls the average request rate per job; jitter controls the instantaneous rate across all jobs, and it is the instantaneous spike that knocks over a service that has just come back. The effect compounds without it: every failed round leaves the survivors even more tightly aligned, so the herd gets sharper rather than dispersing.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "jobs.retry-backoff"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c022",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Where should the retry delay live?",
+      "conceptIds": [
+        "jobs.retry-backoff",
+        "jobs.interrupted-work"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the state lesson to the retry mechanism.",
+      "lessonId": "v2-l11",
+      "type": "transfer",
+      "promptMarkdown": "A worker implements backoff with `await sleep(delay)` inside its retry loop. What breaks when the worker is restarted during a deploy, and what is the alternative?",
+      "answerMarkdown": "The sleeping job is lost: its state lives in a call stack that no longer exists, so nothing will ever retry it. The alternative is to store the delay as a `run_after` timestamp on the job row and return the worker to the queue, so any worker can pick the job up once that time has passed.",
+      "explanationMarkdown": "This is the same lesson as explicit job state, applied to waiting. A sleeping worker is holding state in memory — and deploys, crashes and scale-downs all destroy it. Writing `run_after` to the row makes the wait a durable fact, and has the useful side effect of making the queue query the single place that decides what is eligible to run.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "jobs.retry-backoff"
+    },
+    {
+      "kind": "lesson",
+      "id": "v2-l12",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Idempotency and interrupted work",
+      "conceptIds": [
+        "jobs.idempotency",
+        "jobs.interrupted-work"
+      ],
+      "prerequisiteIds": [
+        "db.idempotent-submission",
+        "jobs.state-machine"
+      ],
+      "bodyMarkdown": "The previous lesson ended on a warning: retrying is only safe if the work is idempotent. This lesson is about earning that.\n\nA job that fails halfway has usually already *done* something. The report job might have emailed nine of twelve depots before the provider timed out. Rerunning it naively sends nine duplicates, so the retry mechanism designed to improve reliability is now the thing damaging it.\n\nThere are three ways to make a rerun safe, and they suit different work.\n\n**Make the effect naturally idempotent.** Setting a value is idempotent; incrementing one is not. `SET status='sent'` can run twice harmlessly, while `SET count = count + 1` cannot. Where you can express work as a assignment rather than an adjustment, the problem disappears.\n\n**Record progress at a granularity you can resume from.** If the unit of work is 'one depot's report', record each one as it completes. A rerun then skips what is already recorded. This turns one large non-idempotent job into twelve small idempotent ones, and it is usually the right answer — the smaller the committed unit, the less a crash costs.\n\n**Carry an idempotency key into the external call.** When the side effect is someone else's system, do what a client does for you: send a key the provider will deduplicate on. This is the only approach that closes the window fully, because it makes the *provider* responsible for the duplicate you cannot otherwise detect.\n\nThat window is worth naming precisely. Between 'the email was sent' and 'we recorded that it was sent' there is an instant where a crash leaves the two facts disagreeing, and no amount of local transactional care removes it — the send is not in your database. You choose which way to fail: record before sending and risk a report that was never sent, or send before recording and risk sending twice. For an email, a duplicate is usually cheaper than a silent omission; for a payment, the reverse. Making that choice explicitly is the job.\n\nThen there is work that was interrupted and never came back. A worker that dies mid-job leaves a row in `running` forever, because the thing that would have moved it on no longer exists. The standard remedy is a **lease**: the claim records `started_at`, and a sweep re-queues jobs whose lease has expired.\n\nThe danger in a lease is choosing the timeout. Too long and a genuinely dead job blocks for hours. Too short and you re-queue a job that is merely *slow* — and now two workers are running it, which is exactly the situation the guarded claim was there to prevent. The safe pattern is a **heartbeat**: a long-running job periodically extends its lease, so 'slow' and 'dead' stop being indistinguishable.",
+      "chapterId": "v2-ch16",
+      "sortOrder": 2,
+      "objectives": [
+        "Make a rerun safe by choosing between natural idempotency, recorded progress, and a provider-side key.",
+        "Identify the window between an external effect and its record, and choose which way to fail.",
+        "Recover interrupted work with a lease, without re-queueing jobs that are merely slow."
+      ],
+      "estimatedMinutes": 19,
+      "workedExampleMarkdown": "The report job, made safe to rerun.\n\n**Before — one job, twelve side effects, no record until the end:**\n\n```js\nfor (const depot of depots) {\n  await sendReport(depot);\n}\nawait markJobSucceeded(job.id);      // reached only if all twelve succeed\n```\n\nFail on the tenth and a rerun sends nine duplicates.\n\n**After — progress recorded per unit:**\n\n```js\nfor (const depot of depots) {\n  const claimed = await db.reportDelivery.createMany({\n    data: [{ jobId: job.id, depotId: depot.id, state: 'sending' }],\n    skipDuplicates: true,               // UNIQUE (job_id, depot_id)\n  });\n  if (claimed.count === 0) continue;    // already handled by an earlier run\n\n  await sendReport(depot, { idempotencyKey: `${job.id}:${depot.id}` });\n  await db.reportDelivery.updateMany({\n    where: { jobId: job.id, depotId: depot.id, state: 'sending' },\n    data:  { state: 'sent' },\n  });\n}\n```\n\nThree mechanisms, layered. The unique constraint makes the claim atomic, so a rerun skips completed depots. The idempotency key means that even a depot left in `sending` — sent, but crashed before recording — is deduplicated by the provider on the retry. And the unit of work is now one depot, so a crash costs at most one uncertain delivery instead of twelve.\n\n**Recovering the abandoned job:**\n\n```sql\nUPDATE report_jobs\n   SET state = 'queued', worker_id = NULL\n WHERE state = 'running'\n   AND heartbeat_at < now() - interval '5 minutes';\n```\n\nNote it compares `heartbeat_at`, not `started_at`. A job that legitimately takes twenty minutes keeps extending its lease, so it is never mistaken for a dead one — whereas a `started_at` comparison would have to be set longer than the slowest possible job, which means a genuinely dead worker blocks for that long too.",
+      "commonMistakes": [
+        "Recording progress only at the end, so any interruption forces a full rerun with duplicated side effects.",
+        "Assuming a database transaction protects an external call; the send is not in your database and cannot roll back.",
+        "Expressing work as an increment where an assignment would do, making the operation impossible to repeat safely.",
+        "Choosing a lease timeout by guessing, so slow jobs are re-queued and run twice concurrently.",
+        "Comparing the lease against started_at rather than a heartbeat, making 'slow' and 'dead' indistinguishable.",
+        "Re-queueing an abandoned job without a guard, so a worker that was merely paused can still complete it afterwards."
+      ],
+      "summaryMarkdown": "A retry is only an improvement if the work can be repeated. Prefer assignments to increments, record progress at a granularity you can resume from, and pass an idempotency key into external calls so someone else's system deduplicates what you cannot see. The window between an effect and its record cannot be closed locally — choose which way to fail, deliberately. Recover interrupted jobs with a lease compared against a heartbeat, so slow work is never mistaken for dead work.",
+      "exerciseIds": [
+        "v2-e034",
+        "v2-e035",
+        "v2-e036"
+      ],
+      "reviewCardIds": [
+        "v2-c023",
+        "v2-c024"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: INSERT ... ON CONFLICT DO NOTHING",
+          "url": "https://www.postgresql.org/docs/current/sql-insert.html#SQL-ON-CONFLICT"
+        },
+        {
+          "label": "MDN: Idempotent",
+          "url": "https://developer.mozilla.org/en-US/docs/Glossary/Idempotent"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e034",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the duplicated emails after a crash",
+      "conceptIds": [
+        "jobs.idempotency"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The retry worked exactly as designed, and that is the problem.",
+      "lessonId": "v2-l12",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "```js\nasync function runReportJob(job) {\n  const depots = await db.depot.findMany();\n  for (const depot of depots) {\n    await sendReport(depot);\n  }\n  await db.reportJob.update({ where: { id: job.id }, data: { state: 'succeeded' } });\n}\n```\n\nThe worker was recycled while depot 10 of 12 was sending. The job's lease expired, it was re-queued, and a second worker ran it. Depots 1 to 9 received two reports.\n\nWhat is the fix?",
+      "hints": [
+        "The retry mechanism did its job. Ask what the *job* failed to record while it was working.",
+        "The only durable fact this function writes is at the very end, so a rerun cannot know anything happened.",
+        "Record each depot's delivery as its own committed unit, so a rerun can skip what is already done."
+      ],
+      "solution": {
+        "modelAnswer": "per-unit-progress",
+        "explanationMarkdown": "The job records nothing until all twelve sends complete, so an interrupted run leaves no trace of the nine that succeeded. The rerun has no way to know, and repeats them.\n\nMaking each depot its own committed unit fixes it:\n\n```js\nconst claimed = await db.reportDelivery.createMany({\n  data: [{ jobId: job.id, depotId: depot.id }],\n  skipDuplicates: true,        // UNIQUE (job_id, depot_id)\n});\nif (claimed.count === 0) continue;\nawait sendReport(depot, { idempotencyKey: `${job.id}:${depot.id}` });\n```\n\nA rerun now skips the nine that are recorded. The idempotency key covers the one remaining uncertainty — depot 10, which may have been sent before the crash — by making the provider responsible for that duplicate.\n\nNote that no arrangement of local code closes that last window on its own: the send happens in someone else's system and cannot participate in your transaction. You can only shrink the window, and then decide which way it should fail."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "per-unit-progress",
+            "textMarkdown": "Record each depot's delivery as its own committed row before sending, so a rerun skips the ones already done, and pass an idempotency key to the provider for the in-flight one.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Committing progress per unit is what makes a rerun resumable, and the provider-side key covers the single delivery whose outcome is genuinely unknown."
+          },
+          {
+            "id": "longer-lease",
+            "textMarkdown": "Increase the lease timeout so the job is not re-queued while it is still running.",
+            "correct": false,
+            "explanationMarkdown": "The worker was recycled — it was not slow, it was gone. A longer lease only delays the recovery, and leaves the same duplication whenever a rerun does happen."
+          },
+          {
+            "id": "transaction",
+            "textMarkdown": "Wrap the whole loop in a database transaction so the sends roll back on failure.",
+            "correct": false,
+            "explanationMarkdown": "Emails cannot be rolled back. A transaction governs your database writes and has no reach into another system's side effects."
+          },
+          {
+            "id": "no-retry",
+            "textMarkdown": "Do not re-queue report jobs; require an operator to rerun them manually.",
+            "correct": false,
+            "explanationMarkdown": "The duplication would happen just the same when the operator reran it, since the job still has no record of its progress. It also trades an automated recovery for a manual one without fixing anything."
+          }
+        ]
+      },
+      "primaryConceptId": "jobs.idempotency",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e035",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Recover only the jobs that are really abandoned",
+      "conceptIds": [
+        "jobs.interrupted-work"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The lease sweep, as a pure decision over a snapshot of the queue.",
+      "lessonId": "v2-l12",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "stretch",
+      "estimatedMinutes": 17,
+      "promptMarkdown": "Implement `recoverStalled(jobs, now, leaseMs)`.\n\n`jobs` is an array of `{ id, state, heartbeatAt, attempts, maxAttempts }`, where `heartbeatAt` is a number of milliseconds and may be `null`.\n\nReturn `{ requeue, dead, ignored }` — three arrays of job ids, each in input order:\n\n- Only jobs in state `'running'` are candidates. Every other state goes to `ignored`.\n- A running job is **stalled** when `heartbeatAt` is `null`, or when `now - heartbeatAt > leaseMs`. A running job that is not stalled goes to `ignored`.\n- A stalled job whose `attempts` has reached `maxAttempts` goes to `dead`; otherwise it goes to `requeue`.\n\nRules:\n\n- The comparison is strict: a job exactly at the lease boundary is **not** stalled.\n- Do not modify `jobs`.",
+      "hints": [
+        "Every job lands in exactly one of the three arrays. Work out the order of questions before writing any of them.",
+        "A missing heartbeat means the job never reported at all, which is the strongest evidence of abandonment — treat it as stalled without doing arithmetic on null.",
+        "For each job: not running means ignored; then decide stalled; not stalled means ignored; then attempts decides dead versus requeue."
+      ],
+      "solution": {
+        "code": "function recoverStalled(jobs, now, leaseMs) {\n  const requeue = [];\n  const dead = [];\n  const ignored = [];\n  for (let i = 0; i < jobs.length; i += 1) {\n    const job = jobs[i];\n    if (job.state !== 'running') {\n      ignored.push(job.id);\n      continue;\n    }\n    let stalled = false;\n    if (job.heartbeatAt === null || job.heartbeatAt === undefined) {\n      stalled = true;\n    } else if (now - job.heartbeatAt > leaseMs) {\n      stalled = true;\n    }\n    if (!stalled) {\n      ignored.push(job.id);\n      continue;\n    }\n    if (job.attempts >= job.maxAttempts) {\n      dead.push(job.id);\n    } else {\n      requeue.push(job.id);\n    }\n  }\n  return { requeue: requeue, dead: dead, ignored: ignored };\n}",
+        "explanationMarkdown": "The null heartbeat is checked before the arithmetic, and not only to avoid `now - null` quietly evaluating to `now`. A job that has never reported a heartbeat is the clearest case of abandonment there is, and treating it as a separate condition says so.\n\nThe strict `>` matters more than it looks. A job exactly at the boundary is given the benefit of the doubt, and the cost of being wrong is asymmetric: leaving a dead job for one more sweep costs a few seconds, while re-queueing a live one means two workers running the same job — the precise failure the guarded claim exists to prevent. When a heuristic decides between 'wait a bit longer' and 'duplicate the work', it should lean toward waiting.\n\nRouting exhausted jobs to `dead` rather than requeueing them stops a job that crashes its worker every time from cycling forever, which is how one poisonous job can consume a queue indefinitely."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "recoverStalled",
+        "starterCode": "function recoverStalled(jobs, now, leaseMs) {\n  // Re-queues every running job, whether or not its lease has expired.\n  const requeue = [];\n  const ignored = [];\n  for (let i = 0; i < jobs.length; i += 1) {\n    if (jobs[i].state === 'running') {\n      requeue.push(jobs[i].id);\n    } else {\n      ignored.push(jobs[i].id);\n    }\n  }\n  return { requeue: requeue, dead: [], ignored: ignored };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "expired-lease-is-requeued",
+            "args": [
+              [
+                {
+                  "id": 1,
+                  "state": "running",
+                  "heartbeatAt": 1000,
+                  "attempts": 1,
+                  "maxAttempts": 3
+                }
+              ],
+              10000,
+              5000
+            ],
+            "expected": {
+              "requeue": [
+                1
+              ],
+              "dead": [],
+              "ignored": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "live-heartbeat-is-ignored",
+            "args": [
+              [
+                {
+                  "id": 2,
+                  "state": "running",
+                  "heartbeatAt": 9000,
+                  "attempts": 1,
+                  "maxAttempts": 3
+                }
+              ],
+              10000,
+              5000
+            ],
+            "expected": {
+              "requeue": [],
+              "dead": [],
+              "ignored": [
+                2
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "null-heartbeat-is-stalled",
+            "args": [
+              [
+                {
+                  "id": 3,
+                  "state": "running",
+                  "heartbeatAt": null,
+                  "attempts": 1,
+                  "maxAttempts": 3
+                }
+              ],
+              10000,
+              5000
+            ],
+            "expected": {
+              "requeue": [
+                3
+              ],
+              "dead": [],
+              "ignored": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "exactly-at-the-boundary-is-not-stalled",
+            "args": [
+              [
+                {
+                  "id": 4,
+                  "state": "running",
+                  "heartbeatAt": 5000,
+                  "attempts": 1,
+                  "maxAttempts": 3
+                }
+              ],
+              10000,
+              5000
+            ],
+            "expected": {
+              "requeue": [],
+              "dead": [],
+              "ignored": [
+                4
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "stalled-and-exhausted-is-dead",
+            "args": [
+              [
+                {
+                  "id": 5,
+                  "state": "running",
+                  "heartbeatAt": 1000,
+                  "attempts": 3,
+                  "maxAttempts": 3
+                }
+              ],
+              10000,
+              5000
+            ],
+            "expected": {
+              "requeue": [],
+              "dead": [
+                5
+              ],
+              "ignored": []
+            },
+            "hidden": false
+          },
+          {
+            "id": "non-running-states-are-ignored",
+            "args": [
+              [
+                {
+                  "id": 6,
+                  "state": "queued",
+                  "heartbeatAt": null,
+                  "attempts": 0,
+                  "maxAttempts": 3
+                },
+                {
+                  "id": 7,
+                  "state": "succeeded",
+                  "heartbeatAt": 1,
+                  "attempts": 1,
+                  "maxAttempts": 3
+                }
+              ],
+              10000,
+              5000
+            ],
+            "expected": {
+              "requeue": [],
+              "dead": [],
+              "ignored": [
+                6,
+                7
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "mixed-queue-preserves-order",
+            "args": [
+              [
+                {
+                  "id": 8,
+                  "state": "running",
+                  "heartbeatAt": 1000,
+                  "attempts": 1,
+                  "maxAttempts": 3
+                },
+                {
+                  "id": 9,
+                  "state": "failed",
+                  "heartbeatAt": null,
+                  "attempts": 2,
+                  "maxAttempts": 3
+                },
+                {
+                  "id": 10,
+                  "state": "running",
+                  "heartbeatAt": 9500,
+                  "attempts": 1,
+                  "maxAttempts": 3
+                },
+                {
+                  "id": 11,
+                  "state": "running",
+                  "heartbeatAt": null,
+                  "attempts": 5,
+                  "maxAttempts": 5
+                }
+              ],
+              10000,
+              5000
+            ],
+            "expected": {
+              "requeue": [
+                8
+              ],
+              "dead": [
+                11
+              ],
+              "ignored": [
+                9,
+                10
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "empty-queue",
+            "args": [
+              [],
+              10000,
+              5000
+            ],
+            "expected": {
+              "requeue": [],
+              "dead": [],
+              "ignored": []
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "jobs.interrupted-work",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v2-e036",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose which way the payment job should fail",
+      "conceptIds": [
+        "jobs.idempotency"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The window between an effect and its record cannot be closed. Decide how to fall on the right side of it.",
+      "lessonId": "v2-l12",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "A job charges a customer's card through a payment provider, then records the charge in your database. The worker can crash at any moment.\n\nIn five to nine sentences: explain why no arrangement of your own code can make these two events atomic; state which order you would choose and why; and describe the one additional mechanism that would make the residual risk acceptable. Say explicitly what goes wrong in the failure case you are accepting.",
+      "hints": [
+        "One of the two events happens in a system you do not control. What does that mean for your transaction boundary?",
+        "Compare the two failure modes concretely: charging twice, versus charging once and having no record of it.",
+        "The provider can help — the same way you help your own clients when they retry a submission."
+      ],
+      "solution": {
+        "modelAnswer": "The charge happens in the provider's system, so it cannot take part in my database transaction and cannot be rolled back when my commit fails; whichever order I choose, there is an instant where one event has happened and the other has not. I would record an intent row *before* calling the provider, then charge, then update that row with the outcome — so a crash always leaves evidence that a charge may exist, rather than leaving no trace at all. The failure I am accepting is an intent row stuck in 'charging' whose true outcome is unknown: the customer may or may not have been charged, and until it is resolved I must not retry blindly, because a blind retry is how a customer gets billed twice. The mechanism that makes this acceptable is an idempotency key sent with the charge, derived deterministically from the intent row's id, so a retry of that exact charge is deduplicated by the provider and returns the original result. With that in place a stuck intent can safely be retried or reconciled by querying the provider for that key. Charging first and recording after is the worse order here, because a crash then leaves a real charge with no record at all, which is invisible until the customer complains.",
+        "explanationMarkdown": "The key realisation is that the atomicity question is settled by *where the effect lives*: an external side effect is outside your transaction, full stop. From there it becomes a choice between two failure modes, and the right choice depends on which is cheaper to detect and repair. For money, an unrecorded charge is much worse than a known-uncertain one, because nobody can find it.\n\nA strong answer names the provider-side idempotency key, since it is what converts 'never retry, it might double-charge' into 'retry safely'. An answer that stops at 'use a transaction' has missed that the transaction cannot reach the thing that matters."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Explains that the external charge cannot participate in the local transaction, so the two events cannot be made atomic by any local arrangement.",
+          "Chooses an order and justifies it by comparing the two concrete failure modes, rather than asserting one is safer.",
+          "States explicitly what goes wrong in the accepted failure case — an unresolved intent whose true outcome is unknown, which must not be blindly retried.",
+          "Identifies a provider-side idempotency key, derived deterministically, as the mechanism that makes a retry or reconciliation safe."
+        ],
+        "modelAnswerMarkdown": "See the model answer. The three things being assessed are: recognising that the boundary is set by where the effect lives; making a reasoned choice between failure modes rather than claiming to eliminate them; and naming the idempotency key as what makes the residual risk recoverable."
+      },
+      "primaryConceptId": "jobs.idempotency",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c023",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Assignment or increment?",
+      "conceptIds": [
+        "jobs.idempotency"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the simplest test for whether work can be repeated.",
+      "lessonId": "v2-l12",
+      "type": "recall",
+      "promptMarkdown": "Why is `SET status = 'sent'` safe to run twice while `SET count = count + 1` is not, and what does that suggest when designing a job?",
+      "answerMarkdown": "An assignment produces the same final state however many times it runs, while an increment produces a different one each time. When designing a job, prefer expressing the effect as 'make this true' rather than 'adjust this by an amount', because the first is naturally idempotent and the second needs an external mechanism to be safe.",
+      "explanationMarkdown": "This is the cheapest idempotency available — it costs nothing at runtime and needs no extra table. Where an increment is genuinely required, the usual route is to make the *unit* idempotent instead: record a row per contributing event with a unique key, and derive the count from those rows. The count then becomes a consequence of facts that can each be recorded at most once.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "jobs.idempotency"
+    },
+    {
+      "kind": "review_card",
+      "id": "v2-c024",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Lease against started_at or heartbeat?",
+      "conceptIds": [
+        "jobs.interrupted-work"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the recovery design to a job with a wide range of runtimes.",
+      "lessonId": "v2-l12",
+      "type": "transfer",
+      "promptMarkdown": "Some report jobs finish in 10 seconds and some take 25 minutes. Why does a lease compared against `started_at` force a bad trade-off, and what removes it?",
+      "answerMarkdown": "With `started_at` the timeout has to exceed the slowest possible run, so it must be over 25 minutes — meaning a genuinely dead worker blocks its job for that long. Shortening it would re-queue slow-but-healthy jobs and run them twice. A heartbeat removes the trade-off: a live job keeps extending its lease, so the timeout only has to exceed the heartbeat interval, and dead work is detected in seconds regardless of how long the job would have taken.",
+      "explanationMarkdown": "The underlying problem is that `started_at` conflates 'has been running a long time' with 'is no longer running', and those need different responses. A heartbeat separates them by making liveness something the worker asserts continuously rather than something inferred from elapsed time. The same reasoning appears in health checks and connection keepalives — when you need to distinguish slow from dead, ask for a signal instead of guessing from duration.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "jobs.interrupted-work"
+    },
+    {
+      "kind": "assessment",
+      "id": "v2-a16",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Background work placement",
+      "conceptIds": [
+        "jobs.state-machine",
+        "jobs.retry-backoff",
+        "jobs.idempotency",
+        "jobs.interrupted-work"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five questions on job state, retries, idempotency and recovery. Pass four, including both critical items, to place out of this chapter.",
+      "chapterId": "v2-ch16",
+      "items": [
+        {
+          "id": "v2-a16-i1",
+          "objectiveIds": [
+            "jobs.state-machine"
+          ],
+          "critical": true,
+          "promptMarkdown": "Several workers poll one job table. What single property must the claim operation have so a job is never run twice concurrently?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "atomic-guard",
+                "textMarkdown": "The state check and the state change must happen in one statement, so the claim either wins outright or affects no rows.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Any gap between checking that a job is queued and marking it running is a window two workers can both pass through."
+              },
+              {
+                "id": "ordering",
+                "textMarkdown": "Workers must poll in a consistent order so they do not collide.",
+                "correct": false,
+                "explanationMarkdown": "Consistent ordering prevents deadlock between transactions holding multiple locks; it does nothing to stop two workers claiming the same first row."
+              },
+              {
+                "id": "unique-worker",
+                "textMarkdown": "Each job must be assigned to a named worker in advance.",
+                "correct": false,
+                "explanationMarkdown": "That prevents overlap but sacrifices availability: a job assigned to a worker that is down waits for it, and the assignment breaks whenever the worker set changes."
+              },
+              {
+                "id": "short-poll",
+                "textMarkdown": "Workers must poll at different intervals so their requests interleave.",
+                "correct": false,
+                "explanationMarkdown": "Timing is not a correctness mechanism — it only makes the collision rarer and harder to reproduce."
+              }
+            ]
+          },
+          "explanationMarkdown": "This is the same guarded-write shape as a revision check and a conditional stock update; recognising it across contexts is the point."
+        },
+        {
+          "id": "v2-a16-i2",
+          "objectiveIds": [
+            "jobs.retry-backoff"
+          ],
+          "critical": false,
+          "promptMarkdown": "A job retries with delays of 1s, 2s, 4s, 8s. Six hundred jobs fail simultaneously during a brief provider outage. What will happen when the provider recovers, and why?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "herd",
+                "textMarkdown": "All six hundred will retry at the same instants, because the delay depends only on the attempt number, likely overwhelming the recovering provider.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Exponential backoff without jitter keeps the herd synchronised, and each failed round aligns the survivors even more tightly."
+              },
+              {
+                "id": "fine",
+                "textMarkdown": "The retries will be naturally spread out, because each job started at a slightly different time.",
+                "correct": false,
+                "explanationMarkdown": "They failed together — the outage, not their start times, determined when their retry clocks began — so their delays elapse together too."
+              },
+              {
+                "id": "capped",
+                "textMarkdown": "Nothing problematic, since exponential backoff guarantees the request rate falls over time.",
+                "correct": false,
+                "explanationMarkdown": "It reduces the average rate per job while leaving the instantaneous rate untouched, and it is the instantaneous spike that knocks over a recovering service."
+              },
+              {
+                "id": "dead",
+                "textMarkdown": "The jobs will exhaust their attempts before the provider recovers and go to the dead state.",
+                "correct": false,
+                "explanationMarkdown": "Possible for a long outage, but it does not describe what happens on recovery, and it treats a symptom of the missing jitter as the outcome."
+              }
+            ]
+          },
+          "explanationMarkdown": "Jitter is the part of the retry policy most often left out, because backoff alone looks sufficient until you consider the whole population."
+        },
+        {
+          "id": "v2-a16-i3",
+          "objectiveIds": [
+            "jobs.idempotency"
+          ],
+          "critical": true,
+          "promptMarkdown": "A job sends an email and then records that it sent it. The worker can crash between the two. Which statement is true?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "cannot-close",
+                "textMarkdown": "The window cannot be closed locally, because the send is not part of your database transaction; you can only shrink it and choose which way it fails.",
+                "correct": true,
+                "explanationMarkdown": "Correct. An external side effect cannot be rolled back by your commit, so the design question is which failure mode you prefer and how you detect it afterwards."
+              },
+              {
+                "id": "transaction",
+                "textMarkdown": "Wrapping both in a transaction makes them atomic.",
+                "correct": false,
+                "explanationMarkdown": "A transaction governs your database writes only. The email has already left; nothing you commit or roll back can recall it."
+              },
+              {
+                "id": "record-first",
+                "textMarkdown": "Recording first and sending second eliminates the problem.",
+                "correct": false,
+                "explanationMarkdown": "It reverses the failure rather than removing it: now a crash can leave a report recorded as sent that never went out — usually the worse of the two, since nobody notices."
+              },
+              {
+                "id": "retry",
+                "textMarkdown": "A retry with exponential backoff resolves it.",
+                "correct": false,
+                "explanationMarkdown": "Backoff decides when to retry, not whether retrying is safe. Retrying a send that may already have happened is exactly how duplicates are produced."
+              }
+            ]
+          },
+          "explanationMarkdown": "Recognising that transaction boundaries stop at your own database is what separates a design that shrinks this window from one that pretends it is not there."
+        },
+        {
+          "id": "v2-a16-i4",
+          "objectiveIds": [
+            "jobs.interrupted-work"
+          ],
+          "critical": false,
+          "promptMarkdown": "A recovery sweep re-queues jobs whose lease has expired. What is the risk of setting the lease too short, and what mechanism removes the trade-off?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "heartbeat",
+                "textMarkdown": "A slow but healthy job is re-queued and then runs twice concurrently; a heartbeat that a live job extends removes the need to guess.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Without a heartbeat the timeout has to exceed the slowest legitimate run, which means dead work is detected slowly; with one, liveness is asserted rather than inferred."
+              },
+              {
+                "id": "more-workers",
+                "textMarkdown": "The queue backs up; adding more workers compensates.",
+                "correct": false,
+                "explanationMarkdown": "A short lease does not back the queue up — it re-queues work that is already running, which adds duplicate execution rather than delay."
+              },
+              {
+                "id": "no-risk",
+                "textMarkdown": "There is no real risk, because the guarded claim prevents two workers from running the same job.",
+                "correct": false,
+                "explanationMarkdown": "The guard prevents two workers claiming a job in the same state, but a re-queued job is genuinely back in the queue, so a second worker claims it legitimately while the first is still working."
+              },
+              {
+                "id": "dead-letter",
+                "textMarkdown": "Jobs reach the dead state too quickly; raising maxAttempts fixes it.",
+                "correct": false,
+                "explanationMarkdown": "Attempt counts and lease duration are independent. Raising the maximum lets a wrongly re-queued job be duplicated more times, not fewer."
+              }
+            ]
+          },
+          "explanationMarkdown": "Distinguishing 'slow' from 'dead' by asking for a signal rather than inferring from elapsed time is a pattern well beyond job queues."
+        },
+        {
+          "id": "v2-a16-i5",
+          "objectiveIds": [
+            "jobs.state-machine",
+            "jobs.idempotency"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which changes make a multi-step job safe to rerun after an interruption? Select all that apply.",
+          "grading": {
+            "kind": "choice",
+            "mode": "multiple",
+            "options": [
+              {
+                "id": "per-unit",
+                "textMarkdown": "Commit progress per unit of work, so a rerun can skip units already recorded.",
+                "correct": true,
+                "explanationMarkdown": "Correct, and usually the highest-value change: it converts one large non-repeatable job into many small repeatable ones."
+              },
+              {
+                "id": "provider-key",
+                "textMarkdown": "Pass a deterministic idempotency key into each external call.",
+                "correct": true,
+                "explanationMarkdown": "Correct. It makes the external system responsible for deduplicating the one effect you cannot observe or roll back."
+              },
+              {
+                "id": "bigger-transaction",
+                "textMarkdown": "Wrap all the steps in a single larger database transaction.",
+                "correct": false,
+                "explanationMarkdown": "It makes the local writes all-or-nothing, which actually removes the progress record a rerun needs, and it still has no reach over external effects."
+              },
+              {
+                "id": "more-attempts",
+                "textMarkdown": "Increase maxAttempts so the job eventually succeeds.",
+                "correct": false,
+                "explanationMarkdown": "More attempts at a job that duplicates its effects means more duplication. Attempt count is orthogonal to whether a rerun is safe."
+              }
+            ]
+          },
+          "explanationMarkdown": "The two correct answers work at different layers — your database and the provider's — and a job with meaningful external effects usually needs both."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}
