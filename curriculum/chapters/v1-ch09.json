@@ -1,0 +1,1383 @@
+{
+  "note": "Chapter 9 — Node.js APIs (L25-L27). No HTTP server runs in the V1 grader, so the runnable tasks are the pure pieces a handler delegates to: a query-parameter parser, a body validator and an error-to-response mapper. Route structure, layering and disclosure are taught through code-reading, classification and rubric review.",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Node.js APIs",
+      "conceptIds": [
+        "node.route-boundaries",
+        "node.handler-stages",
+        "node.parameter-parsing",
+        "node.separation-of-concerns",
+        "node.runtime-validation",
+        "node.invalid-input",
+        "ts.compile-vs-runtime",
+        "http.validation-response",
+        "node.error-contracts",
+        "node.stack-trace-disclosure",
+        "http.error-mapping",
+        "http.status-codes"
+      ],
+      "prerequisiteIds": ["js.functions", "js.async-await"],
+      "bodyMarkdown": "The Wrenly Support Desk queue now needs a server behind it. This chapter is about the seam where an HTTP request stops being a request and becomes ordinary business logic — and about everything that goes wrong when that seam is not drawn.\n\nA route handler has a job with a shape. It parses and checks what arrived, decides who is asking and whether they may, calls domain code that knows nothing about HTTP, and turns the outcome into a status and a body. When those five stages are tangled together, the business rules become impossible to test without a server, and the transport details leak into places that should never have heard of a status code.\n\nEverything crossing that boundary is untrusted. A TypeScript interface describing the request body is a statement about what you *hope* arrived; it is erased before the program runs and checks nothing. The check has to happen at runtime, on the edge, before the value reaches code that assumes it is well formed.\n\nAnd the response has a contract too. Every error a client can receive should have a documented shape, a stable machine-readable code, and a status that means what it says — while internal detail, especially a stack trace, stops at the boundary and goes to the logs instead.",
+      "trackId": "v1-track",
+      "lessonIds": ["v1-l25", "v1-l26", "v1-l27"],
+      "assessmentId": "v1-a09",
+      "objectiveIds": [
+        "node.route-boundaries",
+        "node.handler-stages",
+        "node.parameter-parsing",
+        "node.separation-of-concerns",
+        "node.runtime-validation",
+        "node.invalid-input",
+        "ts.compile-vs-runtime",
+        "http.validation-response",
+        "node.error-contracts",
+        "node.stack-trace-disclosure",
+        "http.error-mapping",
+        "http.status-codes"
+      ],
+      "missionIds": [],
+      "sortOrder": 8
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l25",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Route boundaries",
+      "conceptIds": [
+        "node.route-boundaries",
+        "node.handler-stages",
+        "node.parameter-parsing",
+        "node.separation-of-concerns"
+      ],
+      "prerequisiteIds": ["js.functions", "js.async-await"],
+      "bodyMarkdown": "A route handler is a translator. On one side there is HTTP: strings in a path, strings in a query, a body of unknown shape, headers, a status code. On the other side there is your application: real numbers, real dates, checked values, functions with names like `listTicketsForAgent`. The handler's job is to move between the two and nothing else.\n\nThat gives a handler a predictable set of stages: **parse** the raw inputs into checked values, **authorise** the caller, **delegate** to domain code, then **respond** by mapping the outcome to a status and a body. Errors are handled once, at the end, rather than in five places along the way.\n\nParsing deserves particular attention because everything in a URL is a string. `?page=2` gives you `\"2\"`, and `?page=` gives you `\"\"`, and `?page=abc` gives you `\"abc\"`, and a client can send `?page=2&page=3` and hand you an array. `Number('')` is `0`, and `parseInt('1.5')` is `1`, so a careless parse turns bad input into a plausible wrong answer instead of a clear rejection. Defaults belong here too: the handler decides that a missing page means the first one.\n\nSeparation of concerns is the payoff. Domain code that takes checked values and returns results — never a `res` object, never a status code — can be tested in milliseconds without starting a server, reused by a background job or a command-line tool, and read without knowing anything about Express. When business rules live inside the handler instead, the only way to test \"agents cannot resolve another team's tickets\" is to send an HTTP request.",
+      "chapterId": "v1-ch09",
+      "sortOrder": 0,
+      "objectives": [
+        "Name the ordered stages a route handler performs and what belongs in each.",
+        "Turn raw path and query strings into checked values with explicit defaults.",
+        "Keep business rules in functions that know nothing about HTTP."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "```js\n// routes/tickets.js — transport only\napp.get('/api/tickets', async (req, res, next) => {\n  try {\n    // 1. parse: everything in req.query is a string, or missing, or an array\n    const parsed = parseListQuery(req.query);\n    if (!parsed.ok) {\n      return res.status(400).json({ error: { code: 'invalid_query', details: parsed.errors } });\n    }\n\n    // 2. authorise\n    const agent = req.agent; // established by earlier middleware\n\n    // 3. delegate: domain code, no HTTP anywhere inside\n    const page = await listTicketsForAgent(agent.id, parsed.value);\n\n    // 4. respond\n    return res.status(200).json({ items: page.items, total: page.total });\n  } catch (error) {\n    return next(error); // one error path, handled centrally\n  }\n});\n```\n\n```js\n// domain/tickets.js — knows nothing about HTTP\nexport async function listTicketsForAgent(agentId, { page, pageSize, status }) {\n  const where = status === 'all' ? { agentId } : { agentId, status };\n  return ticketRepository.paginate(where, { page, pageSize });\n}\n```\n\nRead the second file and notice what is absent: no `req`, no `res`, no status codes, no knowledge that a page number arrived as the string `\"2\"`. That is what makes it testable in a millisecond and reusable from a nightly report job.",
+      "commonMistakes": [
+        "Calling `Number(req.query.page)` with no check, so `?page=` becomes `0` and `?page=abc` becomes `NaN`, both of which flow into a query as if they were valid.",
+        "Using `parseInt`, which happily reads `1` out of `'1.5'` and `12` out of `'12kg'` instead of rejecting them.",
+        "Assuming a query parameter is a string; most frameworks hand you an array when the client repeats the key.",
+        "Passing `res` into a service function so it can 'just send the response itself', which welds the business rule to HTTP forever.",
+        "Writing `try`/`catch` in every handler with a different error shape in each, instead of one central error handler.",
+        "Forgetting `next(error)` in an async handler, so a rejected promise leaves the request hanging until it times out."
+      ],
+      "summaryMarkdown": "A handler parses, authorises, delegates and responds — in that order, with errors handled once. Everything from a URL is a string until you check it. Domain functions take checked values and return results; they never see `req` or `res`.",
+      "exerciseIds": ["v1-e073", "v1-e074", "v1-e075"],
+      "reviewCardIds": ["v1-c049", "v1-c050"],
+      "references": [
+        {
+          "label": "Express: Routing",
+          "url": "https://expressjs.com/en/guide/routing.html"
+        },
+        {
+          "label": "MDN: URLSearchParams",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams"
+        },
+        {
+          "label": "MDN: parseInt()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/parseInt"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e073",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Parse the ticket list query",
+      "conceptIds": ["node.parameter-parsing", "node.handler-stages"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The first stage of a handler, extracted. Everything here arrived as a string from a URL, so every value is a claim rather than a fact.",
+      "lessonId": "v1-l25",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 18,
+      "promptMarkdown": "Write `parseListQuery(query)`. `query` is the object a framework builds from the query string: every property is a **string**, and any property may be absent.\n\nRules:\n\n- `page` — a string of digits representing an integer of at least 1. Absent means `1`.\n- `pageSize` — a string of digits representing an integer from 1 to 100 inclusive. Absent means `20`.\n- `status` — one of `open`, `resolved` or `all`. Absent means `all`.\n\nOn success return `{ ok: true, value: { page, pageSize, status } }` with `page` and `pageSize` as **numbers**.\n\nOn failure return `{ ok: false, errors: [...] }` containing these exact messages, in this order — page, then pageSize, then status:\n\n- `page must be an integer of at least 1`\n- `pageSize must be an integer between 1 and 100`\n- `status must be 'open', 'resolved' or 'all'`\n\nDo not modify `query`.",
+      "hints": [
+        "Collect every problem rather than returning at the first one — a client that sent two bad parameters should learn about both in one response instead of discovering them one round trip at a time.",
+        "`Number('')` is `0` and `parseInt('1.5')` is `1`, so neither is a safe way to decide whether a string is an integer. Check the shape of the string first, for example with `/^\\d+$/`, and only then convert it.",
+        "Write one small helper, `toInteger(raw)`, that returns `null` for anything that is not a digits-only string, and treat `null` as 'invalid' only when the property was actually present — an absent property means the default, not an error."
+      ],
+      "solution": {
+        "code": "function parseListQuery(query) {\n  const errors = [];\n\n  const page = toInteger(query.page);\n  if (query.page !== undefined && (page === null || page < 1)) {\n    errors.push('page must be an integer of at least 1');\n  }\n\n  const pageSize = toInteger(query.pageSize);\n  if (query.pageSize !== undefined && (pageSize === null || pageSize < 1 || pageSize > 100)) {\n    errors.push('pageSize must be an integer between 1 and 100');\n  }\n\n  const status = query.status === undefined ? 'all' : query.status;\n  if (status !== 'open' && status !== 'resolved' && status !== 'all') {\n    errors.push(\"status must be 'open', 'resolved' or 'all'\");\n  }\n\n  if (errors.length > 0) {\n    return { ok: false, errors: errors };\n  }\n  return {\n    ok: true,\n    value: {\n      page: page === null ? 1 : page,\n      pageSize: pageSize === null ? 20 : pageSize,\n      status: status,\n    },\n  };\n}\n\nfunction toInteger(raw) {\n  if (typeof raw !== 'string' || !/^\\d+$/.test(raw)) {\n    return null;\n  }\n  return Number(raw);\n}",
+        "explanationMarkdown": "The shape check comes before the conversion, and that ordering is the whole idea. `Number` and `parseInt` are both willing to produce a number from input that is not a number, so using them as the test means malformed input silently becomes a plausible value — the worst possible failure mode for a paging parameter, because nobody notices.\n\nCollecting all three errors rather than returning at the first one is a courtesy that costs nothing here and saves the client a sequence of round trips. Absent and invalid are also kept firmly apart: a missing `page` is a request for the default, while `page=abc` is a request that cannot be honoured."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "parseListQuery",
+        "starterCode": "function parseListQuery(query) {\n  return { ok: true, value: { page: 1, pageSize: 20, status: 'all' } };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-query-uses-defaults",
+            "args": [{}],
+            "expected": { "ok": true, "value": { "page": 1, "pageSize": 20, "status": "all" } },
+            "hidden": false
+          },
+          {
+            "id": "parses-strings-into-numbers",
+            "args": [{ "page": "3", "pageSize": "50", "status": "open" }],
+            "expected": { "ok": true, "value": { "page": 3, "pageSize": 50, "status": "open" } },
+            "hidden": false
+          },
+          {
+            "id": "page-one-is-valid",
+            "args": [{ "page": "1", "pageSize": "20", "status": "all" }],
+            "expected": { "ok": true, "value": { "page": 1, "pageSize": 20, "status": "all" } },
+            "hidden": false
+          },
+          {
+            "id": "page-zero-is-rejected",
+            "args": [{ "page": "0" }],
+            "expected": { "ok": false, "errors": ["page must be an integer of at least 1"] },
+            "hidden": false
+          },
+          {
+            "id": "non-numeric-page-is-rejected",
+            "args": [{ "page": "two" }],
+            "expected": { "ok": false, "errors": ["page must be an integer of at least 1"] },
+            "hidden": false
+          },
+          {
+            "id": "decimal-page-is-rejected",
+            "args": [{ "page": "1.5" }],
+            "expected": { "ok": false, "errors": ["page must be an integer of at least 1"] },
+            "hidden": false
+          },
+          {
+            "id": "page-size-one-hundred-is-accepted",
+            "args": [{ "pageSize": "100" }],
+            "expected": { "ok": true, "value": { "page": 1, "pageSize": 100, "status": "all" } },
+            "hidden": false
+          },
+          {
+            "id": "page-size-one-hundred-and-one-is-rejected",
+            "args": [{ "pageSize": "101" }],
+            "expected": {
+              "ok": false,
+              "errors": ["pageSize must be an integer between 1 and 100"]
+            },
+            "hidden": false
+          },
+          {
+            "id": "unknown-status-is-rejected",
+            "args": [{ "status": "urgent" }],
+            "expected": {
+              "ok": false,
+              "errors": ["status must be 'open', 'resolved' or 'all'"]
+            },
+            "hidden": false
+          },
+          {
+            "id": "empty-string-page-is-not-zero",
+            "args": [{ "page": "" }],
+            "expected": { "ok": false, "errors": ["page must be an integer of at least 1"] },
+            "hidden": true
+          },
+          {
+            "id": "every-error-is-reported-in-order",
+            "args": [{ "page": "0", "pageSize": "0", "status": "nope" }],
+            "expected": {
+              "ok": false,
+              "errors": [
+                "page must be an integer of at least 1",
+                "pageSize must be an integer between 1 and 100",
+                "status must be 'open', 'resolved' or 'all'"
+              ]
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "node.parameter-parsing",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e074",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Find the business rule hiding in a route",
+      "conceptIds": ["node.separation-of-concerns", "node.route-boundaries"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read the handler and decide what it has taken on that does not belong to it, and what that costs the team six months from now.",
+      "lessonId": "v1-l25",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "```js\napp.post('/api/tickets/:id/resolve', async (req, res) => {\n  const ticket = await db.ticket.findUnique({ where: { id: req.params.id } });\n  if (!ticket) return res.status(404).json({ error: 'not found' });\n\n  if (ticket.status === 'resolved') {\n    return res.status(409).json({ error: 'already resolved' });\n  }\n  if (ticket.teamId !== req.agent.teamId) {\n    return res.status(403).json({ error: 'not your team' });\n  }\n  if (ticket.openSubtasks > 0) {\n    return res.status(409).json({ error: 'subtasks still open' });\n  }\n\n  await db.ticket.update({\n    where: { id: ticket.id },\n    data: { status: 'resolved', resolvedAt: new Date(), resolvedBy: req.agent.id },\n  });\n  await notifyCustomer(ticket.customerId, 'resolved');\n  res.status(200).json({ ok: true });\n});\n```\n\nA nightly job now also needs to auto-resolve stale tickets, applying exactly the same rules. Which statement best describes the problem with this handler?",
+      "hints": [
+        "Ask what the nightly job — which has no `req` and no `res` — would have to do to reuse these rules exactly as written.",
+        "Separate the lines that are about HTTP (statuses, `req.params`, JSON bodies) from the lines that are about what it means to resolve a ticket. Which group is larger?",
+        "Everything from 'already resolved' through the notification is a domain rule welded to `res.status(...)`. Move it into `resolveTicket(agent, ticketId)` that returns a result or throws a typed error, and let the route translate that outcome into a status."
+      ],
+      "solution": {
+        "modelAnswer": "The rules for resolving a ticket — must exist, must not already be resolved, must belong to the agent's team, must have no open subtasks, then update and notify — are expressed as HTTP responses, so they exist only inside this handler. The nightly job cannot reuse them without faking a request and response. Extract `resolveTicket(agent, ticketId)` into domain code that returns a result or throws a typed error, and leave the route to map that outcome onto 404, 403, 409 or 200.",
+        "explanationMarkdown": "Every one of these rules is correct; the problem is where they live. Because each is expressed as `res.status(...)`, the knowledge of what resolving means is inseparable from the transport, so the second caller has only two options: duplicate the rules, or fake an HTTP request.\n\nDuplication is the outcome that actually happens, and then the two copies drift. The extraction is cheap now and expensive later, which is why noticing it while reading is the skill worth practising."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "rules-welded-to-http",
+            "textMarkdown": "The domain rules for resolving a ticket are expressed as HTTP responses, so they cannot be reused by anything that is not an HTTP request. Extract them into a `resolveTicket` function and let the route map its outcome to a status.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The rules are right but unreachable from anywhere else, so the nightly job will end up with a second, drifting copy."
+          },
+          {
+            "id": "wrong-status-codes",
+            "textMarkdown": "The status codes are wrong: 'already resolved' and 'subtasks still open' should both be 400, not 409.",
+            "correct": false,
+            "explanationMarkdown": "409 is a reasonable choice for a request that conflicts with the resource's current state. Even if you preferred 422, that would be a detail — it would not help the nightly job at all."
+          },
+          {
+            "id": "needs-transaction",
+            "textMarkdown": "The update and the notification are not in a transaction, which is the only real defect here.",
+            "correct": false,
+            "explanationMarkdown": "That is a genuine concern worth its own fix — a notification really should not be sent inside a transaction — but it says nothing about why the rules cannot be reused."
+          },
+          {
+            "id": "too-many-branches",
+            "textMarkdown": "The handler has too many early returns; it should combine them into one condition and return a single generic error.",
+            "correct": false,
+            "explanationMarkdown": "Collapsing distinct failures into one generic error would make the API less useful to clients. The number of branches is fine; their location is not."
+          }
+        ]
+      },
+      "primaryConceptId": "node.separation-of-concerns",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e075",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Order the stages of a request handler",
+      "conceptIds": ["node.route-boundaries", "node.handler-stages"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A written answer about sequencing. Two of the orderings people propose are not merely untidy — they are security or correctness defects.",
+      "lessonId": "v1-l25",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "A `PATCH /api/tickets/:id` handler has to do all of the following:\n\n- read the ticket from the database\n- check that the caller's team owns the ticket\n- validate the request body\n- write the change\n- turn the outcome into a status and a JSON body\n\nPut these in the order you would run them and justify the order. Then explain what goes wrong if the ownership check happens **after** the write, and what goes wrong if body validation happens **after** the database read.",
+      "hints": [
+        "Two useful principles: do the cheapest rejection first, and never let unchecked input reach code that assumes it is well formed.",
+        "Reading the ticket has to come before the ownership check, because you cannot check who owns something you have not loaded. But validation needs nothing from the database at all.",
+        "Checking ownership after the write means the write already happened — you would have to undo it, and any notification or audit entry it triggered has already escaped. Validating after the read wastes a query on garbage input and, worse, invites a partially-validated value into the code that builds the query."
+      ],
+      "solution": {
+        "modelAnswer": "Validate the body first, because it needs nothing else and rejects the cheapest failures immediately. Then read the ticket, and return 404 if it is missing. Then check that the caller's team owns it, returning 403 or 404 depending on whether you are willing to reveal that the ticket exists. Then write the change. Then map the outcome to a status and body. If the ownership check runs after the write, the write has already happened: undoing it needs a transaction, and any notification, webhook or audit row it produced has already escaped, so the check is not a check but a late apology. If validation runs after the read, you spend a database round trip on input you were always going to reject, and unchecked values are in scope while you build the query — which is how a field the API never intended to accept ends up being written.",
+        "explanationMarkdown": "The ordering rule generalises well beyond this handler: reject as early and as cheaply as possible, and never let a value that has not been checked reach code that assumes it has been. Authorisation is a special case of the same rule — it must gate the effect, not follow it.\n\nThe 403-versus-404 choice is worth being deliberate about. Returning 403 tells the caller the ticket exists, which is itself information. For resources where existence is sensitive, answering 404 to a caller who may not see it is the safer contract, as long as it is applied consistently."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Gives an order in which body validation precedes the database read, and the ownership check precedes the write.",
+          "Justifies validating first by the fact that it needs nothing else and rejects bad requests most cheaply.",
+          "Explains that an ownership check after the write is too late: the effect already happened, and undoing it requires a transaction while notifications or audit entries may already have escaped.",
+          "Explains that validating after the read wastes a query and, more seriously, lets unchecked values reach the code that builds the update.",
+          "Places the mapping to a status and body last, as a single translation step rather than something scattered through the handler."
+        ],
+        "modelAnswerMarkdown": "**Order.**\n1. **Validate the body.** It depends on nothing else, so it is the cheapest rejection available. A malformed body should never cost a database round trip.\n2. **Read the ticket.** Missing → 404.\n3. **Check ownership.** Not the caller's team → 403, or 404 if the existence of the ticket is itself sensitive.\n4. **Write the change.**\n5. **Map the outcome** to a status and a JSON body, in one place.\n\n**Ownership check after the write.** The effect has already occurred. Rolling it back requires a transaction that spans the check, and anything the write triggered — a notification, a webhook, an audit row, a search-index update — has already left the building. A check that runs after the thing it was meant to prevent is not an authorisation check.\n\n**Validation after the read.** You pay for a query on input you were always going to reject, which is a free denial-of-service lever for anyone who cares to pull it. More seriously, unchecked values are in scope while the update is being constructed, which is exactly how a property the API never meant to accept ends up in the `data` object and gets written."
+      },
+      "primaryConceptId": "node.route-boundaries",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c049",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The stages of a route handler",
+      "conceptIds": ["node.handler-stages", "node.route-boundaries"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the ordered work a handler performs and what must not appear in each stage.",
+      "lessonId": "v1-l25",
+      "type": "recall",
+      "promptMarkdown": "List the stages a route handler runs through, in order, and say what must never appear in the delegate stage.",
+      "answerMarkdown": "**Parse** the raw inputs into checked values → **authorise** the caller → **delegate** to domain code → **respond** by mapping the outcome to a status and body, with errors handled once at the end. The delegate stage must never see `req` or `res`, must never choose a status code, and must never know that a page number arrived as a string.",
+      "explanationMarkdown": "The test for whether the boundary is drawn correctly is simple: could a scheduled job or a command-line tool call the domain function directly? If it would first have to fabricate a request and response object, the rules are on the wrong side of the line.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "node.handler-stages"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c050",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which conversion rejects bad input?",
+      "conceptIds": ["node.parameter-parsing"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An objectively checkable card on the trap in every numeric query parameter.",
+      "lessonId": "v1-l25",
+      "type": "debugging",
+      "promptMarkdown": "A handler must turn `req.query.limit` into a positive integer and reject anything else. Which approach actually rejects `''`, `'abc'` and `'2.5'`?",
+      "answerMarkdown": "Check the string's shape first and only then convert: `/^\\d+$/.test(raw)` followed by `Number(raw)`. `Number('')` is `0`, `parseInt('2.5')` is `2`, and `parseInt('abc')` is `NaN` — only the last of those is even detectable, and only if you remember `NaN`.",
+      "explanationMarkdown": "The danger is not the error you catch; it is the value you do not. `Number('')` producing `0` means an empty parameter silently becomes a limit of zero, and `parseInt` reading `12` out of `'12kg'` means junk becomes a plausible number. Validate the representation, then convert.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "regex-then-number",
+            "textMarkdown": "Test `/^\\d+$/` against the raw string, then `Number(raw)`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The shape check rejects the empty string, letters and decimals before any conversion can paper over them."
+          },
+          {
+            "id": "parseint",
+            "textMarkdown": "`parseInt(raw, 10)` and reject the result if it is `NaN`.",
+            "correct": false,
+            "explanationMarkdown": "`parseInt` stops at the first character it cannot use, so `'2.5'` becomes `2` and `'12kg'` becomes `12`. Neither is `NaN`, so neither is rejected."
+          },
+          {
+            "id": "number-only",
+            "textMarkdown": "`Number(raw)` and reject the result if it is `NaN`.",
+            "correct": false,
+            "explanationMarkdown": "`Number('')` is `0` and `Number(' ')` is `0`, so an empty parameter silently becomes a limit of zero rather than being rejected."
+          },
+          {
+            "id": "typeof-number",
+            "textMarkdown": "Check `typeof raw === 'number'` and reject anything else.",
+            "correct": false,
+            "explanationMarkdown": "Every query-string value is a string (or an array of strings), so this rejects every request, valid ones included."
+          }
+        ]
+      },
+      "primaryConceptId": "node.parameter-parsing"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l26",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Runtime validation",
+      "conceptIds": [
+        "node.runtime-validation",
+        "node.invalid-input",
+        "ts.compile-vs-runtime",
+        "http.validation-response"
+      ],
+      "prerequisiteIds": ["node.route-boundaries", "ts.types"],
+      "bodyMarkdown": "TypeScript types are erased before your program runs. `req.body as CreateTicketBody` does not check anything; it tells the compiler to stop asking questions. At runtime the body is whatever bytes arrived, parsed as JSON — an array, a string, `null`, an object with none of the fields you expected, or an object with fifty extra ones.\n\nSo validation has to happen at runtime, at the edge, and the value that comes *out* of validation is what the rest of the code uses. That last part matters: a validator that returns `true` and leaves you holding the original untyped value has only postponed the problem. A validator that returns a checked, narrowed value — the shape schema libraries like Zod are built around — means the unchecked value never travels further than the boundary.\n\nWhat you check is a design decision. Required fields must be present and of the right type. Values from a fixed set must be in it. Numbers need ranges, strings need lengths, and unknown properties should usually be stripped rather than passed through, so a client cannot smuggle a field into a database write.\n\nAnd not every rejection is the same rejection. **400** means the request itself was malformed — bad JSON, a missing field, a string where a number belongs. **422** is a common choice for a request that parsed cleanly but broke a semantic rule. **401** means we do not know who you are; **403** means we do and you still may not. **404** means the thing is not there — and is sometimes the deliberate answer for a resource the caller is not permitted to know exists. **409** means the request conflicts with the current state. Choosing the wrong one sends the client's error handling down the wrong path: a retry that will never succeed, or a login prompt for a permission problem.\n\nWhichever you return, the body should say enough to act on: which fields failed and why, in the documented shape, without echoing back internals.",
+      "chapterId": "v1-ch09",
+      "sortOrder": 1,
+      "objectives": [
+        "Explain why compile-time types cannot validate data that arrives at runtime.",
+        "Write a validator that returns a checked value rather than merely a boolean.",
+        "Classify invalid input and choose a status code that matches the failure."
+      ],
+      "estimatedMinutes": 20,
+      "workedExampleMarkdown": "```ts\ninterface CreateTicketBody {\n  subject: string;\n  priority: 'low' | 'normal' | 'high';\n}\n\n// DANGEROUS: an assertion, not a check. Compiles, verifies nothing.\napp.post('/api/tickets', (req, res) => {\n  const body = req.body as CreateTicketBody;\n  createTicket(body.subject.trim(), body.priority); // throws when subject is absent\n});\n```\n\n```ts\n// SAFE: the checked value is what continues; the raw one stops here.\napp.post('/api/tickets', (req, res) => {\n  const result = validateCreateTicket(req.body); // returns { valid, value | errors }\n  if (!result.valid) {\n    return res.status(400).json({\n      error: { code: 'invalid_request', message: 'Check the fields below', details: result.errors },\n    });\n  }\n  const ticket = createTicket(result.value); // result.value is known-good\n  return res.status(201).json({ ticket });\n});\n```\n\nThe difference is not stylistic. In the first version `body.subject.trim()` throws a `TypeError` for any request without a subject, and the client receives a 500 for a mistake that was entirely its own. In the second the client receives a 400 that names the field, and the domain function is never handed a value it cannot use.",
+      "commonMistakes": [
+        "Writing `req.body as Body` and believing something was checked; an assertion is a promise to the compiler, not a test.",
+        "Validating with `if (!body.subject)`, which also rejects the legitimate empty-string-then-trim case badly and silently accepts a `subject` that is a number or an array.",
+        "Returning `true`/`false` from a validator and then continuing to use the original unchecked value.",
+        "Answering 500 for a malformed request, which tells the client to retry something that will fail identically every time.",
+        "Using 200 with `{ ok: false }` in the body, so every caller — including caches, proxies and monitoring — believes the request succeeded.",
+        "Passing the whole body straight into a database update, letting a client set fields the API never intended to expose.",
+        "Trusting `Content-Type` to guarantee the body is an object; JSON `null`, `[]` and `\"hello\"` are all valid JSON documents."
+      ],
+      "summaryMarkdown": "Types vanish at runtime, so untrusted input must be checked by code that runs. Return the checked value, not a boolean, so the raw input stops at the boundary — and classify the failure so the status code tells the client what kind of problem it has.",
+      "exerciseIds": ["v1-e076", "v1-e077", "v1-e078"],
+      "reviewCardIds": ["v1-c051", "v1-c052"],
+      "references": [
+        {
+          "label": "TypeScript handbook: Type assertions",
+          "url": "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html"
+        },
+        {
+          "label": "MDN: HTTP response status codes",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status"
+        },
+        {
+          "label": "MDN: 422 Unprocessable Content",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e076",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Validate the create-ticket body",
+      "conceptIds": ["node.runtime-validation", "http.validation-response"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The boundary check, written so that what comes out of it is safe to use and what went in never travels further.",
+      "lessonId": "v1-l26",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 20,
+      "promptMarkdown": "Write `validateCreateTicket(body)`. `body` is whatever `JSON.parse` produced from the request — it may be any JSON value at all.\n\nIf `body` is not a plain object (it is `null`, an array, a string, a number, or a boolean), return:\n\n`{ valid: false, errors: [ { field: 'body', message: 'body must be an object' } ] }`\n\nOtherwise check these fields and return `{ valid: false, errors: [...] }` listing every failure in the order subject, priority, customerEmail:\n\n- `subject` — must be a string that is not empty after trimming. Message: `subject must be a non-empty string`\n- `priority` — must be exactly one of `low`, `normal`, `high` (case-sensitive). Message: `priority must be 'low', 'normal' or 'high'`\n- `customerEmail` — must be a string matching `something@something` with no whitespace and one `@`. Message: `customerEmail must be a valid email address`\n\nWhen everything passes, return `{ valid: true, value: { subject, priority, customerEmail, tags } }` where `subject` is **trimmed**, and `tags` is `body.tags` when that is an array and `[]` otherwise. No other property of `body` may appear in `value`.\n\nDo not modify `body`.",
+      "hints": [
+        "`typeof null` is `'object'` and `typeof []` is `'object'` too, so a `typeof` test alone does not establish that you were given a plain object.",
+        "Check the type before the content for each field. `body.subject.trim()` throws when `subject` is a number, so `typeof body.subject === 'string'` has to come first.",
+        "Build `value` from the individual checked fields rather than spreading `body`. Copying the whole body across would let a client set any property it likes on the record you are about to create."
+      ],
+      "solution": {
+        "code": "function validateCreateTicket(body) {\n  if (typeof body !== 'object' || body === null || Array.isArray(body)) {\n    return { valid: false, errors: [{ field: 'body', message: 'body must be an object' }] };\n  }\n\n  const errors = [];\n\n  const subject = typeof body.subject === 'string' ? body.subject.trim() : '';\n  if (subject === '') {\n    errors.push({ field: 'subject', message: 'subject must be a non-empty string' });\n  }\n\n  const priorities = ['low', 'normal', 'high'];\n  if (!priorities.includes(body.priority)) {\n    errors.push({ field: 'priority', message: \"priority must be 'low', 'normal' or 'high'\" });\n  }\n\n  const email = body.customerEmail;\n  if (typeof email !== 'string' || !/^[^@\\s]+@[^@\\s]+$/.test(email)) {\n    errors.push({ field: 'customerEmail', message: 'customerEmail must be a valid email address' });\n  }\n\n  if (errors.length > 0) {\n    return { valid: false, errors: errors };\n  }\n\n  return {\n    valid: true,\n    value: {\n      subject: subject,\n      priority: body.priority,\n      customerEmail: email,\n      tags: Array.isArray(body.tags) ? body.tags : [],\n    },\n  };\n}",
+        "explanationMarkdown": "The function returns a *value*, not a verdict. That is what keeps the raw body at the boundary: the caller uses `result.value`, which contains four known-good fields and nothing else, so a client that posts `isAdmin` or `resolvedAt` cannot have it written anywhere.\n\nThe first guard is easy to skip and expensive to skip. JSON `null`, `[]` and `\"hello\"` are all valid documents that a client may post, and `typeof null === 'object'` means a naive check waves two of them through — after which every field read throws and the client gets a 500 for its own mistake.\n\nReporting all three failures at once is a deliberate part of the contract. A client fixing a form should learn everything wrong with it in one response."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "validateCreateTicket",
+        "starterCode": "function validateCreateTicket(body) {\n  return {\n    valid: true,\n    value: {\n      subject: body.subject,\n      priority: body.priority,\n      customerEmail: body.customerEmail,\n      tags: [],\n    },\n  };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "valid-body-is-trimmed",
+            "args": [
+              {
+                "subject": "  Printer jam  ",
+                "priority": "normal",
+                "customerEmail": "ada@wrenly.example"
+              }
+            ],
+            "expected": {
+              "valid": true,
+              "value": {
+                "subject": "Printer jam",
+                "priority": "normal",
+                "customerEmail": "ada@wrenly.example",
+                "tags": []
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "tags-array-is-kept",
+            "args": [
+              {
+                "subject": "Login loop",
+                "priority": "high",
+                "customerEmail": "bo@wrenly.example",
+                "tags": ["auth", "urgent"]
+              }
+            ],
+            "expected": {
+              "valid": true,
+              "value": {
+                "subject": "Login loop",
+                "priority": "high",
+                "customerEmail": "bo@wrenly.example",
+                "tags": ["auth", "urgent"]
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "extra-properties-are-not-copied",
+            "args": [
+              {
+                "subject": "Card declined",
+                "priority": "low",
+                "customerEmail": "cy@wrenly.example",
+                "isAdmin": true,
+                "resolvedAt": "2031-01-01"
+              }
+            ],
+            "expected": {
+              "valid": true,
+              "value": {
+                "subject": "Card declined",
+                "priority": "low",
+                "customerEmail": "cy@wrenly.example",
+                "tags": []
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "empty-object-reports-every-field",
+            "args": [{}],
+            "expected": {
+              "valid": false,
+              "errors": [
+                { "field": "subject", "message": "subject must be a non-empty string" },
+                { "field": "priority", "message": "priority must be 'low', 'normal' or 'high'" },
+                {
+                  "field": "customerEmail",
+                  "message": "customerEmail must be a valid email address"
+                }
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "null-body-is-rejected",
+            "args": [null],
+            "expected": {
+              "valid": false,
+              "errors": [{ "field": "body", "message": "body must be an object" }]
+            },
+            "hidden": false
+          },
+          {
+            "id": "array-body-is-rejected",
+            "args": [[]],
+            "expected": {
+              "valid": false,
+              "errors": [{ "field": "body", "message": "body must be an object" }]
+            },
+            "hidden": false
+          },
+          {
+            "id": "numeric-subject-is-not-a-string",
+            "args": [{ "subject": 42, "priority": "low", "customerEmail": "ada@wrenly.example" }],
+            "expected": {
+              "valid": false,
+              "errors": [{ "field": "subject", "message": "subject must be a non-empty string" }]
+            },
+            "hidden": false
+          },
+          {
+            "id": "priority-is-case-sensitive",
+            "args": [
+              { "subject": "Printer jam", "priority": "High", "customerEmail": "ada@wrenly.example" }
+            ],
+            "expected": {
+              "valid": false,
+              "errors": [
+                { "field": "priority", "message": "priority must be 'low', 'normal' or 'high'" }
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "whitespace-subject-is-empty",
+            "args": [
+              { "subject": "     ", "priority": "low", "customerEmail": "ada@wrenly.example" }
+            ],
+            "expected": {
+              "valid": false,
+              "errors": [{ "field": "subject", "message": "subject must be a non-empty string" }]
+            },
+            "hidden": true
+          },
+          {
+            "id": "email-with-two-at-signs-is-rejected",
+            "args": [
+              { "subject": "Export fails", "priority": "low", "customerEmail": "a@b@wrenly.example" }
+            ],
+            "expected": {
+              "valid": false,
+              "errors": [
+                {
+                  "field": "customerEmail",
+                  "message": "customerEmail must be a valid email address"
+                }
+              ]
+            },
+            "hidden": true
+          },
+          {
+            "id": "non-array-tags-become-empty",
+            "args": [
+              {
+                "subject": "Slow search",
+                "priority": "normal",
+                "customerEmail": "dee@wrenly.example",
+                "tags": "urgent"
+              }
+            ],
+            "expected": {
+              "valid": true,
+              "value": {
+                "subject": "Slow search",
+                "priority": "normal",
+                "customerEmail": "dee@wrenly.example",
+                "tags": []
+              }
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "node.runtime-validation",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e077",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The type annotation that checks nothing",
+      "conceptIds": ["ts.compile-vs-runtime", "ts.unsafe-cast", "node.runtime-validation"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A handler that type-checks cleanly, passes review, and returns a 500 to any client that omits one field.",
+      "lessonId": "v1-l26",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "```ts\ninterface CreateTicketBody {\n  subject: string;\n  priority: 'low' | 'normal' | 'high';\n  customerEmail: string;\n}\n\napp.post('/api/tickets', async (req, res) => {\n  const body = req.body as CreateTicketBody;\n  const ticket = await createTicket({\n    subject: body.subject.trim(),\n    priority: body.priority,\n    customerEmail: body.customerEmail.toLowerCase(),\n  });\n  res.status(201).json({ ticket });\n});\n```\n\n`tsc --strict` reports no errors. A client posts `{}` and receives a 500 with an empty body; the server log shows `TypeError: Cannot read properties of undefined (reading 'trim')`. Which statement is correct?",
+      "hints": [
+        "Ask what the `as` keyword actually does to the compiled JavaScript. Compare the emitted output with and without it.",
+        "Types are erased at build time. Nothing in the shipped program inspects the body — the assertion only stopped the compiler from complaining.",
+        "The compiler was told to assume the shape, and it did. The consequence is that an entirely client-side mistake becomes a server exception and a 500, when it should have been a 400 naming the missing fields."
+      ],
+      "solution": {
+        "modelAnswer": "`as CreateTicketBody` is an assertion, not a check: it is erased at compile time and produces no runtime code at all. The body is still whatever arrived, so `body.subject` is `undefined` and `.trim()` throws. The request needs a runtime validator whose checked result is what gets passed on, and a missing field should produce a 400 that names it — not a 500.",
+        "explanationMarkdown": "The two failures here compound. The first is silent: the assertion promises the compiler something nobody verified, so every later line reads as safe when it is not. The second is visible in the wrong place: the client's mistake surfaces as a server exception, which pages an on-call engineer and tells the client nothing about what to fix.\n\nNote also that a strict compiler is doing its job perfectly. `as` is the escape hatch you use to say \"trust me\", and this is what it costs when the value came from outside the program."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "assertion-erased",
+            "textMarkdown": "The `as` assertion is erased at compile time and checks nothing at runtime, so the body is unvalidated. A runtime validator should produce a 400 naming the missing fields.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Types describe intent to the compiler; only code that runs can check data that arrives while the program is running."
+          },
+          {
+            "id": "needs-satisfies",
+            "textMarkdown": "The code should use `satisfies CreateTicketBody` instead, which performs the check that `as` skips.",
+            "correct": false,
+            "explanationMarkdown": "`satisfies` is also a compile-time-only operator. It is stricter about what it will accept from *you*, but it emits no runtime code either."
+          },
+          {
+            "id": "express-should-validate",
+            "textMarkdown": "Express should have rejected the empty body automatically, since the route declares a typed handler.",
+            "correct": false,
+            "explanationMarkdown": "Express has no knowledge of TypeScript types; `express.json()` only parses JSON. Nothing validates a body unless you add something that does."
+          },
+          {
+            "id": "optional-chaining-fixes",
+            "textMarkdown": "Adding optional chaining — `body.subject?.trim()` — fixes the defect properly.",
+            "correct": false,
+            "explanationMarkdown": "It stops the throw and replaces it with a ticket whose subject is `undefined`. Turning a loud failure into a silently corrupt record is a downgrade, not a fix."
+          }
+        ]
+      },
+      "primaryConceptId": "ts.compile-vs-runtime",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e078",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Classify five failing requests",
+      "conceptIds": ["node.invalid-input", "http.status-codes"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five requests to the Wrenly API, all of which fail. Choose the row that assigns the right status to every one of them.",
+      "lessonId": "v1-l26",
+      "sortOrder": 2,
+      "type": "choice",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Assign a status code to each of these five failures:\n\n1. `POST /api/tickets` with no `Authorization` header at all.\n2. `POST /api/tickets` from a signed-in agent, body `{ \"subject\": 42 }`.\n3. `POST /api/tickets/T-88/resolve` from a signed-in agent whose team does not own `T-88`, and whose existence is not considered sensitive.\n4. `POST /api/tickets/T-88/resolve` for a ticket that is already resolved.\n5. `GET /api/tickets/T-404` where no such ticket exists.\n\nWhich set is correct?",
+      "hints": [
+        "Two of these are about identity and permission, and they are not the same thing: one caller has not said who they are, the other has and is simply not allowed.",
+        "A body that is the wrong type is a malformed request, not a server fault and not a permission problem.",
+        "\"Already resolved\" is not malformed and not forbidden — the request is perfectly well formed but conflicts with the resource's current state, which is what 409 is for."
+      ],
+      "solution": {
+        "modelAnswer": "401, 400, 403, 409, 404.",
+        "explanationMarkdown": "The distinctions carry real consequences for the caller. 401 tells a client to obtain credentials; 403 tells it not to bother trying again with the same identity. 400 says the request itself is wrong, so retrying it unchanged is pointless. 409 says the request was fine but the world has moved on — refresh and reconsider. 404 says there is nothing here.\n\nThe common wrong answer is 500 for the malformed body, which happens naturally when nothing validates the input and the first property read throws. It is worse than a cosmetic error: it tells the client the server broke and invites an automatic retry of a request that will fail identically forever."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "correct-set",
+            "textMarkdown": "1 → 401, 2 → 400, 3 → 403, 4 → 409, 5 → 404",
+            "correct": true,
+            "explanationMarkdown": "Correct. Unauthenticated, malformed, forbidden, conflicting with current state, and absent — five different problems, five different answers."
+          },
+          {
+            "id": "403-for-anonymous",
+            "textMarkdown": "1 → 403, 2 → 400, 3 → 403, 4 → 409, 5 → 404",
+            "correct": false,
+            "explanationMarkdown": "Only the first is wrong, and it matters: 403 tells an anonymous client that signing in would not help. 401 is the answer when no credentials were presented."
+          },
+          {
+            "id": "500-for-bad-body",
+            "textMarkdown": "1 → 401, 2 → 500, 3 → 403, 4 → 409, 5 → 404",
+            "correct": false,
+            "explanationMarkdown": "A 500 blames the server for the client's malformed body, and invites a retry that will fail identically. This is what you get by default when nothing validates the input."
+          },
+          {
+            "id": "404-for-conflict",
+            "textMarkdown": "1 → 401, 2 → 400, 3 → 404, 4 → 404, 5 → 404",
+            "correct": false,
+            "explanationMarkdown": "404 for the forbidden ticket is a defensible choice when existence is sensitive — the prompt says it is not — but 404 for an already-resolved ticket is simply wrong: the ticket is right there."
+          }
+        ]
+      },
+      "primaryConceptId": "node.invalid-input",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c051",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why can a type not validate a request body?",
+      "conceptIds": ["ts.compile-vs-runtime", "node.runtime-validation"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what survives compilation and what does not.",
+      "lessonId": "v1-l26",
+      "type": "recall",
+      "promptMarkdown": "Why does `const body = req.body as CreateTicketBody` provide no protection, and what should a validator return instead of `true`?",
+      "answerMarkdown": "Types and assertions are erased when TypeScript compiles to JavaScript, so nothing about that line exists in the running program — it only told the compiler to stop checking. A validator should return the **checked value** (`{ valid: true, value }` or a parsed result), so the code downstream uses a value that has actually been examined and the raw input never travels past the boundary.",
+      "explanationMarkdown": "Returning a boolean leaves you holding the original untyped value and relying on discipline to remember it is now \"known good\". Returning the checked value makes that impossible to forget, and lets the validator normalise while it is there — trimming strings, applying defaults, dropping unknown properties.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ts.compile-vs-runtime"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c052",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer the classification to a payment endpoint",
+      "conceptIds": ["node.invalid-input", "http.status-codes"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the status-code distinctions to an endpoint you have not seen before.",
+      "lessonId": "v1-l26",
+      "type": "transfer",
+      "promptMarkdown": "`POST /api/invoices/:id/pay` can fail because: (a) the `amount` field is a string, (b) the invoice belongs to another company, (c) the invoice was paid an hour ago, (d) the card issuer declined. Give a status for each and say which of the four a client should retry unchanged.",
+      "answerMarkdown": "(a) 400 — malformed request. (b) 403, or 404 if you do not want to reveal that another company's invoice exists. (c) 409 — the request conflicts with the invoice's current state. (d) 402 is defensible, though many APIs use 400 or 422 with a specific error code; the important part is that it is a client-actionable failure, not a 500. **None of them should be retried unchanged.** Only (d) might succeed on a retry, and only after the customer changes something about the payment method.",
+      "explanationMarkdown": "The retry question is the practical test of whether a status is right. Clients, SDKs and job runners branch on the class: 4xx means \"this request will not succeed as sent\", 5xx means \"try again shortly\". Returning 500 for a declined card produces an infinite retry loop against a card that will keep declining.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "http.status-codes"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l27",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Errors and contracts",
+      "conceptIds": [
+        "node.error-contracts",
+        "node.stack-trace-disclosure",
+        "http.error-mapping",
+        "http.status-codes"
+      ],
+      "prerequisiteIds": ["node.runtime-validation", "js.error-propagation"],
+      "bodyMarkdown": "An error response is part of your API's contract, not an accident that happens when the happy path does not. Clients write code against it: they branch on it, display it, log it, and decide whether to retry. If every endpoint invents its own shape — `{ error: 'nope' }` here, `{ message, code }` there, a bare string somewhere else — every client ends up with a pile of special cases.\n\nSo pick one shape and use it everywhere. A stable machine-readable `code` that never changes wording, a human-readable `message`, an optional `details` array for field-level problems, and a `requestId` the caller can quote when they contact you. The `code` is the part clients branch on; the `message` is the part humans read, and it may be reworded freely precisely because nobody branches on it.\n\nThe mapping from internal failure to response happens in exactly one place. Domain code throws or returns typed failures that know nothing about HTTP — `NotFoundError`, `ValidationError`, `ConflictError` — and a single error handler translates each to a status and the standard body. Anything unrecognised becomes 500 with a generic message, because a failure you did not anticipate is one you cannot describe safely.\n\nAnd that generic message is not laziness. A stack trace tells an attacker your directory layout, your framework versions, your ORM, and often fragments of a query or a value. Database errors leak column names and constraint names. `error.message` from a third-party client can contain the URL it was calling, complete with a token in the query string. All of it belongs in the log, correlated by the same `requestId` the client was given — so support can find the exact failure without any of it crossing the boundary.",
+      "chapterId": "v1-ch09",
+      "sortOrder": 2,
+      "objectives": [
+        "Design one error response shape and use it for every failure.",
+        "Map internal failures to statuses in a single place rather than at each throw site.",
+        "Keep stack traces and internal details out of responses while keeping them findable in logs."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "```js\n// One handler, registered last. Every failure funnels through here.\napp.use((error, req, res, _next) => {\n  const requestId = req.id;\n\n  // Always log the full detail, correlated by request id.\n  logger.error({ requestId, err: error }, 'request failed');\n\n  const mapped = toErrorResponse(error, requestId); // pure, and unit-tested\n  res.status(mapped.status).json(mapped.body);\n});\n```\n\n```json\n// 400\n{ \"error\": {\n  \"code\": \"invalid_request\",\n  \"message\": \"Check the fields below\",\n  \"requestId\": \"b3f1…\",\n  \"details\": [ { \"field\": \"subject\", \"message\": \"subject must be a non-empty string\" } ]\n} }\n```\n\n```json\n// 500 — nothing internal crosses the boundary\n{ \"error\": {\n  \"code\": \"internal_error\",\n  \"message\": \"Something went wrong. Please try again.\",\n  \"requestId\": \"b3f1…\"\n} }\n```\n\nThe 500 body is deliberately uninformative to the client and completely traceable for you: the caller quotes `b3f1…` to support, and the log holds the stack, the query and the parameters. Notice that `toErrorResponse` is an ordinary function with no `req` and no `res`, which is why it is the runnable exercise below.",
+      "commonMistakes": [
+        "Returning `error.stack` or the raw `error.message` in the response body, which discloses paths, versions, queries and sometimes credentials.",
+        "Sending `res.status(200).json({ error: ... })`, so clients, caches and monitoring all record the request as a success.",
+        "Inventing a different error shape per endpoint, forcing every client to special-case each one.",
+        "Branching client code on the human-readable message, which then breaks the day someone improves the wording.",
+        "Mapping every failure to 500 because the handler cannot tell them apart, turning a client's bad request into a page for the on-call engineer.",
+        "Logging nothing on the 500 path, leaving support with a request id that leads nowhere.",
+        "Letting a database error reach the client, complete with constraint and column names that describe your schema."
+      ],
+      "summaryMarkdown": "One documented error shape, one place that maps internal failures to statuses, a stable `code` for clients to branch on, and a `requestId` that links a safe generic response to the full detail in your logs.",
+      "exerciseIds": ["v1-e079", "v1-e080", "v1-e081"],
+      "reviewCardIds": ["v1-c053", "v1-c054"],
+      "references": [
+        {
+          "label": "Express: Error handling",
+          "url": "https://expressjs.com/en/guide/error-handling.html"
+        },
+        {
+          "label": "Node.js: Errors",
+          "url": "https://nodejs.org/api/errors.html"
+        },
+        {
+          "label": "RFC 9457: Problem Details for HTTP APIs",
+          "url": "https://www.rfc-editor.org/rfc/rfc9457.html"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e079",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Map internal failures to safe responses",
+      "conceptIds": ["node.error-contracts", "http.error-mapping", "node.stack-trace-disclosure"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The single translation point between your failures and your API's contract, written as a pure function so every case can be checked directly.",
+      "lessonId": "v1-l27",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 18,
+      "promptMarkdown": "Write `toErrorResponse(error, requestId)`.\n\n`error` is whatever reached the central error handler. Recognised failures are objects with a `kind` property:\n\n| `kind` | status | `code` |\n| --- | --- | --- |\n| `validation` | 400 | `invalid_request` |\n| `not_found` | 404 | `not_found` |\n| `forbidden` | 403 | `forbidden` |\n| `conflict` | 409 | `conflict` |\n\nFor a recognised failure return:\n\n`{ status, body: { error: { code, message: error.message, requestId } } }`\n\nand for `validation` **only**, add `details` inside `error`, taken from `error.details` or `[]` when that is absent.\n\nFor **anything else** — an unknown `kind`, a missing `kind`, `null`, a thrown `Error` — return exactly:\n\n`{ status: 500, body: { error: { code: 'internal_error', message: 'Something went wrong. Please try again.', requestId } } }`\n\nThe 500 body must never contain the original message, the `kind`, or any other property of `error`. Do not modify `error`.",
+      "hints": [
+        "A lookup object keyed by `kind` gives you both the status and the code in one step, and makes 'unrecognised' simply the case where the lookup finds nothing.",
+        "Guard the lookup: `error` may be `null`, so reading `error.kind` directly will throw inside the very handler that exists to stop failures escaping.",
+        "The `details` key must be **absent** — not `undefined`, not `null` — for the three non-validation kinds, so add it conditionally after building the body rather than always including it."
+      ],
+      "solution": {
+        "code": "function toErrorResponse(error, requestId) {\n  const known = {\n    validation: { status: 400, code: 'invalid_request' },\n    not_found: { status: 404, code: 'not_found' },\n    forbidden: { status: 403, code: 'forbidden' },\n    conflict: { status: 409, code: 'conflict' },\n  };\n\n  const match = error && typeof error === 'object' ? known[error.kind] : undefined;\n\n  if (!match) {\n    return {\n      status: 500,\n      body: {\n        error: {\n          code: 'internal_error',\n          message: 'Something went wrong. Please try again.',\n          requestId: requestId,\n        },\n      },\n    };\n  }\n\n  const payload = { code: match.code, message: error.message, requestId: requestId };\n  if (error.kind === 'validation') {\n    payload.details = error.details || [];\n  }\n  return { status: match.status, body: { error: payload } };\n}",
+        "explanationMarkdown": "Because the mapping is a pure function of the error and the request id, every branch — including the one that matters most, the unrecognised failure — can be checked without starting a server. That is what makes it realistic to assert that no internal detail escapes.\n\nThe default branch is the security boundary. Anything the code did not anticipate becomes a fixed sentence, which is the only safe response to a failure you cannot describe: an unknown error might be a database error naming your columns, or a client library error carrying a URL with a token in it. The `requestId` is what keeps this honest rather than merely opaque — the caller quotes it, and the full detail is in your log under the same id."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "toErrorResponse",
+        "starterCode": "function toErrorResponse(error, requestId) {\n  return {\n    status: 500,\n    body: { error: { code: 'internal_error', message: error.message, requestId: requestId } },\n  };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "validation-carries-details",
+            "args": [
+              {
+                "kind": "validation",
+                "message": "Check the fields below",
+                "details": [{ "field": "subject", "message": "subject must be a non-empty string" }]
+              },
+              "req-1"
+            ],
+            "expected": {
+              "status": 400,
+              "body": {
+                "error": {
+                  "code": "invalid_request",
+                  "message": "Check the fields below",
+                  "requestId": "req-1",
+                  "details": [
+                    { "field": "subject", "message": "subject must be a non-empty string" }
+                  ]
+                }
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "validation-without-details-gets-empty-list",
+            "args": [{ "kind": "validation", "message": "Check the fields below" }, "req-2"],
+            "expected": {
+              "status": 400,
+              "body": {
+                "error": {
+                  "code": "invalid_request",
+                  "message": "Check the fields below",
+                  "requestId": "req-2",
+                  "details": []
+                }
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "not-found-has-no-details-key",
+            "args": [{ "kind": "not_found", "message": "Ticket T-404 does not exist" }, "req-3"],
+            "expected": {
+              "status": 404,
+              "body": {
+                "error": {
+                  "code": "not_found",
+                  "message": "Ticket T-404 does not exist",
+                  "requestId": "req-3"
+                }
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "forbidden",
+            "args": [{ "kind": "forbidden", "message": "Ticket belongs to another team" }, "req-4"],
+            "expected": {
+              "status": 403,
+              "body": {
+                "error": {
+                  "code": "forbidden",
+                  "message": "Ticket belongs to another team",
+                  "requestId": "req-4"
+                }
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "conflict",
+            "args": [{ "kind": "conflict", "message": "Ticket is already resolved" }, "req-5"],
+            "expected": {
+              "status": 409,
+              "body": {
+                "error": {
+                  "code": "conflict",
+                  "message": "Ticket is already resolved",
+                  "requestId": "req-5"
+                }
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "unknown-kind-leaks-nothing",
+            "args": [
+              {
+                "kind": "database_unavailable",
+                "message": "connect ECONNREFUSED 10.0.4.9:5432 relation \"tickets\" locked",
+                "stack": "at Pool.query (/srv/wrenly/node_modules/pg/lib/pool.js:44:11)"
+              },
+              "req-6"
+            ],
+            "expected": {
+              "status": 500,
+              "body": {
+                "error": {
+                  "code": "internal_error",
+                  "message": "Something went wrong. Please try again.",
+                  "requestId": "req-6"
+                }
+              }
+            },
+            "hidden": false
+          },
+          {
+            "id": "missing-kind-is-unrecognised",
+            "args": [{ "message": "Unexpected token in JSON" }, "req-7"],
+            "expected": {
+              "status": 500,
+              "body": {
+                "error": {
+                  "code": "internal_error",
+                  "message": "Something went wrong. Please try again.",
+                  "requestId": "req-7"
+                }
+              }
+            },
+            "hidden": true
+          },
+          {
+            "id": "null-error-does-not-throw",
+            "args": [null, "req-8"],
+            "expected": {
+              "status": 500,
+              "body": {
+                "error": {
+                  "code": "internal_error",
+                  "message": "Something went wrong. Please try again.",
+                  "requestId": "req-8"
+                }
+              }
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "node.error-contracts",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e080",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Count the disclosures in one error handler",
+      "conceptIds": ["node.stack-trace-disclosure", "http.error-mapping"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An error handler written by someone in a hurry during an incident, and never revisited. Identify the most serious problem with it.",
+      "lessonId": "v1-l27",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "```js\napp.use((error, req, res, next) => {\n  res.status(200).json({\n    ok: false,\n    message: error.message,\n    stack: error.stack,\n    query: error.query,\n  });\n});\n```\n\nA client posting a malformed body receives a 200 whose body includes:\n\n```text\ninsert into \"tickets\" (\"subject\",\"customer_email\") values ($1,$2) — null value in column \"subject\" violates not-null constraint\nat TicketRepo.create (/srv/wrenly/src/db/tickets.js:88:15)\n```\n\nWhich statement best describes what is wrong here?",
+      "hints": [
+        "There is more than one defect. Separate what the response *says* from what the response's status *claims*, and consider who else reads a status code besides the client's own code.",
+        "The body describes your table names, your column names, your source paths and your directory layout — a free map for anyone probing the API.",
+        "Nothing is logged either, so removing the disclosure would leave support with no way to investigate at all. The complete fix is: log the full error server-side with a request id, return that id to the client, and send a generic message with a status that matches the actual failure."
+      ],
+      "solution": {
+        "modelAnswer": "It discloses internals — SQL, table and column names, source paths and the directory layout — to any client that can provoke an error, and it reports the failure as a 200, so clients, caches and monitoring all treat a failure as a success. It also logs nothing, so the detail is given to the wrong audience and kept from the right one. Log the full error with a request id, return that id with a generic message, and use a status that matches the failure.",
+        "explanationMarkdown": "Disclosure is the headline, but the 200 is close behind and is often missed in review. Status codes are read by proxies, caches, SDK retry logic and dashboards; a 200 on a failure means the error rate looks perfect while every client silently receives broken data.\n\nThe absence of logging is what makes the fix a rewrite rather than a deletion. The detail in this response is genuinely valuable — it just belongs in your log, correlated by a request id, with only that id crossing the boundary."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "leak-and-wrong-status",
+            "textMarkdown": "It hands the client SQL, schema and filesystem detail, and it reports a failure as a 200 so every client, cache and dashboard records a success — while logging nothing, so the detail never reaches the people who need it.",
+            "correct": true,
+            "explanationMarkdown": "Correct. All three are real: disclosure to the wrong audience, a status that misrepresents the outcome, and no server-side record at all."
+          },
+          {
+            "id": "only-stack-matters",
+            "textMarkdown": "Only the `stack` field is a problem; `message` and `query` are safe because they describe the request rather than the server.",
+            "correct": false,
+            "explanationMarkdown": "`query` is the SQL statement and `message` names the offending column — both describe your schema. Removing only the stack leaves most of the map intact."
+          },
+          {
+            "id": "missing-next",
+            "textMarkdown": "The handler never calls `next(error)`, so Express cannot apply its default error handling.",
+            "correct": false,
+            "explanationMarkdown": "Terminating the chain is exactly what a final error handler should do. Forwarding to Express's default handler would, in development, print the stack in the response as well."
+          },
+          {
+            "id": "should-be-500",
+            "textMarkdown": "The only real fix is changing `200` to `500` for every failure.",
+            "correct": false,
+            "explanationMarkdown": "The status is one of three defects, and 500 for a malformed body is also wrong — it blames the server and invites a pointless retry. The failure should be mapped to a matching status."
+          }
+        ]
+      },
+      "primaryConceptId": "node.stack-trace-disclosure",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e081",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Design the error contract",
+      "conceptIds": ["node.error-contracts", "http.status-codes", "ops.request-id"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A design answer. The audience is a client developer who has to write error handling against your API and would like never to touch it again.",
+      "lessonId": "v1-l27",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "Three Wrenly endpoints currently fail in three different ways: `{ \"error\": \"not found\" }`, `{ \"message\": \"Ticket already resolved\", \"code\": 409 }`, and a bare string `\"unauthorised\"`.\n\nDesign one error contract for the whole API. Specify the fields and what each is for, and say which field a client is expected to branch on and why. Explain how a validation failure carries per-field detail. Explain what a 500 response contains and how support still diagnoses the problem. Finally, describe how you would roll this out without breaking the clients that already exist.",
+      "hints": [
+        "Distinguish the parts of the response meant for a program from the parts meant for a person; they have completely different stability requirements.",
+        "Something has to link the deliberately uninformative 500 the client sees to the full detail you keep. Decide who generates that link and when the client learns it.",
+        "A workable rollout is: add the new shape alongside the old fields so both are present, publish and version the contract, give clients a deprecation window with metrics on who still reads the old fields, and only then remove them."
+      ],
+      "solution": {
+        "modelAnswer": "One envelope for every failure: { error: { code, message, requestId, details? } }. `code` is a stable machine-readable string such as invalid_request or ticket_already_resolved and is the only field clients branch on — it never changes wording, so improving the prose is always safe. `message` is human-readable and explicitly unstable. `requestId` is generated per request by middleware, returned in the body and in a response header, and included in every log line for that request. `details` appears on validation failures only, as an array of { field, message }, so a form can attach each message to its field. A 500 contains code internal_error, a fixed generic message and the requestId, and nothing else; support pastes the requestId into the log search and gets the stack, the query and the parameters. Rollout: emit the new envelope alongside the existing fields so old clients keep working, document and version it, measure who still reads the legacy fields, give a deprecation window, then remove them.",
+        "explanationMarkdown": "The key design idea is separating the stable machine contract from the unstable human text. Once clients branch on `code`, wording, translation and tone can all change freely — and the day someone rewrites a message for clarity does not become an outage in three integrations.\n\nThe request id is what makes a safe 500 acceptable rather than merely obstructive. Without it, hiding detail from the client also hides it from the support conversation; with it, the client hands you an exact pointer into the logs and the boundary holds."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Defines one envelope used by every failing endpoint, and names its fields and the purpose of each.",
+          "States that clients branch on a stable machine-readable `code`, and explains that the human-readable message is deliberately free to change.",
+          "Describes per-field validation detail as a structured list (for example `details` as an array of field and message) rather than one concatenated sentence.",
+          "Specifies that a 500 carries a generic message and no internal detail, and explains how support still diagnoses it via a request id correlated with server-side logs.",
+          "Gives a rollout plan that keeps existing clients working — emitting both shapes, documenting and versioning, a deprecation window, then removal."
+        ],
+        "modelAnswerMarkdown": "**The envelope.** Every failure, from every endpoint:\n\n```json\n{ \"error\": {\n  \"code\": \"ticket_already_resolved\",\n  \"message\": \"This ticket was resolved on 2 April.\",\n  \"requestId\": \"b3f1c2…\",\n  \"details\": []\n} }\n```\n\n- `code` — stable, machine-readable, documented. **This is the only field clients branch on.** Because nobody branches on the prose, the prose can be rewritten, translated or softened at any time without breaking an integration.\n- `message` — for humans, explicitly unstable.\n- `requestId` — generated by middleware for every request, returned in the body and in a header, and stamped on every log line for that request.\n- `details` — present on validation failures: `[{ \"field\": \"subject\", \"message\": \"subject must be a non-empty string\" }]`, so a form attaches each message to the right input instead of showing one run-on sentence.\n\n**The 500.** `code: \"internal_error\"`, a fixed generic message, the `requestId`, and nothing else — no stack, no SQL, no upstream URL. Support asks the caller for the request id, searches the logs for it, and gets the stack, the query and the parameters. The boundary holds and the diagnosis still happens.\n\n**Rollout.** Emit the new envelope *alongside* the current fields so existing clients keep working. Publish the contract with a version and a table of codes. Instrument which clients still read the legacy fields, announce a deprecation window, and only remove the old fields once that metric reaches zero or the window closes."
+      },
+      "primaryConceptId": "node.error-contracts",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c053",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What belongs in a 500 response body?",
+      "conceptIds": ["node.stack-trace-disclosure", "node.error-contracts"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the boundary rule for internal detail, and what replaces it.",
+      "lessonId": "v1-l27",
+      "type": "recall",
+      "promptMarkdown": "What may a 500 response body contain, what must it never contain, and how does support still diagnose the failure?",
+      "answerMarkdown": "It may contain a stable `code` such as `internal_error`, a fixed generic message, and a `requestId`. It must never contain a stack trace, a SQL statement, database column or constraint names, filesystem paths, upstream URLs, or the raw `error.message` — any of which can carry schema details or credentials. Support diagnoses it from the logs: the full error is logged server-side under the same `requestId` the caller was given, so the caller quotes the id and you find the exact failure.",
+      "explanationMarkdown": "The rule is about audience, not secrecy. All that detail is genuinely valuable — to you. The request id is the one piece that crosses the boundary in both directions, which is what makes an opaque response acceptable rather than merely unhelpful.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "node.stack-trace-disclosure"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c054",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which field should a client branch on?",
+      "conceptIds": ["node.error-contracts"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An objectively checkable card on the stable part of an error contract.",
+      "lessonId": "v1-l27",
+      "type": "code-reading",
+      "promptMarkdown": "A client needs to show a special screen when a ticket is already resolved. Which part of the error response should its condition test?",
+      "answerMarkdown": "The stable machine-readable `code` — `if (body.error.code === 'ticket_already_resolved')`. The status alone is too coarse, because several different conflicts share 409, and the human-readable message is deliberately free to change.",
+      "explanationMarkdown": "Separating the stable code from the unstable prose is what lets a team reword, translate or soften every message in the API without coordinating a release with each client. A client that matches on message text turns a copy edit into an outage.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "error-code",
+            "textMarkdown": "`body.error.code === 'ticket_already_resolved'`",
+            "correct": true,
+            "explanationMarkdown": "Correct. The code is the documented, stable identifier, and it distinguishes this conflict from every other 409."
+          },
+          {
+            "id": "status-only",
+            "textMarkdown": "`response.status === 409`",
+            "correct": false,
+            "explanationMarkdown": "Useful as a first branch, but too coarse on its own: an already-resolved ticket, a duplicate creation and an edit conflict can all be 409."
+          },
+          {
+            "id": "message-text",
+            "textMarkdown": "`body.error.message.includes('already resolved')`",
+            "correct": false,
+            "explanationMarkdown": "This makes a copy edit or a translation a breaking change, and it fails immediately for any client running in another language."
+          },
+          {
+            "id": "details-length",
+            "textMarkdown": "`body.error.details.length === 0`",
+            "correct": false,
+            "explanationMarkdown": "`details` is about field-level validation problems and is empty for most failures, so this matches almost every non-validation error."
+          }
+        ]
+      },
+      "primaryConceptId": "node.error-contracts"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v1-a09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Node.js APIs placement check",
+      "conceptIds": [
+        "node.route-boundaries",
+        "node.parameter-parsing",
+        "node.runtime-validation",
+        "ts.compile-vs-runtime",
+        "http.status-codes",
+        "node.stack-trace-disclosure",
+        "node.error-contracts"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering route boundaries, runtime validation and error contracts. Two are critical and must both be answered correctly.",
+      "chapterId": "v1-ch09",
+      "items": [
+        {
+          "id": "v1-a09-i1",
+          "objectiveIds": ["ts.compile-vs-runtime", "node.runtime-validation"],
+          "critical": true,
+          "promptMarkdown": "A service declares `function archive(input: ArchiveRequest)` and the route calls `archive(JSON.parse(rawBody) as ArchiveRequest)`. Which statement is true of the compiled JavaScript that actually runs?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "no-check-emitted",
+                "textMarkdown": "No check is emitted at all — both the annotation and the assertion are erased, so `archive` receives whatever the JSON contained.",
+                "correct": true,
+                "explanationMarkdown": "Correct. TypeScript emits no runtime type checks. The assertion only told the compiler to stop objecting."
+              },
+              {
+                "id": "shape-check",
+                "textMarkdown": "TypeScript emits a shape check at the call site and throws a `TypeError` when the object does not match.",
+                "correct": false,
+                "explanationMarkdown": "No such code is generated. That behaviour is what a schema validator gives you, and it has to be added deliberately."
+              },
+              {
+                "id": "strict-adds-guards",
+                "textMarkdown": "Under `strict` mode the compiler inserts runtime guards for parameters of interface type.",
+                "correct": false,
+                "explanationMarkdown": "`strict` changes how thoroughly the compiler checks your source; it never adds code to the output."
+              },
+              {
+                "id": "json-parse-validates",
+                "textMarkdown": "`JSON.parse` validates against the target type when the result is immediately asserted to it.",
+                "correct": false,
+                "explanationMarkdown": "`JSON.parse` checks that the text is valid JSON and nothing more. It has no knowledge of your types."
+              }
+            ]
+          },
+          "explanationMarkdown": "Compile-time types describe intent; only code that runs can inspect data that arrives while the program is running. Every trust boundary needs a validator, not an annotation."
+        },
+        {
+          "id": "v1-a09-i2",
+          "objectiveIds": ["node.stack-trace-disclosure", "http.error-mapping"],
+          "critical": true,
+          "promptMarkdown": "An API returns `{ \"error\": \"ER_DUP_ENTRY: Duplicate entry 'ada@wrenly.example' for key 'users.email_unique'\" }` with a 500. Which is the most complete assessment?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "leak-and-misclassified",
+                "textMarkdown": "It discloses the table, column and index names, and it misclassifies a client-side conflict as a server fault: this should be a 409 with a generic code, and the driver's message should go to the logs.",
+                "correct": true,
+                "explanationMarkdown": "Correct on both counts. The schema detail belongs in the log, and a duplicate is a conflict the client can act on — not a server failure to retry blindly."
+              },
+              {
+                "id": "just-reword",
+                "textMarkdown": "The status is right; the message merely needs friendlier wording before it is shown to users.",
+                "correct": false,
+                "explanationMarkdown": "Rewording still leaks nothing less if the original is passed through elsewhere, and 500 tells the client's retry logic to try again at something that will always fail."
+              },
+              {
+                "id": "only-status",
+                "textMarkdown": "The only problem is the status code; database error messages are safe because they are not stack traces.",
+                "correct": false,
+                "explanationMarkdown": "Constraint and column names describe your schema, and this one also echoes a customer's email address back to whoever provoked it."
+              },
+              {
+                "id": "acceptable-internally",
+                "textMarkdown": "It is acceptable for an internal API, because only trusted services call it.",
+                "correct": false,
+                "explanationMarkdown": "Internal APIs get exposed, proxied and logged in places you did not plan. The generic-response rule is cheap enough to apply everywhere."
+              }
+            ]
+          },
+          "explanationMarkdown": "Two rules meet here: internal detail stops at the boundary and goes to the logs, and the status must describe the actual class of failure so client retry logic behaves sensibly."
+        },
+        {
+          "id": "v1-a09-i3",
+          "objectiveIds": ["node.parameter-parsing"],
+          "critical": false,
+          "promptMarkdown": "A handler runs `const limit = Number(req.query.limit) || 50`. A client sends `?limit=0`, expecting zero results. What happens, and why is it easy to miss?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "zero-is-falsy",
+                "textMarkdown": "`0` is falsy, so the `||` replaces it with 50 and the client receives fifty rows. It is easy to miss because the same expression handles missing and malformed input correctly.",
+                "correct": true,
+                "explanationMarkdown": "Correct. `||` cannot distinguish 'absent' from 'legitimately zero'. `??` would fix the falsy case, but the input still needs a real shape check."
+              },
+              {
+                "id": "throws",
+                "textMarkdown": "`Number('0')` throws because an empty result is not a valid number.",
+                "correct": false,
+                "explanationMarkdown": "`Number('0')` is simply `0`. Nothing throws — which is exactly why the defect is quiet."
+              },
+              {
+                "id": "returns-zero",
+                "textMarkdown": "The client gets zero rows, because `Number('0')` is `0` and `0 || 50` evaluates to `0`.",
+                "correct": false,
+                "explanationMarkdown": "`0 || 50` evaluates to `50`: `||` returns the right operand whenever the left is falsy, and `0` is falsy."
+              },
+              {
+                "id": "nan",
+                "textMarkdown": "`limit` becomes `NaN`, which the database driver silently treats as no limit.",
+                "correct": false,
+                "explanationMarkdown": "`NaN` would come from `Number('abc')`, and it is also falsy — so that case, too, quietly becomes 50."
+              }
+            ]
+          },
+          "explanationMarkdown": "`||` as a default treats every falsy value as absent, which hides `0` and the empty string. Check the shape of the raw string first, then apply a default only when the parameter really was missing."
+        },
+        {
+          "id": "v1-a09-i4",
+          "objectiveIds": ["node.route-boundaries", "node.separation-of-concerns"],
+          "critical": false,
+          "promptMarkdown": "Which function signature shows that a business rule has been kept on the correct side of the HTTP boundary?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "pure-domain",
+                "textMarkdown": "`async function resolveTicket(agentId: string, ticketId: string): Promise<ResolveResult>`",
+                "correct": true,
+                "explanationMarkdown": "Correct. It takes checked values and returns a result, so a nightly job or a CLI can call it and a test needs no server."
+              },
+              {
+                "id": "takes-res",
+                "textMarkdown": "`async function resolveTicket(req: Request, res: Response): Promise<void>`",
+                "correct": false,
+                "explanationMarkdown": "Taking `req` and `res` means the rule can only ever be exercised through HTTP, and testing it requires fabricating both objects."
+              },
+              {
+                "id": "returns-status",
+                "textMarkdown": "`async function resolveTicket(ticketId: string): Promise<{ status: number; body: unknown }>`",
+                "correct": false,
+                "explanationMarkdown": "It has shed `req` and `res` but still speaks HTTP: the domain now decides status codes, so the transport concern has just moved one file deeper."
+              },
+              {
+                "id": "throws-http-error",
+                "textMarkdown": "`async function resolveTicket(ticketId: string): Promise<Ticket>` that throws `new HttpError(409, 'conflict')`.",
+                "correct": false,
+                "explanationMarkdown": "Closer, but the domain is still choosing status codes. Throw a `ConflictError` and let a single mapper at the boundary decide it is a 409."
+              }
+            ]
+          },
+          "explanationMarkdown": "The test is whether a caller that is not an HTTP request could use the function unchanged. Status codes are a transport decision and belong in the one place that maps outcomes to responses."
+        },
+        {
+          "id": "v1-a09-i5",
+          "objectiveIds": ["node.error-contracts", "http.status-codes"],
+          "critical": false,
+          "promptMarkdown": "A team proposes always returning HTTP 200 and putting a `success` boolean in the body, arguing it simplifies client code. What is the strongest objection?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "infrastructure-reads-status",
+                "textMarkdown": "Everything between the client and the server reads the status: caches store the failure as a valid response, retry logic and circuit breakers never trigger, and dashboards report a zero error rate during an outage.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The status code is a contract with the whole infrastructure, not just with the calling function."
+              },
+              {
+                "id": "more-bytes",
+                "textMarkdown": "The response body grows by a few bytes on every request, which is wasteful at scale.",
+                "correct": false,
+                "explanationMarkdown": "True and irrelevant. The cost here is that failures become invisible to every layer that reads status codes."
+              },
+              {
+                "id": "against-rest",
+                "textMarkdown": "It violates REST, and REST compliance is required for an API to be considered well designed.",
+                "correct": false,
+                "explanationMarkdown": "An appeal to a label rather than a consequence. The concrete harm — caching, retries, monitoring — is the argument that actually persuades."
+              },
+              {
+                "id": "clients-cannot-parse",
+                "textMarkdown": "Client HTTP libraries cannot read a body from a 200 response, so the `success` flag would be unreachable.",
+                "correct": false,
+                "explanationMarkdown": "They read it perfectly well. The scheme is workable in isolation, which is exactly why it survives review until the first incident."
+              }
+            ]
+          },
+          "explanationMarkdown": "Status codes are consumed by caches, proxies, SDK retry logic, load balancers and monitoring. Hiding failures inside a 200 body blinds all of them at once."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

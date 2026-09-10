@@ -1,0 +1,1194 @@
+{
+  "note": "V1 chapter 1 — Web workflow. Also carries the single v1-track item for the whole V1 release. prerequisiteIds hold CONCEPT ids (see packages/contracts/src/content.ts baseItem.prerequisiteIds) and always point at concepts taught earlier in the release order.",
+  "items": [
+    {
+      "kind": "track",
+      "id": "v1-track",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Web engineering foundations",
+      "conceptIds": [
+        "web.request-response",
+        "debug.next-step",
+        "js.functions",
+        "js.array-filter",
+        "js.async-await",
+        "ts.narrowing",
+        "html.semantics",
+        "react.state-updates",
+        "node.route-boundaries",
+        "sql.select",
+        "auth.ownership-check",
+        "test.boundary-cases"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The V1 track walks from the mechanics of a single web request to a small, testable, secured feature that talks to a database. Twelve chapters, thirty-six lessons, three required exercises per lesson, and one placement check per chapter.\n\nThe track is deliberately linear. Every chapter assumes the vocabulary of the ones before it, and every chapter ends with a placement check whose items were written separately from the practice exercises, so passing it means the ideas transferred rather than that the answers were memorised.",
+      "description": "A linear twelve-chapter path from the request/response cycle through JavaScript, TypeScript, the browser platform, React, Node.js APIs, relational data, authentication and day-to-day operation.",
+      "targetOutcomes": [
+        "Explain what happens between a click in the browser and a rendered response.",
+        "Write and debug small JavaScript and TypeScript functions from evidence rather than guesswork.",
+        "Build an accessible React feature that reads and writes real server data.",
+        "Design a Node.js endpoint that validates input, scopes data to its owner and reports failures honestly.",
+        "Model, query and migrate relational data without losing or duplicating rows.",
+        "Ship a change with tests, logs and a rollback you have actually thought through."
+      ],
+      "chapterIds": [
+        "v1-ch01",
+        "v1-ch02",
+        "v1-ch03",
+        "v1-ch04",
+        "v1-ch05",
+        "v1-ch06",
+        "v1-ch07",
+        "v1-ch08",
+        "v1-ch09",
+        "v1-ch10",
+        "v1-ch11",
+        "v1-ch12"
+      ]
+    },
+    {
+      "kind": "chapter",
+      "id": "v1-ch01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Web workflow",
+      "conceptIds": [
+        "web.request-response",
+        "web.client-vs-server",
+        "git.working-tree",
+        "git.commit-sequence",
+        "npm.scripts",
+        "debug.stack-trace",
+        "debug.next-step",
+        "debug.minimal-reproduction"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Before any of the code in this course makes sense, three habits have to be in place: knowing what actually travels between a browser and a server, being able to see and describe the state of your own project, and being able to turn a failure into evidence instead of a guess.\n\nThis chapter is short on syntax on purpose. Everything in it is a working habit you will use in every later chapter, and most of the defects in the rest of the course are found by exactly these moves.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v1-l01",
+        "v1-l02",
+        "v1-l03"
+      ],
+      "assessmentId": "v1-a01",
+      "objectiveIds": [
+        "web.request-response",
+        "web.client-vs-server",
+        "git.working-tree",
+        "git.commit-sequence",
+        "npm.scripts",
+        "debug.stack-trace",
+        "debug.next-step",
+        "debug.minimal-reproduction"
+      ],
+      "missionIds": [],
+      "sortOrder": 0
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Request and response",
+      "conceptIds": [
+        "web.request-response",
+        "web.client-vs-server"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A web page is not a thing that lives on your screen. It is the visible result of a conversation that already finished.\n\nThe browser sends a **request**: a method, a path, some headers, and sometimes a body. A server somewhere reads that request, decides what it means, does some work, and sends back a **response**: a status code, some headers, and usually a body. The browser then does something with the body — render it, run it, or hand it to code that is already running.\n\nTwo consequences matter immediately. First, the browser cannot see anything the server did not send; if a value is missing from the page, either the server never sent it or the browser code never used it, and those are different bugs. Second, the server cannot see anything the browser did not send; a value the user typed does not exist on the server until a request carries it there.\n\nThat second point is also the beginning of every security lesson later in the track. Anything the browser sends is *claimed* by whoever is sitting at that browser. The server decides what to believe.",
+      "chapterId": "v1-ch01",
+      "sortOrder": 0,
+      "objectives": [
+        "Describe the parts of an HTTP request and of the response it produces.",
+        "Decide whether a given piece of work belongs in the browser or on the server."
+      ],
+      "estimatedMinutes": 12,
+      "workedExampleMarkdown": "The Larkspur Bakery order tool (a fictional app used throughout this course) shows a list of orders. Opening the page produces two separate conversations.\n\n```text\n1) Browser -> Server\n   GET /orders?status=open HTTP/1.1\n   Accept: text/html\n\n   Server -> Browser\n   200 OK\n   Content-Type: text/html\n   <html> ... the page shell and its script tags ... </html>\n\n2) Browser -> Server   (started by the script the first response delivered)\n   GET /api/orders?status=open HTTP/1.1\n   Accept: application/json\n\n   Server -> Browser\n   200 OK\n   Content-Type: application/json\n   [{\"id\":\"o-1041\",\"customer\":\"R. Vance\",\"status\":\"open\"}]\n```\n\nNothing on the rendered page came from nowhere. The customer name is on screen because the second response contained it. If the name renders as `undefined`, exactly one of two things is true: the JSON did not contain it, or the browser code read the wrong property. Opening the network panel and looking at that response body decides which, in about five seconds, and no amount of staring at the component will.",
+      "commonMistakes": [
+        "Assuming the page and its data arrived together — they are usually separate requests with separate failure modes.",
+        "Treating a value the browser sent as trustworthy on the server because it came from a control the user was not supposed to change.",
+        "Reading a 200 status as 'it worked' without checking whether the body actually contains the records the page needed.",
+        "Editing browser code to fix a value that the server never sent in the first place."
+      ],
+      "summaryMarkdown": "A request carries a method, a path, headers and sometimes a body. A response carries a status, headers and usually a body. The browser can only show what a response contained; the server can only act on what a request carried. When something is missing on screen, find out which side it went missing on before changing any code.",
+      "exerciseIds": [
+        "v1-e001",
+        "v1-e002",
+        "v1-e003"
+      ],
+      "reviewCardIds": [
+        "v1-c001",
+        "v1-c002"
+      ],
+      "references": [
+        {
+          "label": "MDN: An overview of HTTP",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Overview"
+        },
+        {
+          "label": "MDN: HTTP response status codes",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status"
+        }
+      ]
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Git and project commands",
+      "conceptIds": [
+        "git.working-tree",
+        "git.commit-sequence",
+        "npm.scripts"
+      ],
+      "prerequisiteIds": [
+        "web.request-response"
+      ],
+      "bodyMarkdown": "Two questions come up dozens of times a day: *what have I changed?* and *how do I run this project?* Neither should ever be a guess.\n\n`git status` answers the first. It reports three separate places a change can be: the working tree (files you edited), the index or staging area (changes marked for the next commit), and the last commit itself. A file can be in more than one of these at once, which is why a file can appear twice in the output with different meanings.\n\nThe second question is answered by the `scripts` block in `package.json`. `npm run <name>` runs the command recorded under that name in the same project, using the project's own installed tools rather than whatever happens to be on your machine. That is why `npm test` works for a colleague who has never installed the test runner globally.\n\nCommit sequencing is the habit that ties them together. A commit is a unit someone else has to be able to read, and possibly revert, without reading the ones after it. Keeping a rename separate from a behaviour change is not tidiness — it is what makes the behaviour change reviewable at all.",
+      "chapterId": "v1-ch01",
+      "sortOrder": 1,
+      "objectives": [
+        "Read git status output and say precisely which changes are staged, unstaged or untracked.",
+        "Split work into commits that stay reviewable and revertible on their own.",
+        "Find and run the right project script instead of guessing a command."
+      ],
+      "estimatedMinutes": 14,
+      "workedExampleMarkdown": "```text\n$ git status --short\n M src/orders/list.js\nMM src/orders/format.js\n?? src/orders/notes.js\n```\n\nThe two-character column is the point. The first character is the index, the second is the working tree.\n\n- `' M'` — `list.js` is modified but nothing is staged.\n- `'MM'` — `format.js` has staged changes **and** further edits made after staging. Committing now captures only the staged half.\n- `'??'` — `notes.js` is untracked. Git is not watching it, so it will not appear in a commit, and it will not be there for anyone else.\n\nThe `MM` line is the one that bites people. If you stage a file, keep editing it, and commit, you ship a version of the file that never existed on your disk. Re-run `git status` immediately before committing, or use `git add` again after your last edit.\n\nFor scripts, read the source of truth rather than remembering:\n\n```json\n{\n  \"scripts\": {\n    \"dev\": \"vite\",\n    \"test\": \"vitest run\",\n    \"build\": \"vite build\"\n  }\n}\n```\n\n`npm run dev` starts the dev server; `npm test` runs the suite once and exits, which is what a machine needs. If a script fails, the first useful question is whether it failed while starting up or while doing its work — the two have completely different causes.",
+      "commonMistakes": [
+        "Committing after staging and then editing again, so the commit contains a half-finished version of the file.",
+        "Assuming an untracked file is safe because it is visible in the editor; it is in no commit and no colleague has it.",
+        "Bundling a rename, a reformat and a behaviour change into one commit, so nobody can review or revert the behaviour change.",
+        "Running a globally installed tool instead of the project script and getting a different version's behaviour.",
+        "Reading only the last line of a failing script's output when the actual cause is twenty lines higher."
+      ],
+      "summaryMarkdown": "`git status` tells you what is untracked, unstaged and staged, and the difference matters at commit time. `package.json` scripts tell you how this project runs, using this project's tools. Commits are for readers: one intention each.",
+      "exerciseIds": [
+        "v1-e004",
+        "v1-e005",
+        "v1-e006"
+      ],
+      "reviewCardIds": [
+        "v1-c003",
+        "v1-c004"
+      ],
+      "references": [
+        {
+          "label": "Git: git-status documentation",
+          "url": "https://git-scm.com/docs/git-status"
+        },
+        {
+          "label": "npm Docs: scripts",
+          "url": "https://docs.npmjs.com/cli/v10/using-npm/scripts"
+        }
+      ]
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Debugging from evidence",
+      "conceptIds": [
+        "debug.stack-trace",
+        "debug.next-step",
+        "debug.minimal-reproduction"
+      ],
+      "prerequisiteIds": [
+        "npm.scripts"
+      ],
+      "bodyMarkdown": "Debugging is not a talent. It is a loop: state what you believe, make one observation that could prove you wrong, and update.\n\nThe first evidence is usually a stack trace. Read it in three parts. The **message** says what went wrong. The **top frame** says where it went wrong — the line that actually threw. The frames underneath say how you got there. The line that threw is frequently not the line with the mistake: a `Cannot read properties of undefined` on line 40 is often caused by whatever produced `undefined` on line 12.\n\nThe second habit is choosing the next observation deliberately. A good next step splits the remaining possibilities roughly in half. If a value is wrong on screen, checking the response body tells you whether the problem is server-side or browser-side in one move; adding a log inside a component tells you far less, because it only confirms the half you were already looking at.\n\nThe third is reduction. A minimal reproduction is the smallest input and shortest code path that still fails. Every element you remove without the failure disappearing is a possibility eliminated. When it finally stops failing, the last thing you removed is where to look.",
+      "chapterId": "v1-ch01",
+      "sortOrder": 2,
+      "objectives": [
+        "Extract the failing call, file and line from a stack trace.",
+        "Choose the observation that eliminates the most possibilities next.",
+        "Reduce a failure to the smallest input that still reproduces it."
+      ],
+      "estimatedMinutes": 14,
+      "workedExampleMarkdown": "A bakery order page throws on load.\n\n```text\nTypeError: Cannot read properties of undefined (reading 'toUpperCase')\n    at formatCustomer (src/orders/format.js:12:26)\n    at renderRow (src/orders/list.js:41:18)\n    at renderOrders (src/orders/list.js:33:5)\n```\n\nRead it downward. The throw is at `format.js:12`, called from `list.js:41`, which was called from `list.js:33`. So `formatCustomer` received something whose `.name` (or whatever line 12 reads) is `undefined`.\n\nThe tempting move is to edit line 12 to `customer?.name?.toUpperCase()`. That makes the error disappear without answering a single question, and the page will then render a blank name forever.\n\nThe evidence-first move is one observation that splits the problem: log the argument at the call site on `list.js:41`.\n\n```js\nconsole.log('order passed to formatCustomer:', order);\n```\n\nIf the order has no `customer` at all, the data is wrong and the fix is server-side or in whatever mapped the response. If the order has a customer but the property is spelled `customerName`, the fix is one line in the browser code. Both are cheap once you know which one you are in.\n\nThen reduce. Call `formatCustomer` directly with one hand-written order object. If it fails, you have a two-line reproduction with no page, no server and no framework in it.",
+      "commonMistakes": [
+        "Reading only the error message and skipping the frames, so the call site is never identified.",
+        "Assuming the top frame contains the mistake, when it usually only contains the symptom.",
+        "Silencing an error with optional chaining or a try/catch before knowing what produced the missing value.",
+        "Changing several things at once, so a passing result proves nothing about which change mattered.",
+        "Reproducing through the full application when a direct call to one function would show the same failure."
+      ],
+      "summaryMarkdown": "A stack trace gives a message, a throwing line and a path of callers. The throwing line shows the symptom; the caller path usually contains the cause. Pick observations that halve the search space, and shrink the reproduction until only the failure and its cause are left.",
+      "exerciseIds": [
+        "v1-e007",
+        "v1-e008",
+        "v1-e009"
+      ],
+      "reviewCardIds": [
+        "v1-c005",
+        "v1-c006"
+      ],
+      "references": [
+        {
+          "label": "MDN: Error.prototype.stack",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/Stack"
+        },
+        {
+          "label": "MDN: TypeError",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e001",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What the response actually carried",
+      "conceptIds": [
+        "web.request-response"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Separate the status line from the body, and both from what the page displays.",
+      "lessonId": "v1-l01",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 5,
+      "promptMarkdown": "The Larkspur Bakery order page shows an empty list. The network panel shows one request to `/api/orders?status=open` with this response:\n\n```text\n200 OK\nContent-Type: application/json\n\n[]\n```\n\nWhat has this evidence established?",
+      "hints": [
+        "A status code describes the outcome of the request, not the usefulness of the body.",
+        "The browser rendered an empty list; the response body was an empty list. Those two facts agree with each other.",
+        "The request succeeded and honestly returned zero records, so the remaining question is why the server considers zero orders to be open — not why the page is blank."
+      ],
+      "solution": {
+        "modelAnswer": "The request succeeded and the server genuinely returned no open orders, so the next question belongs on the server or in the data, not in the rendering code.",
+        "explanationMarkdown": "A 200 with an empty array is not a failure. It is an accurate answer to the question that was asked. The page is showing exactly what it received, so nothing in the browser code is implicated yet. The useful next observation is whether any order in the data actually has the status the query filtered on."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "server-returned-none",
+            "textMarkdown": "The request succeeded and the server returned zero matching records, so the next thing to check is the data or the filter the server applied.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The page and the response agree, so the rendering code is not yet implicated."
+          },
+          {
+            "id": "render-bug",
+            "textMarkdown": "The rendering code is dropping the records, because a 200 means records were sent.",
+            "correct": false,
+            "explanationMarkdown": "A 200 describes the outcome of the request only. The body here is an empty array, so there was nothing to drop."
+          },
+          {
+            "id": "request-failed",
+            "textMarkdown": "The request failed, because an empty body means the server errored.",
+            "correct": false,
+            "explanationMarkdown": "An empty array is a body, and 200 is a success status. A server error would use a 5xx status."
+          },
+          {
+            "id": "cache",
+            "textMarkdown": "The browser served a cached empty response, so the request never reached the server.",
+            "correct": false,
+            "explanationMarkdown": "Nothing in the evidence indicates a cache hit, and inventing one adds a possibility rather than eliminating one."
+          }
+        ]
+      },
+      "primaryConceptId": "web.request-response",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e002",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which side owns the discount rule",
+      "conceptIds": [
+        "web.client-vs-server",
+        "web.request-response"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Argue about responsibility, not about convenience.",
+      "lessonId": "v1-l01",
+      "sortOrder": 1,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "A teammate on the Larkspur Bakery tool proposes this: the browser calculates each order's staff discount and sends the final price to `POST /api/orders`, because \"the browser already has the prices, so the server does not need to recalculate anything.\"\n\nExplain, in your own words, what is wrong with that split of responsibility and what you would do instead. Say what the browser is still allowed to do.",
+      "hints": [
+        "Ask what the server knows about where a request came from.",
+        "Anything in the request body was chosen by whoever sent the request, and a request does not have to come from your page.",
+        "Keep the price calculation on the server as the authority, and let the browser compute the same number purely to show the customer a preview before submitting."
+      ],
+      "solution": {
+        "modelAnswer": "The server cannot tell a request from our page apart from a request typed by hand, so a price in the request body is a claim, not a fact — anyone could post a discounted price. The rule that decides a price is a business rule and must live where it can be enforced, on the server. The browser should still calculate a preview so the customer sees the discount immediately, but the server recalculates from the order contents and the customer's staff status, and its number is the one that gets stored.",
+        "explanationMarkdown": "The distinction is between showing a value and deciding it. Browser code is a convenience for the person using it and provides no guarantee to anyone else, because the browser is under the user's control and the network is open to anything that can send a request. Duplicating the calculation is fine and often good for responsiveness; delegating the *decision* is not. The same reasoning returns in the authentication chapter, where a browser-supplied user id is likewise a claim rather than an identity."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that the server cannot distinguish a request from our page from any other request, so a browser-supplied price is untrusted input.",
+          "Identifies the price calculation as a business rule that must be enforced where it cannot be bypassed.",
+          "Proposes that the server recalculates the price from the order contents rather than accepting the submitted number.",
+          "Allows the browser a legitimate role — a preview or immediate feedback — rather than banning client-side calculation outright."
+        ],
+        "modelAnswerMarkdown": "A request body is whatever the sender chose to put in it. The server has no way to know that a particular `POST /api/orders` came from our page rather than from a hand-written request, so accepting a submitted final price means accepting any price a customer likes.\n\nPricing is a business rule, so it belongs on the server, where it is enforced for every caller. I would have the browser send the order contents and the customer identifier, and let the server look up the staff status and calculate the price itself.\n\nThe browser still has a real job: calculate the same discount locally so the customer sees the price update instantly instead of waiting for a round trip. That is a preview. If the two numbers ever disagree, the server's number wins and the difference is a bug worth logging."
+      },
+      "primaryConceptId": "web.client-vs-server",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e003",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a request log to locate a missing name",
+      "conceptIds": [
+        "web.request-response",
+        "web.client-vs-server"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Compare what was sent with what is displayed and let the difference name the defect.",
+      "lessonId": "v1-l01",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "The order list renders every row's customer as `undefined`. Here is the recorded exchange and the rendering code.\n\n```text\nGET /api/orders?status=open\n200 OK\n[{\"id\":\"o-1041\",\"customerName\":\"R. Vance\",\"status\":\"open\"}]\n```\n\n```js\nfunction renderRow(order) {\n  return `<td>${order.id}</td><td>${order.customer}</td>`;\n}\n```\n\nWhich side is the defect on, and what is the smallest correct fix?",
+      "hints": [
+        "The response body is right there. Check whether the value the page wants exists in it at all.",
+        "The response carries `customerName`; the rendering code reads `customer`.",
+        "The data is fine and the server needs no change: the browser code is reading a property name that the response never used."
+      ],
+      "solution": {
+        "modelAnswer": "The response contains `customerName`, but the row reads `order.customer`, which is undefined. The fix is in the browser: read `order.customerName`.",
+        "explanationMarkdown": "Reading a property that does not exist gives `undefined` rather than an error, so this class of defect is silent until it reaches the screen. Comparing the response body against the property names the code reads settles it in one step, and it also tells you the server is behaving correctly — which is worth knowing before anyone changes an endpoint."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "client-property-name",
+            "textMarkdown": "Browser side: the code reads `order.customer` while the response carries `customerName`. Read `order.customerName`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Missing properties evaluate to `undefined` silently, and the response proves the data was sent."
+          },
+          {
+            "id": "server-omits",
+            "textMarkdown": "Server side: the endpoint forgot to include the customer, so it must be added to the response.",
+            "correct": false,
+            "explanationMarkdown": "The recorded body does include the customer, under the name `customerName`."
+          },
+          {
+            "id": "needs-guard",
+            "textMarkdown": "Browser side: add `order.customer ?? \"Unknown\"` so the row never shows `undefined`.",
+            "correct": false,
+            "explanationMarkdown": "That hides the symptom and permanently displays 'Unknown' for a name the server did send."
+          },
+          {
+            "id": "status-code",
+            "textMarkdown": "The 200 status is wrong; a partial record should have returned 206.",
+            "correct": false,
+            "explanationMarkdown": "The record is not partial, and 206 is about ranged content, not about fields."
+          }
+        ]
+      },
+      "primaryConceptId": "web.request-response",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e004",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a working tree before committing",
+      "conceptIds": [
+        "git.working-tree"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read the two status columns separately and predict what a commit would capture.",
+      "lessonId": "v1-l02",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "foundation",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "You are about to run `git commit -m \"Fix order totals\"`. This is the current status:\n\n```text\n$ git status --short\nM  src/orders/total.js\n M src/orders/total.js.bak\nMM src/orders/format.js\n?? src/orders/notes.md\n```\n\nWhich files contribute content to the commit you are about to make?",
+      "hints": [
+        "The first column is the index (staged); the second is the working tree (not staged).",
+        "A commit records the index only, and untracked files are in neither.",
+        "`total.js` is fully staged and `format.js` is staged but has newer unstaged edits, so both contribute — but `format.js` contributes only its staged half."
+      ],
+      "solution": {
+        "modelAnswer": "`total.js` and `format.js` contribute. `format.js` contributes only its staged version, not the edits made after staging. `total.js.bak` is unstaged and `notes.md` is untracked, so neither appears.",
+        "explanationMarkdown": "A commit is built from the index, not from your disk. The `MM` case is the one that produces confusing history: the committed file is a version that never existed as a whole on your machine. Re-staging immediately before committing, or reading `git status` one last time, prevents it."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "total-js",
+            "textMarkdown": "`src/orders/total.js`",
+            "correct": true,
+            "explanationMarkdown": "Yes. `M ` means staged with no further edits, so the commit gets exactly what you see on disk."
+          },
+          {
+            "id": "format-js",
+            "textMarkdown": "`src/orders/format.js`, but only the version that was staged",
+            "correct": true,
+            "explanationMarkdown": "Yes. `MM` means staged changes plus later unstaged edits; the commit captures only the staged half."
+          },
+          {
+            "id": "bak",
+            "textMarkdown": "`src/orders/total.js.bak`",
+            "correct": false,
+            "explanationMarkdown": "The leading space means nothing is staged for it, so a commit ignores it."
+          },
+          {
+            "id": "notes",
+            "textMarkdown": "`src/orders/notes.md`",
+            "correct": false,
+            "explanationMarkdown": "`??` is untracked. Git is not following the file at all, so it cannot be committed until it is added."
+          }
+        ]
+      },
+      "primaryConceptId": "git.working-tree",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e005",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Order the commits so each one is revertible",
+      "conceptIds": [
+        "git.commit-sequence",
+        "git.working-tree"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Choose a sequence a reviewer can follow and a maintainer can undo.",
+      "lessonId": "v1-l02",
+      "sortOrder": 1,
+      "type": "choice",
+      "difficulty": "core",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "In one session on the bakery tool you did four things:\n\n1. renamed `fmt.js` to `format.js` and updated its imports;\n2. reformatted the whole file with the project formatter;\n3. changed how totals round, which changes visible output;\n4. added a test that fails before change 3 and passes after it.\n\nWhich commit sequence makes the behaviour change easiest to review and to revert on its own?",
+      "hints": [
+        "A reviewer's effort is dominated by how much unrelated noise sits next to the meaningful change.",
+        "Renames and reformats change many lines and no behaviour; the rounding change changes few lines and all of the behaviour.",
+        "Put the rename first, the reformat second, then the failing test and the rounding fix together, so reverting that last commit removes both the behaviour change and the test that describes it."
+      ],
+      "solution": {
+        "modelAnswer": "Commit the rename alone, then the reformat alone, then the test and the rounding change together.",
+        "explanationMarkdown": "The rename and the reformat are large and mechanical: reviewed once, quickly, and never again. Isolating them means the rounding change is reviewed as the handful of lines it actually is. Keeping the test with the change it describes means a single revert removes the behaviour and its specification together, leaving the repository consistent rather than red."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "rename-format-testfix",
+            "textMarkdown": "rename → reformat → (test + rounding change)",
+            "correct": true,
+            "explanationMarkdown": "Correct. Mechanical noise is isolated first, and the behaviour change ships with the test that defines it, so it reverts cleanly."
+          },
+          {
+            "id": "all-in-one",
+            "textMarkdown": "One commit containing everything, with a message listing all four items",
+            "correct": false,
+            "explanationMarkdown": "The rounding change is then a few lines hidden inside hundreds of rename and formatting lines, and it cannot be reverted without also undoing the rename."
+          },
+          {
+            "id": "fix-then-test",
+            "textMarkdown": "rounding change → rename → reformat → test",
+            "correct": false,
+            "explanationMarkdown": "The test lands three commits after the behaviour it describes, so the intermediate commits contain untested new behaviour and reverting the change leaves the test behind."
+          },
+          {
+            "id": "test-first-alone",
+            "textMarkdown": "test (failing) → rename → reformat → rounding change",
+            "correct": false,
+            "explanationMarkdown": "This leaves the repository with a deliberately failing test for three commits, so nobody after you can tell a broken build from an expected one."
+          }
+        ]
+      },
+      "primaryConceptId": "git.commit-sequence",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e006",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain how you would attack a failing project script",
+      "conceptIds": [
+        "npm.scripts",
+        "debug.next-step"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Describe an ordered approach, not a list of things you might try.",
+      "lessonId": "v1-l02",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "A colleague clones the bakery repository, runs `npm test`, and reports only this: \"it doesn't work\".\n\nWrite the sequence of questions you would ask and observations you would make, in order, and say what each one would rule out. Assume you cannot see their screen.",
+      "hints": [
+        "The first distinction is whether the command failed to start at all or ran and reported failures.",
+        "A script can fail before it does any work — missing dependencies, a missing script name, a wrong Node version — and those look nothing like a failing test.",
+        "Ask for the whole output, decide from the first error line whether it is a startup failure or a test failure, then compare their environment against the project's own script definition and installed dependencies before touching any test."
+      ],
+      "solution": {
+        "modelAnswer": "First, ask for the complete output rather than the last line. Then classify it: did the script start? If npm reports a missing script, the name is wrong or they are in the wrong directory. If the runner itself cannot start, dependencies are not installed or the Node version does not match. Only if the runner ran and reported assertions do we have an actual test failure, and then the question becomes whether it fails for me too — which separates a broken checkout from a broken commit.",
+        "explanationMarkdown": "Almost every 'it doesn't work' report collapses once you split startup failures from work failures, because the two have disjoint causes. The `scripts` block is the source of truth for what the command even runs, and the project's own installed dependencies are what it runs with, which is why 'it works on my machine' is usually a difference in one of those two things rather than in the code."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Asks for the complete output rather than reasoning from a summary or the final line.",
+          "Distinguishes a script that failed to start from a script that ran and reported failures, and says how the output tells them apart.",
+          "Names at least two concrete startup causes, such as dependencies not installed, the wrong directory, a missing script name or a mismatched Node version.",
+          "Includes reproducing the command locally to separate a broken checkout from a broken commit."
+        ],
+        "modelAnswerMarkdown": "I would ask for the entire terminal output, starting from the command they typed. The last line is almost never the informative one.\n\nThen I would classify the first error. If npm says the script is missing, they are either in the wrong directory or using a name that is not in `scripts`. If the test runner itself cannot start, the likely causes are dependencies never installed after the clone, or a Node version the project does not support. If instead the runner started and printed assertion failures, this is a real test failure and the environment is fine.\n\nOnly in that last case would I run `npm test` on my own checkout. If it passes for me and fails for them, the difference is environmental; if it fails for both of us, the commit is broken and the environment was never the issue."
+      },
+      "primaryConceptId": "npm.scripts",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e007",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a stack trace and name the call site",
+      "conceptIds": [
+        "debug.stack-trace"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Distinguish the line that threw from the line that caused it.",
+      "lessonId": "v1-l03",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "foundation",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "```text\nTypeError: orders.map is not a function\n    at buildRows (src/orders/list.js:28:24)\n    at renderOrders (src/orders/list.js:15:16)\n    at start (src/main.js:9:3)\n```\n\nWhat does this trace establish, and where should you look first?",
+      "hints": [
+        "Separate the message from the frames: the message describes the value, the frames describe the path.",
+        "`orders.map is not a function` means `orders` exists but is not an array — a plain object and a string both produce this message.",
+        "The value was wrong before line 28 ran, so look at `renderOrders` on line 15 to see what it passed in and where it got it from."
+      ],
+      "solution": {
+        "modelAnswer": "`buildRows` was called with an `orders` value that is not an array. The mistake is upstream, so the first place to look is `renderOrders` at `list.js:15` and whatever produced the value it passed.",
+        "explanationMarkdown": "The top frame is where the program noticed the problem, not where the problem was created. Because the message names an existing-but-wrong value rather than `undefined`, the likely cause is a shape mismatch — for example a response body of `{ \"orders\": [...] }` being passed straight in where the array itself was expected."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "caller-passed-non-array",
+            "textMarkdown": "`orders` is not an array by the time `buildRows` runs, so inspect what `renderOrders` passes at `list.js:15`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The throwing frame shows the symptom; the caller frame is where the wrong value came from."
+          },
+          {
+            "id": "map-missing",
+            "textMarkdown": "The environment is missing `Array.prototype.map`, so the build target needs a polyfill.",
+            "correct": false,
+            "explanationMarkdown": "`map` has been available in every JavaScript environment for well over a decade. The message is about this particular value, not about the language."
+          },
+          {
+            "id": "line-28-typo",
+            "textMarkdown": "Line 28 has a typo in the method name and should be corrected there.",
+            "correct": false,
+            "explanationMarkdown": "The message quotes `map`, which is the intended method. Changing line 28 cannot fix a value that was already wrong when it arrived."
+          },
+          {
+            "id": "async",
+            "textMarkdown": "The data has not loaded yet, so `orders` is still a pending promise and the call needs `await`.",
+            "correct": false,
+            "explanationMarkdown": "Possible in general, but the trace alone does not establish it, and a pending promise is only one of several non-array values that produce this message. Check the actual value first."
+          }
+        ]
+      },
+      "primaryConceptId": "debug.stack-trace",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e008",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Pick the observation that eliminates the most",
+      "conceptIds": [
+        "debug.next-step"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Choose the single next step that splits the remaining possibilities.",
+      "lessonId": "v1-l03",
+      "sortOrder": 1,
+      "type": "choice",
+      "difficulty": "core",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "On the bakery tool, one specific customer's order page shows a total of `NaN`. Every other customer's page is correct. Nothing throws.\n\nYou may make exactly one observation before deciding what to change. Which one eliminates the most possibilities?",
+      "hints": [
+        "One customer differs from all the others, so the difference is far more likely to be in that customer's data than in code every page runs.",
+        "The calculation runs identically for every page, so if the code were wrong, every page would be wrong.",
+        "Look at the raw response body for that one order and find the field that is not a number."
+      ],
+      "solution": {
+        "modelAnswer": "Read the raw API response for that single order and look for a non-numeric or missing value among the fields the total is computed from.",
+        "explanationMarkdown": "`NaN` is produced by arithmetic on something that is not a number, and the fact that only one record misbehaves points squarely at data rather than logic. One look at that record's body either finds the offending field immediately — a null price, a quantity sent as an empty string — or rules the data out entirely and promotes the code to prime suspect."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "inspect-response",
+            "textMarkdown": "Open the network panel and read the raw response body for that one order.",
+            "correct": true,
+            "explanationMarkdown": "Correct. It is one action, it covers every field at once, and it either finds the bad value or clears the data entirely."
+          },
+          {
+            "id": "log-in-total",
+            "textMarkdown": "Add a log inside the total calculation and reload the page.",
+            "correct": false,
+            "explanationMarkdown": "Useful later, but it only shows the value at one point and requires an edit, a reload and a guess about which point to instrument."
+          },
+          {
+            "id": "rewrite-with-guards",
+            "textMarkdown": "Rewrite the calculation to coerce every field with `Number(...) || 0`.",
+            "correct": false,
+            "explanationMarkdown": "That is a change, not an observation, and it would silently turn a real bad value into a plausible wrong total."
+          },
+          {
+            "id": "check-browser",
+            "textMarkdown": "Ask the customer which browser they use.",
+            "correct": false,
+            "explanationMarkdown": "The page is wrong for one record across all browsers you have; browser variation is not what distinguishes this case from the working ones."
+          }
+        ]
+      },
+      "primaryConceptId": "debug.next-step",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e009",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Shrink a failing batch to its first bad record",
+      "conceptIds": [
+        "debug.minimal-reproduction",
+        "js.object-access"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Turn 'the import crashed' into 'record r-2 has no email' with a function you can run on any batch.",
+      "lessonId": "v1-l03",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "A nightly customer import fails somewhere inside a batch of a few thousand records, and the stack trace only says a name could not be read. Rather than bisecting by hand, write the reducer that finds the first offender.\n\nImplement `firstMissingEmail(records)`. It returns the `id` of the **first** record whose `email` is not a usable string, and `null` if every record has one. A record counts as an offender when `email` is absent, is not a string, or contains only whitespace. Do not modify the input.",
+      "hints": [
+        "You need the first offender, not all of them, so a loop that can stop early fits better than building a list.",
+        "Three separate conditions make an email unusable: the property is missing, it is not a string at all, and it is a string of only whitespace.",
+        "Check `typeof email !== 'string'` first so that calling `.trim()` on the remaining values is always safe, and return `record.id` the moment a check fails."
+      ],
+      "solution": {
+        "code": "function firstMissingEmail(records) {\n  for (const record of records) {\n    const email = record.email;\n    if (typeof email !== 'string' || email.trim() === '') {\n      return record.id;\n    }\n  }\n  return null;\n}",
+        "explanationMarkdown": "Reduction is the whole point: the batch stops being an opaque failure and becomes a named record you can look at. Checking the type before calling a string method is the ordering that makes the second check safe, and it is why `typeof` comes first rather than second. Returning `null` for a clean batch is deliberate — it is a value the caller can test, whereas returning nothing at all would be indistinguishable from a record whose id is missing."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "firstMissingEmail",
+        "starterCode": "function firstMissingEmail(records) {\n  // Replace this: it reports every batch as clean.\n  return null;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-batch",
+            "args": [
+              []
+            ],
+            "expected": null,
+            "hidden": false
+          },
+          {
+            "id": "all-valid",
+            "args": [
+              [
+                {
+                  "id": "r-1",
+                  "email": "vance@larkspur.test"
+                },
+                {
+                  "id": "r-2",
+                  "email": "okoro@larkspur.test"
+                }
+              ]
+            ],
+            "expected": null,
+            "hidden": false
+          },
+          {
+            "id": "second-record-has-no-email",
+            "args": [
+              [
+                {
+                  "id": "r-1",
+                  "email": "vance@larkspur.test"
+                },
+                {
+                  "id": "r-2"
+                }
+              ]
+            ],
+            "expected": "r-2",
+            "hidden": false
+          },
+          {
+            "id": "whitespace-only-counts-as-missing",
+            "args": [
+              [
+                {
+                  "id": "r-9",
+                  "email": "   "
+                }
+              ]
+            ],
+            "expected": "r-9",
+            "hidden": false
+          },
+          {
+            "id": "non-string-email",
+            "args": [
+              [
+                {
+                  "id": "r-4",
+                  "email": 12345
+                },
+                {
+                  "id": "r-5",
+                  "email": "ng@larkspur.test"
+                }
+              ]
+            ],
+            "expected": "r-4",
+            "hidden": false
+          },
+          {
+            "id": "only-the-first-offender-is-reported",
+            "args": [
+              [
+                {
+                  "id": "r-7",
+                  "email": ""
+                },
+                {
+                  "id": "r-8"
+                }
+              ]
+            ],
+            "expected": "r-7",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "debug.minimal-reproduction",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c001",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Parts of a request and a response",
+      "conceptIds": [
+        "web.request-response"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the anatomy of both halves of the exchange.",
+      "lessonId": "v1-l01",
+      "type": "recall",
+      "promptMarkdown": "Name the parts of an HTTP request, and the parts of the response it produces.",
+      "answerMarkdown": "**Request:** a method (GET, POST, …), a path with any query string, headers, and optionally a body.\n\n**Response:** a status code, headers, and usually a body.",
+      "explanationMarkdown": "Keeping these two lists distinct is what lets you say precisely where a value went missing: a request body problem and a response body problem are different bugs with different owners.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "web.request-response"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c002",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Trusting a value that came from the browser",
+      "conceptIds": [
+        "web.client-vs-server",
+        "web.request-response"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the client/server split to an unfamiliar feature.",
+      "lessonId": "v1-l01",
+      "type": "transfer",
+      "promptMarkdown": "A colleague adds a hidden form field carrying `role=\"staff\"` and the server grants a discount whenever that field is present. They argue it is safe because the field is hidden and no button ever sets it to anything else. What is your response?",
+      "answerMarkdown": "Hidden is a rendering choice, not a protection. The field arrives in the request body exactly like any other field, and anyone can send a request with it set. The server must decide staff status from the authenticated account it already knows about, never from a value the request carried.",
+      "explanationMarkdown": "The general rule transfers to every later chapter: the browser proposes and the server decides. Any input that determines an outcome must be re-derived from something the server itself controls.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "web.client-vs-server"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c003",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The three places a change can live",
+      "conceptIds": [
+        "git.working-tree"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what git tracks and where a change sits before it is committed.",
+      "lessonId": "v1-l02",
+      "type": "recall",
+      "promptMarkdown": "Name the three states a change can be in before it is part of a commit, and say which of them a `git commit` actually records.",
+      "answerMarkdown": "Untracked (git is not following the file), unstaged (tracked and modified in the working tree), and staged (added to the index). `git commit` records the **index** — that is, the staged content only.",
+      "explanationMarkdown": "Because the commit comes from the index rather than from disk, staging a file and then editing it again produces a commit containing a version you never had in front of you.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "git.working-tree"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c004",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Reading a two-column status line",
+      "conceptIds": [
+        "git.working-tree",
+        "git.commit-sequence"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Interpret short-format status output correctly.",
+      "lessonId": "v1-l02",
+      "type": "code-reading",
+      "promptMarkdown": "`git status --short` prints `AM src/orders/rates.js`. What does committing right now capture?",
+      "answerMarkdown": "The file is newly added to the index (`A`) and has been modified again since (`M`). The commit captures the version that was staged when it was added, not the current file on disk.",
+      "explanationMarkdown": "The first column is always the index and the second is always the working tree. Any line whose second column is not a space has content that a commit will leave behind.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "staged-version",
+            "textMarkdown": "The version staged at `git add` time; the later edits are left out.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A commit is built from the index, and the second `M` says the working tree has moved on."
+          },
+          {
+            "id": "current-disk",
+            "textMarkdown": "The current contents of the file on disk.",
+            "correct": false,
+            "explanationMarkdown": "That would be true only if the second column were a space."
+          },
+          {
+            "id": "nothing",
+            "textMarkdown": "Nothing, because a file with unstaged edits is skipped entirely.",
+            "correct": false,
+            "explanationMarkdown": "The staged half is committed; git does not skip the file."
+          }
+        ]
+      },
+      "primaryConceptId": "git.working-tree"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c005",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What each part of a stack trace tells you",
+      "conceptIds": [
+        "debug.stack-trace"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall how to read a trace in order.",
+      "lessonId": "v1-l03",
+      "type": "recall",
+      "promptMarkdown": "A stack trace has a message and a list of frames. What does each part tell you, and which one usually contains the mistake?",
+      "answerMarkdown": "The message says what went wrong. The top frame says where it was noticed — the line that threw. The frames below say how execution got there. The mistake is frequently in a lower frame, because that is where the wrong value was produced.",
+      "explanationMarkdown": "Treating the top frame as the culprit is what leads to patching symptoms with optional chaining. The trace is a path, and the path is the useful part.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "debug.stack-trace"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c006",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choosing between two next steps",
+      "conceptIds": [
+        "debug.next-step",
+        "debug.minimal-reproduction"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Judge which diagnostic move carries more information.",
+      "lessonId": "v1-l03",
+      "type": "debugging",
+      "promptMarkdown": "A saved order occasionally comes back with no line items. You can either add logging to the save endpoint and wait for it to happen again, or try to reproduce it locally by saving an order with zero items. Which do you do first, and why?",
+      "answerMarkdown": "Try the local reproduction first. It costs minutes instead of days, and if it reproduces you have a complete, repeatable failure with no waiting. Logging is the fallback for when you cannot make it happen on demand.",
+      "explanationMarkdown": "Prefer the observation with the shortest feedback loop that could still settle the question. Logging in production only pays off once the event recurs; a reproduction pays off immediately or eliminates one hypothesis cheaply.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "reproduce-first",
+            "textMarkdown": "Attempt the local reproduction first, because it either settles the question in minutes or rules out the simplest cause.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Shortest feedback loop that could still be decisive."
+          },
+          {
+            "id": "log-first",
+            "textMarkdown": "Add production logging first, because only real traffic can show the true cause.",
+            "correct": false,
+            "explanationMarkdown": "It may end there, but starting with a days-long feedback loop when a minutes-long one is available wastes the cheaper evidence."
+          },
+          {
+            "id": "both-at-once",
+            "textMarkdown": "Do both simultaneously and also refactor the save path while you are in there.",
+            "correct": false,
+            "explanationMarkdown": "Changing the code you are investigating destroys your ability to attribute any later result to anything."
+          }
+        ]
+      },
+      "primaryConceptId": "debug.next-step"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v1-a01",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Web workflow placement check",
+      "conceptIds": [
+        "web.request-response",
+        "web.client-vs-server",
+        "git.working-tree",
+        "git.commit-sequence",
+        "npm.scripts",
+        "debug.stack-trace",
+        "debug.next-step"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering chapter 1. Each one uses a scenario that does not appear in the lesson exercises.",
+      "chapterId": "v1-ch01",
+      "items": [
+        {
+          "id": "v1-a01-i1",
+          "objectiveIds": [
+            "web.request-response"
+          ],
+          "critical": true,
+          "promptMarkdown": "A form submits and the browser network panel records `POST /api/subscriptions` returning `201 Created` with a body of `{\"id\":\"s-88\"}`. The confirmation panel on the page stays empty. Which conclusion does the evidence support?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "browser-side",
+                "textMarkdown": "The write succeeded; whatever should display the confirmation is browser-side and did not run or did not read the response.",
+                "correct": true,
+                "explanationMarkdown": "Correct. 201 with an id is a successful creation, so the remaining failure has to be in the code that reacts to the response."
+              },
+              {
+                "id": "server-failed",
+                "textMarkdown": "The server failed to create the subscription, since nothing appeared on screen.",
+                "correct": false,
+                "explanationMarkdown": "201 Created plus an assigned id is direct evidence that the record was created."
+              },
+              {
+                "id": "wrong-status",
+                "textMarkdown": "The endpoint should have returned 200, and the unexpected status is why the page ignored it.",
+                "correct": false,
+                "explanationMarkdown": "201 is the correct status for a creation, and a status alone does not stop page code from reading a response."
+              },
+              {
+                "id": "body-too-small",
+                "textMarkdown": "The response body is incomplete: it must return the whole subscription for the page to render anything.",
+                "correct": false,
+                "explanationMarkdown": "Returning just an identifier is a normal design. If the page needs more, that is a deliberate contract change, not the cause of nothing happening at all."
+              }
+            ]
+          },
+          "explanationMarkdown": "Status and body together tell you which side of the exchange is still in question. Here they clear the server, which is exactly the value of looking before editing."
+        },
+        {
+          "id": "v1-a01-i2",
+          "objectiveIds": [
+            "web.client-vs-server"
+          ],
+          "critical": true,
+          "promptMarkdown": "Which of these responsibilities must live on the server rather than in the browser, even if the browser also implements it for responsiveness?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "authorisation",
+                "textMarkdown": "Deciding whether the current account is allowed to cancel a given order.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Permission decisions have to be enforced where they cannot be bypassed by a hand-written request."
+              },
+              {
+                "id": "focus-ring",
+                "textMarkdown": "Showing a focus outline on the currently focused button.",
+                "correct": false,
+                "explanationMarkdown": "This is presentation with no security or correctness consequence beyond the current screen."
+              },
+              {
+                "id": "sorting-visible-rows",
+                "textMarkdown": "Re-sorting the rows already loaded into the table when a column header is clicked.",
+                "correct": false,
+                "explanationMarkdown": "The data is already in the browser, so sorting it there is a legitimate and purely visual operation."
+              },
+              {
+                "id": "collapse-panel",
+                "textMarkdown": "Remembering which detail panels the user collapsed during this visit.",
+                "correct": false,
+                "explanationMarkdown": "Transient view state affects nobody else and does not need to be authoritative."
+              }
+            ]
+          },
+          "explanationMarkdown": "The dividing line is consequence. Anything that decides what is allowed or what is recorded belongs to the server; anything that only affects the current view can live in the browser."
+        },
+        {
+          "id": "v1-a01-i3",
+          "objectiveIds": [
+            "git.working-tree",
+            "git.commit-sequence"
+          ],
+          "critical": false,
+          "promptMarkdown": "You staged `report.js`, then deleted a function from it, then ran `git commit`. Afterwards `git status --short` shows ` M report.js`. What is in the commit?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "pre-delete",
+                "textMarkdown": "The version from before the deletion, because only staged content is committed.",
+                "correct": true,
+                "explanationMarkdown": "Correct, and the leftover ` M` is the deletion still sitting unstaged in the working tree."
+              },
+              {
+                "id": "post-delete",
+                "textMarkdown": "The version with the function deleted, because commit reads the file from disk.",
+                "correct": false,
+                "explanationMarkdown": "Commit reads the index. If it read disk, nothing would be left unstaged afterwards."
+              },
+              {
+                "id": "both",
+                "textMarkdown": "Both versions, as two separate changes inside one commit.",
+                "correct": false,
+                "explanationMarkdown": "A commit records one snapshot of the tree, not a sequence of edits."
+              },
+              {
+                "id": "nothing-committed",
+                "textMarkdown": "Nothing, because the file changed after staging and git aborts in that case.",
+                "correct": false,
+                "explanationMarkdown": "Git commits the staged content silently; that silence is precisely why this trips people up."
+              }
+            ]
+          },
+          "explanationMarkdown": "The index is a real, separate snapshot. Reading `git status` immediately before committing is the cheap habit that stops this from ever mattering."
+        },
+        {
+          "id": "v1-a01-i4",
+          "objectiveIds": [
+            "npm.scripts"
+          ],
+          "critical": false,
+          "promptMarkdown": "`package.json` declares `\"scripts\": { \"check\": \"tsc --noEmit && vitest run\" }`. Running `npm run check` prints TypeScript errors and stops. Did the test suite run?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "no-short-circuit",
+                "textMarkdown": "No. `&&` runs the second command only if the first exits successfully, and the type check failed.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Reading the script definition answers this without running anything."
+              },
+              {
+                "id": "yes-both",
+                "textMarkdown": "Yes. Both commands always run; the output was simply interleaved.",
+                "correct": false,
+                "explanationMarkdown": "That would be `;` or `&`. With `&&` a non-zero exit stops the chain."
+              },
+              {
+                "id": "depends-runner",
+                "textMarkdown": "It depends on the test runner, which decides whether to start after a type error.",
+                "correct": false,
+                "explanationMarkdown": "The runner is never started, so it has no say in the matter."
+              },
+              {
+                "id": "npm-retries",
+                "textMarkdown": "Yes, because npm retries the whole script once when part of it fails.",
+                "correct": false,
+                "explanationMarkdown": "npm does not retry failed scripts."
+              }
+            ]
+          },
+          "explanationMarkdown": "The `scripts` block is documentation you can trust, because it is the thing that actually runs. Reading it beats guessing what a command did."
+        },
+        {
+          "id": "v1-a01-i5",
+          "objectiveIds": [
+            "debug.stack-trace",
+            "debug.next-step"
+          ],
+          "critical": false,
+          "promptMarkdown": "```text\nTypeError: Cannot read properties of null (reading 'city')\n    at addressLine (src/ship/format.js:7:31)\n    at labelFor (src/ship/label.js:22:10)\n    at printBatch (src/ship/label.js:48:7)\n```\n\nEvery label in the batch prints except one. What is the most informative next move?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "find-the-record",
+                "textMarkdown": "Find which record in the batch reached `addressLine` with a null address, then look at that record.",
+                "correct": true,
+                "explanationMarkdown": "Correct. One failure among many points at data, and identifying the record turns the crash into a concrete, inspectable case."
+              },
+              {
+                "id": "optional-chain",
+                "textMarkdown": "Change line 7 to use `?.city` so the batch completes.",
+                "correct": false,
+                "explanationMarkdown": "The batch would finish and one label would silently print without an address, which is worse than a loud failure."
+              },
+              {
+                "id": "wrap-try",
+                "textMarkdown": "Wrap `printBatch` in try/catch and log the error.",
+                "correct": false,
+                "explanationMarkdown": "You already have the error. Catching it adds nothing you did not know and may abandon the rest of the batch."
+              },
+              {
+                "id": "blame-format",
+                "textMarkdown": "Rewrite `addressLine` to build the string defensively from whatever fields exist.",
+                "correct": false,
+                "explanationMarkdown": "A rewrite before knowing why one address is null is a change made in the dark, and it hides the underlying data problem permanently."
+              }
+            ]
+          },
+          "explanationMarkdown": "When one item out of many fails, the difference is almost always in that item. Identify it before changing code that works correctly for everything else."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

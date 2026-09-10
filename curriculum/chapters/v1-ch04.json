@@ -1,0 +1,1192 @@
+{
+  "note": "V1 chapter 4 — Async and HTTP (lessons L10-L12, exercises e028-e036, cards c019-c024, assessment a04). Runnable tasks are deliberately synchronous: the V1 runner calls the entrypoint and compares the returned value without awaiting it, so async ideas are graded through the data those operations produce rather than through real timers.",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Async and HTTP",
+      "conceptIds": [
+        "js.promises",
+        "js.async-await",
+        "js.missing-await",
+        "http.methods",
+        "http.status-codes",
+        "http.validation-response",
+        "js.error-propagation",
+        "js.race-condition",
+        "js.cancellation",
+        "ui.stale-response",
+        "http.retryable-failure",
+        "http.error-mapping"
+      ],
+      "prerequisiteIds": [
+        "js.functions",
+        "js.object-access"
+      ],
+      "bodyMarkdown": "Everything interesting in a web application happens across a gap: the browser asks, the network takes its time, and the answer arrives later — or badly, or twice, or out of order.\n\nThis chapter is about working honestly across that gap. You will learn what a promise actually represents, what `await` suspends and what it does not, how to choose a status code that tells the truth about what happened, and what to do when a response you no longer want turns up anyway.\n\nThe defects here are quiet. A missing `await` does not crash; it renders `[object Promise]`. A slow response does not error; it silently overwrites a newer one. Learning to see those is the point of the chapter.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v1-l10",
+        "v1-l11",
+        "v1-l12"
+      ],
+      "assessmentId": "v1-a04",
+      "objectiveIds": [
+        "js.promises",
+        "js.async-await",
+        "js.missing-await",
+        "http.methods",
+        "http.status-codes",
+        "http.validation-response",
+        "js.error-propagation",
+        "js.race-condition",
+        "js.cancellation",
+        "ui.stale-response",
+        "http.retryable-failure",
+        "http.error-mapping"
+      ],
+      "missionIds": [],
+      "sortOrder": 3
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l10",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Promises and async/await",
+      "conceptIds": [
+        "js.promises",
+        "js.async-await",
+        "js.missing-await"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A promise is not a value. It is a **receipt** for a value that does not exist yet. It starts pending and later settles exactly once: fulfilled with a value, or rejected with a reason. Once settled it never changes again.\n\n`await` is the instruction \"suspend this function until that receipt settles, then give me the value\". Two things follow that beginners routinely get wrong.\n\nFirst, `await` suspends **only the async function it appears in**. The caller keeps running. That is why the lines after a call to an async function often log before the lines inside it.\n\nSecond, an `async` function always returns a promise, even when its body looks entirely ordinary. `async function two() { return 2; }` does not return `2`; it returns a promise that fulfils with `2`. Forget to `await` that and you will not get an error — you will get a promise object where you expected a number, and it will travel silently through your code until something tries to render it.\n\nWhen you need several independent operations, `Promise.all` gives you every value or the first rejection, and `Promise.allSettled` gives you one entry per operation describing how each one ended. `allSettled` is what you want when a partial result is still useful.",
+      "chapterId": "v1-ch04",
+      "sortOrder": 0,
+      "objectives": [
+        "Explain what a promise represents and the three states it can be in.",
+        "Predict the order in which code runs around an await.",
+        "Recognise a missing await from the wrong value it produces."
+      ],
+      "estimatedMinutes": 14,
+      "workedExampleMarkdown": "Thistle Dispatch loads a courier's next stop and prints a summary.\n\n```js\nfunction loadStop(stopId) {\n  // Pretend this talks to the network. It returns a receipt, not a stop.\n  return Promise.resolve({ id: stopId, suburb: 'Ferndale' });\n}\n\nasync function summarise(stopId) {\n  const stop = await loadStop(stopId);   // suspend here; caller keeps going\n  return `Next stop: ${stop.suburb}`;\n}\n\nasync function main() {\n  console.log('starting');\n  const line = await summarise('s-1');   // await again, because summarise is async\n  console.log(line);                     // 'Next stop: Ferndale'\n}\n```\n\nNow remove the `await` inside `main`:\n\n```js\nconst line = summarise('s-1');\nconsole.log(line);  // Promise { <pending> }  — no error, just the wrong thing\n```\n\nNothing threw. `line` is a receipt, and if you interpolate it into a template string you get the string `[object Promise]` on screen. The defect is invisible until someone reads the output.",
+      "commonMistakes": [
+        "Treating an async function's return value as the value itself, so a promise ends up in state or in a template string.",
+        "Assuming `await` pauses the whole program; it only suspends the function it is written in.",
+        "Putting `await` inside a `forEach` callback and expecting the loop to wait — `forEach` ignores the returned promise entirely.",
+        "Reaching for `Promise.all` when a partial result is still useful, so one failure discards every successful result."
+      ],
+      "summaryMarkdown": "A promise is a receipt that settles once. `await` unwraps it and suspends only the function it appears in. An `async` function always hands back a promise, so a forgotten `await` gives you a receipt where you wanted a value — quietly.",
+      "exerciseIds": [
+        "v1-e028",
+        "v1-e029",
+        "v1-e030"
+      ],
+      "reviewCardIds": [
+        "v1-c019",
+        "v1-c020"
+      ],
+      "references": [
+        {
+          "label": "MDN: Using promises",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_promises"
+        },
+        {
+          "label": "MDN: await",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/await"
+        },
+        {
+          "label": "MDN: Promise.allSettled()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e028",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Summarise a settled batch of stop lookups",
+      "conceptIds": [
+        "js.promises",
+        "js.async-await"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Work with the exact shape `Promise.allSettled` hands back, so the settled/rejected distinction stops being abstract.",
+      "lessonId": "v1-l10",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "foundation",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "Thistle Dispatch looks up several stops at once and passes the result of `Promise.allSettled` to you. Each entry is either `{ status: 'fulfilled', value: <number> }` (the distance in kilometres) or `{ status: 'rejected', reason: <string> }`.\n\nWrite `summariseSettled(results)` returning an object:\n\n```js\n{ fulfilled: <count>, rejected: <count>, values: [<fulfilled values in order>] }\n```\n\nA distance of `0` is a real distance and must be counted and kept. Do not modify the input array.",
+      "hints": [
+        "Every entry tells you how it ended in its `status` field — that is the only thing you should branch on.",
+        "Walk the array once, collecting fulfilled values into a new array and counting the rejected entries separately.",
+        "The fulfilled count is just the length of the array you collected, so you never need a second counter — and never test `if (entry.value)`, because `0` is falsy but still a real distance."
+      ],
+      "solution": {
+        "code": "function summariseSettled(results) {\n  const values = [];\n  let rejected = 0;\n  for (const entry of results) {\n    if (entry.status === 'fulfilled') {\n      values.push(entry.value);\n    } else {\n      rejected += 1;\n    }\n  }\n  return { fulfilled: values.length, rejected, values };\n}",
+        "explanationMarkdown": "`allSettled` never rejects. It reports, per operation, how that operation ended, which is precisely what you need when a partial answer is still worth showing. Branching on `status` rather than on the truthiness of `value` is what keeps a legitimate `0` from disappearing: the shape of the entry tells you the outcome, the payload does not."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "summariseSettled",
+        "starterCode": "function summariseSettled(results) {\n  return { fulfilled: 0, rejected: 0, values: [] };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-batch",
+            "args": [[]],
+            "expected": { "fulfilled": 0, "rejected": 0, "values": [] },
+            "hidden": false
+          },
+          {
+            "id": "all-fulfilled",
+            "args": [[{ "status": "fulfilled", "value": 2 }, { "status": "fulfilled", "value": 5 }]],
+            "expected": { "fulfilled": 2, "rejected": 0, "values": [2, 5] },
+            "hidden": false
+          },
+          {
+            "id": "mixed-batch-keeps-order",
+            "args": [[{ "status": "fulfilled", "value": 7 }, { "status": "rejected", "reason": "timeout" }, { "status": "fulfilled", "value": 1 }]],
+            "expected": { "fulfilled": 2, "rejected": 1, "values": [7, 1] },
+            "hidden": false
+          },
+          {
+            "id": "all-rejected",
+            "args": [[{ "status": "rejected", "reason": "gateway" }, { "status": "rejected", "reason": "timeout" }]],
+            "expected": { "fulfilled": 0, "rejected": 2, "values": [] },
+            "hidden": false
+          },
+          {
+            "id": "zero-is-a-real-distance",
+            "args": [[{ "status": "fulfilled", "value": 0 }, { "status": "rejected", "reason": "gateway" }]],
+            "expected": { "fulfilled": 1, "rejected": 1, "values": [0] },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.promises",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e029",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a dispatch banner that renders [object Promise]",
+      "conceptIds": [
+        "js.missing-await",
+        "js.async-await"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A quiet defect from the Thistle Dispatch board: no error, no stack trace, just a nonsense banner.",
+      "lessonId": "v1-l10",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "The courier board shows `Next stop: [object Promise]` instead of a suburb. Nothing was logged as an error.\n\n```js\nasync function loadStop(id) {\n  const stop = await stopStore.read(id);\n  return stop;\n}\n\nasync function renderBanner(id) {\n  const stop = loadStop(id);\n  return `Next stop: ${stop.suburb}`;\n}\n```\n\nWhat is wrong, and why did nothing throw?",
+      "hints": [
+        "Look at what `loadStop` hands back, not at what its body appears to produce.",
+        "Reading an unknown property off an object gives `undefined` rather than an error — and a promise is an object.",
+        "`renderBanner` never awaits `loadStop(id)`, so `stop` is a pending promise; `stop.suburb` is `undefined` and interpolating the promise itself elsewhere prints `[object Promise]`."
+      ],
+      "solution": {
+        "modelAnswer": "`loadStop` is async, so calling it returns a promise. `renderBanner` assigns that promise to `stop` without awaiting it. Reading `.suburb` off a promise gives `undefined` rather than throwing, so the defect is silent. Adding `await` in front of `loadStop(id)` fixes it.",
+        "explanationMarkdown": "An `async` function always returns a promise, whatever its body says. Nothing threw because JavaScript happily returns `undefined` for a property an object does not have, and a promise is a perfectly ordinary object. This is why a missing await tends to surface as odd output far from the mistake rather than as a crash at the mistake."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "missing-await",
+            "textMarkdown": "`renderBanner` never awaits `loadStop(id)`, so `stop` holds a promise; reading `.suburb` off it yields `undefined` instead of throwing.",
+            "correct": true,
+            "explanationMarkdown": "Correct. An async function returns a promise, and a missing property on any object reads as `undefined`, so the mistake never raises an error."
+          },
+          {
+            "id": "store-broken",
+            "textMarkdown": "`stopStore.read` is returning the wrong shape, so `stop.suburb` is missing from the record.",
+            "correct": false,
+            "explanationMarkdown": "If the store were at fault, `loadStop` would resolve to a bad record — but the banner prints `[object Promise]`, which only a promise can produce. The store is not the suspect."
+          },
+          {
+            "id": "needs-then",
+            "textMarkdown": "You cannot use `await` on a value from another async function; `loadStop` must be rewritten with `.then`.",
+            "correct": false,
+            "explanationMarkdown": "`await` works on any promise, including one returned by another async function. `.then` is an alternative style, not a requirement."
+          },
+          {
+            "id": "template-literal",
+            "textMarkdown": "Template literals cannot interpolate object properties, so the whole object was stringified instead.",
+            "correct": false,
+            "explanationMarkdown": "Template literals interpolate any expression, properties included. The string shows a promise because that is genuinely what was interpolated."
+          }
+        ]
+      },
+      "primaryConceptId": "js.missing-await",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e030",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Predict the logging order around an await",
+      "conceptIds": [
+        "js.async-await",
+        "js.promises"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Ordering is the part of async that intuition gets wrong, so predict it explicitly before you trust it.",
+      "lessonId": "v1-l10",
+      "sortOrder": 2,
+      "type": "predict-output",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "Write the console output of this program, one entry per line, in order.\n\n```js\nfunction measure() {\n  console.log('C');\n  return Promise.resolve(12);\n}\n\nasync function loadRoute() {\n  console.log('A');\n  const distance = await measure();\n  console.log('B', distance);\n}\n\nconsole.log('D');\nloadRoute();\nconsole.log('E');\n```",
+      "hints": [
+        "Start at the bottom: which statements are plainly at the top level, and in what order does the engine reach them?",
+        "The body of an async function runs immediately and synchronously right up to its first `await`; only then does control return to the caller.",
+        "So `D`, then everything in `loadRoute` before the await (`A`, then `C` from calling `measure`), then the caller's `E`, and finally `B 12` once the awaited promise settles."
+      ],
+      "solution": {
+        "modelAnswer": "D\nA\nC\nE\nB 12",
+        "explanationMarkdown": "Calling an async function is not the same as scheduling it for later. Its body starts running at once and keeps running synchronously until it reaches an `await`. Everything before that first `await` — here `A`, and `C` from evaluating `measure()` — has already happened by the time control comes back to the caller, which is why `E` lands before `B`. The awaited continuation is queued as a microtask and runs after the current synchronous work finishes."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": {
+          "trim": true,
+          "collapseWhitespace": true,
+          "caseSensitive": true
+        },
+        "expected": "D\nA\nC\nE\nB 12",
+        "acceptedAlternatives": [
+          "D A C E B 12"
+        ]
+      },
+      "primaryConceptId": "js.async-await",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c019",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The three states of a promise",
+      "conceptIds": [
+        "js.promises"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the states a promise moves through and how many times it can settle.",
+      "lessonId": "v1-l10",
+      "type": "recall",
+      "promptMarkdown": "What states can a promise be in, how many times can it settle, and what does an `async` function always return?",
+      "answerMarkdown": "Pending, fulfilled or rejected. It settles **at most once**, and once settled its state and value never change again. An `async` function always returns a promise, regardless of what its body returns.",
+      "explanationMarkdown": "Settling once is the property that makes promises safe to hand around: any number of consumers can attach later and all see the same outcome. And because async functions always wrap their result, the value you want is always one `await` away.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.promises"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c020",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Spot the forgotten await in a total",
+      "conceptIds": [
+        "js.missing-await",
+        "js.async-await"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the missing-await symptom to a numeric result rather than a rendered string.",
+      "lessonId": "v1-l10",
+      "type": "debugging",
+      "promptMarkdown": "`async function fee(id) { return 4; }` and a caller writes `const total = fee('a') + fee('b');`. What is `total`, and what would you change?",
+      "answerMarkdown": "`total` is the string `\"[object Promise][object Promise]\"`. Adding two promises coerces each to a string and concatenates them. The fix is `const total = (await fee('a')) + (await fee('b'));`, or `Promise.all` when the two are independent.",
+      "explanationMarkdown": "`+` on two objects falls back to string concatenation instead of throwing, so a missing await turns a number into nonsense text without any error. Numeric results are the worst case: the nonsense often survives all the way into a stored record.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "string-concat",
+            "textMarkdown": "A string: each promise is coerced to `[object Promise]` and the two are concatenated.",
+            "correct": true,
+            "explanationMarkdown": "Correct. `+` with two objects coerces both to strings, so no error is raised and the result is text."
+          },
+          {
+            "id": "eight",
+            "textMarkdown": "`8`, because an async function returning a number can be used as a number.",
+            "correct": false,
+            "explanationMarkdown": "The async wrapper is not transparent. Without `await` you are adding two promise objects, not two numbers."
+          },
+          {
+            "id": "nan",
+            "textMarkdown": "`NaN`, because objects cannot participate in arithmetic.",
+            "correct": false,
+            "explanationMarkdown": "`NaN` would appear with an operator like `-`. With `+`, string concatenation wins before numeric coercion is attempted."
+          },
+          {
+            "id": "throws",
+            "textMarkdown": "A `TypeError`, because promises are not valid operands.",
+            "correct": false,
+            "explanationMarkdown": "Nothing throws, and that is exactly what makes this defect expensive to find."
+          }
+        ]
+      },
+      "primaryConceptId": "js.missing-await"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l11",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Requests and status codes",
+      "conceptIds": [
+        "http.methods",
+        "http.status-codes",
+        "http.validation-response"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An HTTP response is a claim about what happened. The status code is the machine-readable part of that claim, and clients, proxies, browsers and monitoring all act on it. Getting it wrong is not a cosmetic problem: a `200` on a failed write means the browser caches it, the client shows success, and your dashboards report perfect health.\n\nTwo things carry the meaning of a request.\n\nThe **method** says what kind of operation this is. `GET` reads and must not change anything — browsers, caches and crawlers all assume they may repeat a `GET` freely. `POST` creates or triggers. `PUT` replaces a whole record, `PATCH` changes part of one, `DELETE` removes it. `GET`, `PUT` and `DELETE` are expected to be idempotent: sending the same request twice leaves the server in the same state as sending it once.\n\nThe **status class** says how it went. `2xx` succeeded, `3xx` go elsewhere, `4xx` the request was wrong, `5xx` the server was wrong. That last boundary matters more than any individual code: `4xx` tells the client \"do not repeat this unchanged\", while `5xx` tells it \"this may work if you try again\".\n\nWithin `4xx`, be specific. `400` is malformed input the server could not even parse. `422` is well-formed input that fails your rules. `404` is a record that is not there. `409` is a conflict with the current state, such as a duplicate booking. A validation failure answered with `500` blames you for the caller's mistake; answered with `200` it hides the failure entirely.",
+      "chapterId": "v1-ch04",
+      "sortOrder": 1,
+      "objectives": [
+        "Match an operation to the HTTP method that describes it honestly.",
+        "Choose a status code that reflects what actually happened.",
+        "Report invalid input in a shape the client can act on."
+      ],
+      "estimatedMinutes": 14,
+      "workedExampleMarkdown": "Ferndale Bike Hire accepts a booking. The handler's job is to turn an outcome into a truthful response.\n\n```js\n// createBooking returns one of:\n//   { outcome: 'created', booking }\n//   { outcome: 'invalid', errors: [{ field: 'startsAt', message: '...' }] }\n//   { outcome: 'conflict' }          // that bike is already out\n//   { outcome: 'not-found' }         // no such bike\n\nconst result = createBooking(request.body);\n\nswitch (result.outcome) {\n  case 'created':\n    return respond(201, result.booking);\n  case 'invalid':\n    return respond(422, { error: 'validation_failed', fields: result.errors });\n  case 'conflict':\n    return respond(409, { error: 'bike_already_booked' });\n  case 'not-found':\n    return respond(404, { error: 'bike_not_found' });\n}\n```\n\nNotice what the validation branch does: `422` says the request was understood and rejected, and the body names **which field** failed and why. A client can render that next to the input. `{ error: 'bad request' }` with no field cannot be rendered anywhere useful, and a `200` with an `ok: false` inside it forces every caller to invent its own error handling.",
+      "commonMistakes": [
+        "Answering `200` for a failed operation and hiding the failure in the body, so caches and monitoring both believe it worked.",
+        "Using `500` for invalid input, which blames the server for the caller's mistake and triggers retries that can never succeed.",
+        "Using `GET` for an operation that changes data, which a browser prefetch or a link crawler will then trigger on its own.",
+        "Returning a single opaque error string when several fields failed, so the client cannot say which input to correct."
+      ],
+      "summaryMarkdown": "The method describes the operation, the status describes the outcome, and the `4xx`/`5xx` boundary tells the client whose fault it was and whether retrying could ever help. Validation failures deserve a `4xx` plus the specific fields that failed.",
+      "exerciseIds": [
+        "v1-e031",
+        "v1-e032",
+        "v1-e033"
+      ],
+      "reviewCardIds": [
+        "v1-c021",
+        "v1-c022"
+      ],
+      "references": [
+        {
+          "label": "MDN: HTTP request methods",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods"
+        },
+        {
+          "label": "MDN: HTTP response status codes",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status"
+        },
+        {
+          "label": "RFC 9110: HTTP semantics",
+          "url": "https://www.rfc-editor.org/rfc/rfc9110.html"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e031",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose a status code for each booking outcome",
+      "conceptIds": [
+        "http.status-codes",
+        "http.methods"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Turn the outcomes of a booking service into the status codes a client can actually act on.",
+      "lessonId": "v1-l11",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "foundation",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "The Ferndale Bike Hire service reports what happened as `{ outcome: <string> }`. Write `statusForResult(result)` returning the HTTP status number:\n\n| outcome | status |\n| --- | --- |\n| `created` | 201 |\n| `read` | 200 |\n| `updated` | 200 |\n| `invalid` | 422 |\n| `not-found` | 404 |\n| `conflict` | 409 |\n| anything else | 500 |\n\nThe last row matters: an outcome your code does not recognise is a bug on the server side, so it must not be reported as a client error.",
+      "hints": [
+        "Every branch depends on one field, so this is a lookup rather than a chain of comparisons.",
+        "A `switch` on `result.outcome` with a `default` branch expresses \"anything else\" directly; two outcomes can share one `return`.",
+        "Make `default` return `500`, not `400` — an unrecognised outcome means your own mapping is incomplete, which is a server fault and not something the caller can correct."
+      ],
+      "solution": {
+        "code": "function statusForResult(result) {\n  switch (result.outcome) {\n    case 'created':\n      return 201;\n    case 'read':\n    case 'updated':\n      return 200;\n    case 'invalid':\n      return 422;\n    case 'not-found':\n      return 404;\n    case 'conflict':\n      return 409;\n    default:\n      return 500;\n  }\n}",
+        "explanationMarkdown": "The mapping encodes two separate judgements. First, whose fault was it: `4xx` means the caller must change something before retrying, `5xx` means the caller did nothing wrong. Second, how specific can we be: `422` is more useful than `400` because it says the request parsed fine and failed a rule, and `409` is more useful than `422` because it says the request was fine and the *current state* is the obstacle. The `default` deliberately falls into `5xx`: an outcome nobody mapped is a hole in this function, not a mistake by the caller."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "statusForResult",
+        "starterCode": "function statusForResult(result) {\n  return 200;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "created",
+            "args": [{ "outcome": "created" }],
+            "expected": 201,
+            "hidden": false
+          },
+          {
+            "id": "read",
+            "args": [{ "outcome": "read" }],
+            "expected": 200,
+            "hidden": false
+          },
+          {
+            "id": "invalid-is-unprocessable",
+            "args": [{ "outcome": "invalid" }],
+            "expected": 422,
+            "hidden": false
+          },
+          {
+            "id": "not-found",
+            "args": [{ "outcome": "not-found" }],
+            "expected": 404,
+            "hidden": false
+          },
+          {
+            "id": "updated-shares-200",
+            "args": [{ "outcome": "updated" }],
+            "expected": 200,
+            "hidden": false
+          },
+          {
+            "id": "conflict",
+            "args": [{ "outcome": "conflict" }],
+            "expected": 409,
+            "hidden": true
+          },
+          {
+            "id": "unmapped-outcome-is-server-fault",
+            "args": [{ "outcome": "bike-caught-fire" }],
+            "expected": 500,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "http.status-codes",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e032",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a handler that reports validation failures as success",
+      "conceptIds": [
+        "http.validation-response",
+        "http.status-codes"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A code review of a Ferndale Bike Hire endpoint that passes every one of its own tests and still misleads every client.",
+      "lessonId": "v1-l11",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "Review this handler. Bookings with a start date in the past are rejected by `validate`, and the endpoint's own tests pass.\n\n```js\nfunction handleCreateBooking(request, respond) {\n  const problems = validate(request.body);\n  if (problems.length > 0) {\n    return respond(200, { ok: false, message: 'Could not book' });\n  }\n  const booking = store.insert(request.body);\n  return respond(200, { ok: true, booking });\n}\n```\n\nWhat is the most serious problem here?",
+      "hints": [
+        "Ask what a caller that only inspects the status line — a cache, a monitor, a retry policy — concludes from this response.",
+        "There are two separate faults: the status class is wrong, and the body throws away information `validate` already produced.",
+        "A rejected request should answer `422` (or `400`), and the body should list the specific fields from `problems` so the client can mark those inputs; `200` with `ok: false` makes every consumer invent its own error protocol."
+      ],
+      "solution": {
+        "modelAnswer": "The failure is reported with a `2xx` status, so anything that reads only the status line — caches, proxies, monitoring, generic client code — treats a rejected booking as a successful one. It should be `422`, and the body should carry the per-field problems from `validate` rather than one opaque message.",
+        "explanationMarkdown": "The status code is the part of the response that infrastructure you do not control acts on. Encoding failure solely in the body means the failure is invisible to all of it, and the endpoint's own tests will happily pass because they read the body. Losing the contents of `problems` is the second fault: the server already knows exactly which field was wrong, and discarding that forces the user to guess."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "success-status-for-failure",
+            "textMarkdown": "A rejected request is answered with `200`, so every consumer that reads the status line records a success — and the specific field problems are discarded.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The status class is the machine-readable outcome; `200` here lies to caches, monitors and generic clients, and the useful detail in `problems` never leaves the server."
+          },
+          {
+            "id": "should-be-500",
+            "textMarkdown": "The failure branch should return `500`, because the booking could not be completed.",
+            "correct": false,
+            "explanationMarkdown": "`5xx` says the server malfunctioned and invites a retry. The caller sent a date in the past; that is a `4xx`, and retrying it unchanged can never succeed."
+          },
+          {
+            "id": "missing-await",
+            "textMarkdown": "`validate` and `store.insert` are not awaited, so `problems` is a promise and the check never fires.",
+            "correct": false,
+            "explanationMarkdown": "Nothing here is declared async and no promise is in play. Invent that fault and you would still ship the real one."
+          },
+          {
+            "id": "should-use-put",
+            "textMarkdown": "Creating a booking should use `PUT` rather than `POST`, which is why the status is wrong.",
+            "correct": false,
+            "explanationMarkdown": "`POST` is the right method for creating a booking the server names, and the method choice has no bearing on reporting a validation failure as `200`."
+          }
+        ]
+      },
+      "primaryConceptId": "http.validation-response",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e033",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain why a read must not be a write",
+      "conceptIds": [
+        "http.methods",
+        "http.status-codes"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Put the reasoning behind method choice into your own words; the criteria appear after you answer.",
+      "lessonId": "v1-l11",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "A colleague at Ferndale Bike Hire adds `GET /bikes/:id/return` so the depot staff can end a hire by clicking a link in an email. It works when they test it.\n\nExplain what will go wrong in production and what you would change. Name at least one specific mechanism that will trigger the endpoint without a human deciding to.",
+      "hints": [
+        "Think about who else sends `GET` requests to a URL besides the person who clicked.",
+        "Browsers prefetch links, mail clients scan URLs for safety, and caches are allowed to repeat or replay a `GET` because the method promises it is safe to do so.",
+        "The change is to make the operation a `POST` (the state change is not idempotent) triggered by a real form or button, and to answer `200` with the updated hire — not to keep a `GET` and hope nothing else fetches it."
+      ],
+      "solution": {
+        "modelAnswer": "`GET` is defined as safe: it must not change state. Because of that promise, things other than the user will fetch the URL — a browser or extension prefetching links, a mail provider scanning the message for malware, a corporate proxy warming its cache, a crawler following the link. Any of those will silently end hires. The fix is to make ending a hire a `POST` (or `PATCH` on the hire record) submitted from a real form or button in the app, and to send the user an ordinary link to a page where they confirm.",
+        "explanationMarkdown": "Method semantics are a contract with software you never wrote. The whole ecosystem — browsers, caches, proxies, mail scanners, monitoring — is built on the assumption that `GET` is safe to repeat, so a state change hidden behind `GET` is not merely unfashionable, it will actually fire without anyone deciding to. The deeper habit is to let the method carry the intent instead of relying on the URL path to communicate it."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that `GET` is defined as safe, so it must not change server state.",
+          "Names at least one concrete non-human mechanism that issues `GET` requests: prefetching, mail link scanning, caches, proxies or crawlers.",
+          "Proposes a method that matches the operation — `POST` or `PATCH` triggered by a form or button — rather than keeping `GET` and adding a guard.",
+          "Mentions a consequence beyond the single request, such as the action repeating on a refresh or being replayed from a cache."
+          ],
+        "modelAnswerMarkdown": "`GET` promises to be safe, so the rest of the web treats the URL as free to fetch. A mail provider scanning links for malware, a browser prefetching, or a proxy warming a cache will all issue that request, and each one ends a hire nobody asked to end. Refreshing the resulting page repeats it again. I would make ending a hire a `POST` to `/hires/:id/return` submitted from a button in the application, put the email link on a confirmation page instead, and answer with `200` and the updated hire (or `409` if it was already returned)."
+      },
+      "primaryConceptId": "http.methods",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c021",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What each status class claims",
+      "conceptIds": [
+        "http.status-codes"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the meaning of the status classes and the one boundary that changes client behaviour.",
+      "lessonId": "v1-l11",
+      "type": "recall",
+      "promptMarkdown": "What do the `2xx`, `4xx` and `5xx` classes each claim, and why does the boundary between `4xx` and `5xx` change what a client does next?",
+      "answerMarkdown": "`2xx` the request succeeded, `4xx` the request was wrong, `5xx` the server was wrong. The boundary decides retry behaviour: a `4xx` will fail identically if repeated unchanged, so the caller must alter the request; a `5xx` may succeed on a retry, so a client is right to back off and try again.",
+      "explanationMarkdown": "Retry policies, circuit breakers and alerting are all built on this boundary. Mislabelling a validation failure as `5xx` produces retry storms against a request that can never succeed, and mislabelling an outage as `4xx` hides a real incident from your dashboards.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "http.status-codes"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c022",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Read the method choice in a delete link",
+      "conceptIds": [
+        "http.methods"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Judge a method choice from a snippet of markup rather than from a rule you memorised.",
+      "lessonId": "v1-l11",
+      "type": "code-reading",
+      "promptMarkdown": "The Pinegate Library admin page removes a loan with `<a href=\"/loans/42/delete\">Remove</a>`. What is the defect?",
+      "answerMarkdown": "A link issues a `GET`, and `GET` must not change state. Anything that fetches the URL — a prefetch, a link scanner, a cache — deletes the loan. The removal should be a `POST` or `DELETE` sent from a form or button.",
+      "explanationMarkdown": "The give-away is that the operation lives in the path (`/delete`) rather than in the method. Whenever a verb has migrated into the URL, check whether the method still describes what the request actually does.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "get-changes-state",
+            "textMarkdown": "A link sends `GET`, which is defined as safe, so anything that fetches the URL will delete the loan.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The verb belongs in the method, not the path; this should be a form issuing `POST` or `DELETE`."
+          },
+          {
+            "id": "path-naming",
+            "textMarkdown": "The path should be `/loans/42` rather than `/loans/42/delete`, but the behaviour is otherwise fine.",
+            "correct": false,
+            "explanationMarkdown": "Tidier paths are worth having, but renaming the URL leaves the real defect untouched: it is still a state change behind a `GET`."
+          },
+          {
+            "id": "needs-confirm",
+            "textMarkdown": "The only problem is the missing confirmation dialog before the removal happens.",
+            "correct": false,
+            "explanationMarkdown": "A dialog only stops the human. A prefetch or link scanner never sees the dialog and deletes the loan anyway."
+          },
+          {
+            "id": "status-code",
+            "textMarkdown": "The defect is that a deletion cannot answer with `200`; it must answer `204`.",
+            "correct": false,
+            "explanationMarkdown": "Both `200` and `204` are legitimate answers to a deletion. The status code is not what makes this link dangerous."
+          }
+        ]
+      },
+      "primaryConceptId": "http.methods"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l12",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Failures and cancellation",
+      "conceptIds": [
+        "js.error-propagation",
+        "js.race-condition",
+        "js.cancellation",
+        "ui.stale-response",
+        "http.retryable-failure",
+        "http.error-mapping"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Two things go wrong across the network gap, and they need different tools.\n\n**Failures.** A rejected promise travels like a thrown error: it propagates out of the async function it happened in, into whatever awaited it, and onwards until something catches it. If nothing does, you get an unhandled rejection — and, importantly, `try { doWork(); } catch {}` without an `await` catches nothing at all, because `doWork()` returned a promise and returning is not throwing. The place to catch is wherever you can actually do something useful: retry, show a message, fall back.\n\nNot every failure deserves the same response. A timeout, a `503`, a dropped connection: transient, worth retrying with a growing delay. A `400`, a `404`, a `422`: permanent for this request, and retrying is just noise. Deciding which is which — and never retrying a non-idempotent operation blindly — is the whole of retry design.\n\n**Ordering.** When a user types in a search box you fire a request per keystroke. Those responses come back in whatever order the network feels like. If you render each response as it arrives, a slow answer for `fer` can land after the fast answer for `ferndale` and overwrite it. The user watches the results go backwards.\n\nThe fix is not to make the network orderly. It is to decide, at the moment a response arrives, whether you still want it. Track which request is current and ignore anything else — and, better, actually cancel the abandoned request with an `AbortController` so you stop paying for work nobody wants.",
+      "chapterId": "v1-ch04",
+      "sortOrder": 2,
+      "objectives": [
+        "Catch a rejection at the level where something useful can be done about it.",
+        "Ignore a response that a newer request has superseded.",
+        "Separate failures worth retrying from failures that never will be."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "A search box in the Thistle Dispatch console, with the ordering bug and then without it.\n\n```js\n// Broken: whichever response arrives last wins, regardless of which is newest.\nasync function search(term) {\n  const results = await api.search(term);\n  render(results);\n}\n```\n\nType `fer`, then `ferndale`. If the `fer` response is slower, `render` runs twice and the last call shows results for a term the user has already finished typing.\n\n```js\nlet currentRequestId = 0;\nlet inFlight = null;\n\nasync function search(term) {\n  const requestId = ++currentRequestId;   // claim the newest slot\n  inFlight?.abort();\n  const controller = new AbortController();\n  inFlight = controller;\n\n  try {\n    const results = await api.search(term, { signal: controller.signal });\n    if (requestId !== currentRequestId) return;   // a newer search has started\n    render(results);\n  } catch (error) {\n    if (error.name === 'AbortError') return;      // we cancelled it on purpose\n    if (requestId !== currentRequestId) return;\n    renderError(error);\n  }\n}\n```\n\nThere are two guards and they are not redundant. `abort` stops work we no longer want; the `requestId` check handles the response that was already on the wire when we changed our minds. Note also that the `AbortError` is filtered out before the error branch runs: a cancellation we asked for is not a failure to report to the user.",
+      "commonMistakes": [
+        "Writing `try { load(); } catch (e) {}` without `await`, so the rejection escapes the block entirely and nothing is caught.",
+        "Rendering every response as it arrives, so a slow answer for an old query overwrites a fresh one.",
+        "Showing a cancelled request's `AbortError` to the user as though the search had failed.",
+        "Retrying a `422` or `404`, which cannot succeed unchanged, or blindly retrying a `POST` and creating duplicate records.",
+        "Catching an error only to `console.log` it and carry on, leaving the caller to act on a result that was never produced."
+      ],
+      "summaryMarkdown": "Rejections propagate like throws, but only if you `await` them. Retry the transient and never the permanent. And when responses can arrive out of order, decide at arrival time whether the answer is still the one you asked for — cancelling what you abandoned.",
+      "exerciseIds": [
+        "v1-e034",
+        "v1-e035",
+        "v1-e036"
+      ],
+      "reviewCardIds": [
+        "v1-c023",
+        "v1-c024"
+      ],
+      "references": [
+        {
+          "label": "MDN: AbortController",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+        },
+        {
+          "label": "MDN: Promise.prototype.catch()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/catch"
+        },
+        {
+          "label": "MDN: 503 Service Unavailable",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e034",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Decide which search response is still wanted",
+      "conceptIds": [
+        "ui.stale-response",
+        "js.race-condition",
+        "js.cancellation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Replay a timeline of requests and responses and work out what the user should be looking at when it ends.",
+      "lessonId": "v1-l12",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "The Thistle Dispatch search box records what happened, in arrival order, as a list of events:\n\n- `{ type: 'request', id: <number> }` — a new search was issued. It immediately supersedes any earlier one.\n- `{ type: 'response', id: <number>, body: <string> }` — a response arrived for the request with that id.\n\nWrite `resolveDisplayed(events)` returning the text that should be on screen after every event has been processed, or `null` if nothing should be shown.\n\nA response is rendered **only** if its id is still the newest request issued at the moment it arrives. Any other response is stale and must be ignored — including a response for a request that was never issued. Once something is displayed it stays displayed until a newer response replaces it. Do not modify the input array.",
+      "hints": [
+        "You need to remember exactly two things as you walk the timeline, and neither of them is the list of responses you have seen.",
+        "Track the id of the newest request issued so far, and the text currently displayed. A `request` event updates the first; a `response` event may update the second.",
+        "On a `response`, render it only when `event.id` equals the newest request id you have recorded — that single comparison is what makes a late answer for an old query disappear."
+      ],
+      "solution": {
+        "code": "function resolveDisplayed(events) {\n  let newestRequestId = null;\n  let displayed = null;\n  for (const event of events) {\n    if (event.type === 'request') {\n      newestRequestId = event.id;\n    } else if (event.id === newestRequestId) {\n      displayed = event.body;\n    }\n  }\n  return displayed;\n}",
+        "explanationMarkdown": "The network gives you no ordering guarantee, so the only reliable place to decide is at the moment a response arrives: is this still the answer to the question I am currently asking? Comparing against the newest request id answers that in one step, and it works whether the stale response arrives before or after the fresh one. Note what the function deliberately does not do: it never tries to make the responses arrive in order, and it never assumes the last response is the right one. In real code the same guard sits next to an `AbortController` so abandoned work is also stopped, but the guard is still needed for responses that were already on the wire."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "resolveDisplayed",
+        "starterCode": "function resolveDisplayed(events) {\n  const last = events[events.length - 1];\n  return last ? last.body : null;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "no-events",
+            "args": [[]],
+            "expected": null,
+            "hidden": false
+          },
+          {
+            "id": "single-round-trip",
+            "args": [[{ "type": "request", "id": 1 }, { "type": "response", "id": 1, "body": "ferns" }]],
+            "expected": "ferns",
+            "hidden": false
+          },
+          {
+            "id": "stale-response-arrives-last",
+            "args": [[{ "type": "request", "id": 1 }, { "type": "request", "id": 2 }, { "type": "response", "id": 2, "body": "roses" }, { "type": "response", "id": 1, "body": "ferns" }]],
+            "expected": "roses",
+            "hidden": false
+          },
+          {
+            "id": "stale-response-arrives-first",
+            "args": [[{ "type": "request", "id": 1 }, { "type": "request", "id": 2 }, { "type": "response", "id": 1, "body": "ferns" }, { "type": "response", "id": 2, "body": "roses" }]],
+            "expected": "roses",
+            "hidden": false
+          },
+          {
+            "id": "newer-request-still-pending",
+            "args": [[{ "type": "request", "id": 1 }, { "type": "response", "id": 1, "body": "ferns" }, { "type": "request", "id": 2 }]],
+            "expected": "ferns",
+            "hidden": true
+          },
+          {
+            "id": "response-without-a-request",
+            "args": [[{ "type": "response", "id": 9, "body": "ghost" }]],
+            "expected": null,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ui.stale-response",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e035",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the catch block that catches nothing",
+      "conceptIds": [
+        "js.error-propagation",
+        "js.async-await"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An error-handling block that reads correctly and does nothing at all, taken from a nightly import job.",
+      "lessonId": "v1-l12",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "The Pinegate Library nightly import logs `UnhandledPromiseRejection` and stops, even though the author wrapped the risky call in a `try`.\n\n```js\nasync function importCatalogue(rows) {\n  try {\n    saveRows(rows);              // async function that may reject\n  } catch (error) {\n    logger.warn('import failed', error);\n  }\n  return 'done';\n}\n```\n\nWhy does the `catch` never run?",
+      "hints": [
+        "A `catch` block only sees something that was *thrown* while the `try` block was executing.",
+        "`saveRows(rows)` returns a promise and returns normally; the rejection happens later, after the `try` block has already finished.",
+        "Adding `await` in front of `saveRows(rows)` makes the async function resume by throwing at that line, which is inside the `try` — so the `catch` finally has something to catch."
+      ],
+      "solution": {
+        "modelAnswer": "`saveRows(rows)` is called without `await`. The call itself returns a promise immediately and does not throw, so the `try` block completes successfully and `catch` is skipped. The rejection surfaces later with nobody attached to it. Writing `await saveRows(rows);` makes the rejection reappear as a thrown error at that line, inside the `try`.",
+        "explanationMarkdown": "`try`/`catch` is synchronous machinery: it observes throws that happen while the block is on the stack. A promise rejection is an event that happens afterwards, so it can only be routed into a `catch` by `await`ing it (or by attaching `.catch`). This is the most common reason a piece of error handling appears complete in review and is inert in production — and it is why an unused promise result deserves suspicion even when nothing is being read from it."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "no-await",
+            "textMarkdown": "`saveRows(rows)` is not awaited, so the `try` block finishes before the rejection happens and there is nothing to catch.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Returning a promise is not throwing; only `await` (or `.catch`) turns a later rejection into something the block can see."
+          },
+          {
+            "id": "async-catch-unsupported",
+            "textMarkdown": "`try`/`catch` cannot be used inside an `async` function; you must use `.catch` on the promise instead.",
+            "correct": false,
+            "explanationMarkdown": "`try`/`catch` works perfectly well in an async function — it just needs an `await` inside the block so the rejection arrives as a throw."
+          },
+          {
+            "id": "error-not-instance",
+            "textMarkdown": "`saveRows` rejects with a plain object rather than an `Error`, and `catch` only receives real `Error` instances.",
+            "correct": false,
+            "explanationMarkdown": "A `catch` binding receives whatever the rejection carried, `Error` or not. The value's type is not what stops the block running."
+          },
+          {
+            "id": "return-skips-catch",
+            "textMarkdown": "The `return 'done'` after the block causes the function to settle before the `catch` has a chance to run.",
+            "correct": false,
+            "explanationMarkdown": "The `return` runs after the whole `try`/`catch` statement. It would not pre-empt a `catch` that had something to catch."
+          }
+        ]
+      },
+      "primaryConceptId": "js.error-propagation",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e036",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain which failures your client should retry",
+      "conceptIds": [
+        "http.retryable-failure",
+        "http.error-mapping"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Design a retry policy in prose and justify each boundary you draw.",
+      "lessonId": "v1-l12",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "The Thistle Dispatch client currently retries every failed request three times, immediately, whatever went wrong. Overnight, one bad `POST /deliveries` from a courier's phone produced four identical delivery records, and a burst of `422` responses tripled the load on an already struggling service.\n\nExplain which failures this client should retry and which it should not, why the immediate retries made things worse, and what the delivery endpoint could do so that a retried `POST` is safe.",
+      "hints": [
+        "Sort the failures by whether repeating the identical request could ever produce a different answer.",
+        "A `4xx` says the request was wrong, so an unchanged retry fails identically; `5xx`, timeouts and dropped connections may genuinely succeed later — and retrying without a growing delay concentrates load exactly when the service is weakest.",
+        "Duplicates come from retrying an operation that is not idempotent: have the client send a unique key with the `POST` and have the server return the original result when it sees that key again, so a retry cannot create a second delivery."
+      ],
+      "solution": {
+        "modelAnswer": "Retry only failures that could plausibly succeed unchanged: timeouts, dropped connections, `502`/`503`/`504`, and `429` when it tells you when to come back. Never retry `400`, `401`, `403`, `404` or `422` — the request itself is wrong, so an identical retry is guaranteed to fail and simply adds load. The immediate retries made the incident worse because a struggling service received four times the traffic with no gap in which to recover; retries need exponential backoff plus jitter and an overall attempt limit. The duplicate deliveries came from retrying a non-idempotent `POST` whose response was lost in transit: the write had succeeded. The endpoint should accept a client-generated idempotency key, record it with the created delivery, and return the original delivery when the same key arrives again.",
+        "explanationMarkdown": "Retry design is two questions, not one. First, could this ever succeed? That is the `4xx`/`5xx` boundary, and it decides whether to retry at all. Second, is repeating it safe? That is idempotency, and it decides whether a retry can be allowed to reach a write. Immediate retries are the classic amplifier: every client backs off at the same instant, so the recovering service is hit by a synchronised wave, which is why jitter matters as much as the delay itself. The idempotency key is what makes the second question answerable at all, because a lost response is indistinguishable from a lost request from the client's side."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Separates retryable failures (timeouts, dropped connections, `5xx`, `429`) from permanent ones (`400`, `401`, `403`, `404`, `422`) and explains the reasoning rather than listing codes.",
+          "Explains that an immediate retry storm concentrates load on a service that is already failing, and proposes backoff with jitter and a bounded number of attempts.",
+          "Identifies that the duplicate records came from retrying a non-idempotent write whose response was lost, not from the write failing.",
+          "Proposes a concrete server-side mechanism — an idempotency key stored with the created record and replayed on a repeat — rather than only telling the client to retry less."
+        ],
+        "modelAnswerMarkdown": "Retry what could succeed on a second attempt: timeouts, connection resets, `502`, `503`, `504`, and `429` honouring its retry-after. Do not retry `400`, `401`, `403`, `404` or `422`; the server has told us the request is wrong, and sending the same bytes again cannot change that. Retry with exponential backoff and jitter, capped at a few attempts, because immediate synchronised retries hit a struggling service hardest at the worst moment. The duplicates came from a `POST` that actually succeeded while its response was lost, so the client retried a write it believed had failed. Fix that on the server: let the client generate an idempotency key per delivery, store it alongside the created record, and return that same record — with the same status — whenever the key is seen again."
+      },
+      "primaryConceptId": "http.retryable-failure",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c023",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why the newest response is not always the right one",
+      "conceptIds": [
+        "ui.stale-response",
+        "js.cancellation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the guard that keeps a search box from showing results going backwards.",
+      "lessonId": "v1-l12",
+      "type": "recall",
+      "promptMarkdown": "A search box fires one request per keystroke. What must you check when a response arrives, and why is cancelling the abandoned request not enough on its own?",
+      "answerMarkdown": "Check that the response belongs to the request that is still the newest one — usually by comparing a request id or sequence number captured before the call. Cancelling is not enough because a response can already be in transit when you change your mind, and because a cancelled request may still deliver its result depending on where it was in flight.",
+      "explanationMarkdown": "Cancellation is an optimisation: it stops paying for work nobody wants. The identity check is the correctness guarantee. Keep both, and filter the resulting cancellation error out of your error handling so an abandoned request never looks like a failed one to the user.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ui.stale-response"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c024",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Where the rejection goes in a chain of awaits",
+      "conceptIds": [
+        "js.error-propagation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Trace a rejection through three layers and decide which one should hold the handler.",
+      "lessonId": "v1-l12",
+      "type": "debugging",
+      "promptMarkdown": "`handler` awaits `loadReport`, which awaits `queryRows`, and `queryRows` rejects. None of the three has a `try`/`catch`. What happens, and where should the handler go?",
+      "answerMarkdown": "The rejection propagates outward: `queryRows` rejects, so the `await` inside `loadReport` throws, so `loadReport`'s promise rejects, so the `await` inside `handler` throws and `handler`'s promise rejects too. It should be caught in `handler`, the only layer that knows how to turn a failure into a response.",
+      "explanationMarkdown": "Rejections travel exactly like thrown errors through awaited calls, so intermediate layers do not need handlers just to pass a failure along. Catch where you can act — usually the outermost layer that owns the response — and let a `catch` that only logs and continues be a warning sign, because the caller then acts on a result that was never produced.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "propagates-to-handler",
+            "textMarkdown": "The rejection propagates through both awaits and rejects `handler`'s promise; the `catch` belongs in `handler`, where a response can be produced.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Awaited rejections behave like throws, so the failure reaches the layer that owns the response without any intermediate handling."
+          },
+          {
+            "id": "stops-at-loadreport",
+            "textMarkdown": "The rejection stops at `loadReport`, which returns `undefined` to `handler`.",
+            "correct": false,
+            "explanationMarkdown": "A rejected await does not produce `undefined`; it throws, which rejects `loadReport`'s own promise and continues outward."
+          },
+          {
+            "id": "each-layer-catches",
+            "textMarkdown": "Every layer must have its own `try`/`catch` or the rejection is lost between them.",
+            "correct": false,
+            "explanationMarkdown": "Intermediate handlers are not required for propagation. Adding them usually just buries the failure at a layer that cannot do anything about it."
+          },
+          {
+            "id": "queryrows-catches",
+            "textMarkdown": "The `catch` belongs in `queryRows`, closest to where the failure happened.",
+            "correct": false,
+            "explanationMarkdown": "`queryRows` knows what broke but not what the application should do about it. Catching there forces it to invent a fallback result that the caller cannot distinguish from success."
+          }
+        ]
+      },
+      "primaryConceptId": "js.error-propagation"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v1-a04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Async and HTTP placement check",
+      "conceptIds": [
+        "js.async-await",
+        "js.missing-await",
+        "http.status-codes",
+        "http.retryable-failure",
+        "ui.stale-response"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering promises, method and status choice, propagation and ordering. Explanations appear after you submit.",
+      "chapterId": "v1-ch04",
+      "items": [
+        {
+          "id": "v1-a04-i1",
+          "objectiveIds": [
+            "js.async-await",
+            "js.promises"
+          ],
+          "critical": true,
+          "promptMarkdown": "`async function ration() { return 5; }`. What is the type of `ration()`, and what does `typeof await ration()` evaluate to?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "promise-then-number",
+                "textMarkdown": "`ration()` is a promise; `typeof await ration()` is `\"number\"`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. An async function always wraps its result in a promise, and `await` unwraps it back to the underlying value."
+              },
+              {
+                "id": "number-both",
+                "textMarkdown": "`ration()` is a number, and `await` on a number is a syntax error.",
+                "correct": false,
+                "explanationMarkdown": "`async` changes the return type unconditionally, and `await` on a non-promise is legal — it simply resolves to that value."
+              },
+              {
+                "id": "promise-both",
+                "textMarkdown": "Both are promises; `await` only schedules the value for later.",
+                "correct": false,
+                "explanationMarkdown": "`await` does not schedule anything for the caller to unwrap later. It suspends until the promise settles and evaluates to the settled value."
+              },
+              {
+                "id": "depends-on-body",
+                "textMarkdown": "It depends on the body: a function whose body has no `await` returns its value directly.",
+                "correct": false,
+                "explanationMarkdown": "The wrapping comes from the `async` keyword, not from whether the body awaits anything."
+              }
+            ]
+          },
+          "explanationMarkdown": "The `async` keyword is a promise-returning contract on the function signature. Whatever the body returns is wrapped, and `await` is the operation that unwraps it."
+        },
+        {
+          "id": "v1-a04-i2",
+          "objectiveIds": [
+            "js.missing-await"
+          ],
+          "critical": false,
+          "promptMarkdown": "A cache is written as `const rows = loadRows(); cache.set(key, rows);` where `loadRows` is async. Later reads of the cache produce nothing useful, but nothing has ever thrown. What was stored?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "promise-stored",
+                "textMarkdown": "A pending promise was stored, so every later read gets a promise instead of rows.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Without `await`, the value in hand is the receipt, and storing it caches the receipt rather than the data."
+              },
+              {
+                "id": "undefined-stored",
+                "textMarkdown": "`undefined` was stored, because the async function had not returned yet.",
+                "correct": false,
+                "explanationMarkdown": "The call returns immediately, but it returns a promise, never `undefined`."
+              },
+              {
+                "id": "empty-array",
+                "textMarkdown": "An empty array was stored and later filled in when the load completed.",
+                "correct": false,
+                "explanationMarkdown": "Nothing retroactively replaces a stored value. The promise settles, but the cache still holds the promise object."
+              },
+              {
+                "id": "rows-fine",
+                "textMarkdown": "The rows were stored correctly; the defect must be in the cache key.",
+                "correct": false,
+                "explanationMarkdown": "A wrong key would produce misses, not unusable values. The stored value itself is the wrong kind of thing."
+              }
+            ]
+          },
+          "explanationMarkdown": "Caching an un-awaited call is a common variant of the missing-await defect: the cache appears to work, hit rates look normal, and every consumer receives something that is not data."
+        },
+        {
+          "id": "v1-a04-i3",
+          "objectiveIds": [
+            "http.status-codes",
+            "http.validation-response"
+          ],
+          "critical": true,
+          "promptMarkdown": "A client sends well-formed JSON to create an account, but the chosen username is already taken. Which status best describes that outcome?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "conflict",
+                "textMarkdown": "`409 Conflict` — the request is fine; it clashes with the current state of the server.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Nothing about the request is malformed or invalid in isolation; the obstacle is a record that already exists."
+              },
+              {
+                "id": "bad-request",
+                "textMarkdown": "`400 Bad Request` — the server could not accept the body.",
+                "correct": false,
+                "explanationMarkdown": "`400` says the request could not be understood. This one was understood perfectly; it just collided with existing data."
+              },
+              {
+                "id": "internal",
+                "textMarkdown": "`500 Internal Server Error` — the insert failed, which is a server fault.",
+                "correct": false,
+                "explanationMarkdown": "The insert failing on purpose because of a rule is not a malfunction. A `5xx` here would invite a retry that can never succeed."
+              },
+              {
+                "id": "forbidden",
+                "textMarkdown": "`403 Forbidden` — the caller is not allowed to have that username.",
+                "correct": false,
+                "explanationMarkdown": "`403` is about authorisation: who you are versus what you may do. Nothing about the caller's permissions is at issue here."
+              }
+            ]
+          },
+          "explanationMarkdown": "`409` exists precisely for a valid request that the current state rejects, and it tells the client something useful: change the value and try again, rather than fix your syntax or wait for us to recover."
+        },
+        {
+          "id": "v1-a04-i4",
+          "objectiveIds": [
+            "http.retryable-failure",
+            "http.error-mapping"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which of these responses to an automated client is worth retrying unchanged after a short delay?",
+          "grading": {
+            "kind": "choice",
+            "mode": "multiple",
+            "options": [
+              {
+                "id": "gateway-timeout",
+                "textMarkdown": "`504 Gateway Timeout`",
+                "correct": true,
+                "explanationMarkdown": "Yes. An upstream took too long; the same request may well complete on a later attempt."
+              },
+              {
+                "id": "unprocessable",
+                "textMarkdown": "`422 Unprocessable Content`",
+                "correct": false,
+                "explanationMarkdown": "No. The server understood the request and rejected its contents; identical bytes will be rejected identically."
+              },
+              {
+                "id": "too-many-requests",
+                "textMarkdown": "`429 Too Many Requests`",
+                "correct": true,
+                "explanationMarkdown": "Yes, provided you honour the delay the server asks for. Retrying immediately makes the situation worse."
+              },
+              {
+                "id": "not-found",
+                "textMarkdown": "`404 Not Found`",
+                "correct": false,
+                "explanationMarkdown": "No. The resource is absent; repeating the request will not conjure it into existence."
+              }
+            ]
+          },
+          "explanationMarkdown": "The dividing question is whether repeating the identical request could plausibly produce a different answer. `5xx` and `429` can; the `4xx` family, other than `429`, cannot."
+        },
+        {
+          "id": "v1-a04-i5",
+          "objectiveIds": [
+            "ui.stale-response",
+            "js.race-condition"
+          ],
+          "critical": false,
+          "promptMarkdown": "A filter panel issues a request each time a checkbox changes and renders every response as it arrives. Users report the table occasionally showing results for filters they have already cleared. Which change actually fixes it?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "identity-guard",
+                "textMarkdown": "Record a sequence number per request and, when a response arrives, render it only if its number is still the newest.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The decision has to be made at arrival time, because the network offers no ordering guarantee at all."
+              },
+              {
+                "id": "debounce",
+                "textMarkdown": "Debounce the checkbox handler by 300ms so fewer requests are in flight.",
+                "correct": false,
+                "explanationMarkdown": "Debouncing reduces how often the race occurs but does not prevent it: two requests can still overlap, and the slow one can still land last."
+              },
+              {
+                "id": "sort-responses",
+                "textMarkdown": "Buffer responses and sort them by their server timestamp before rendering.",
+                "correct": false,
+                "explanationMarkdown": "This adds latency and still renders answers to questions the user has abandoned. The problem is relevance, not ordering of the display."
+              },
+              {
+                "id": "loading-flag",
+                "textMarkdown": "Set a boolean `isLoading` flag and ignore new requests while one is in flight.",
+                "correct": false,
+                "explanationMarkdown": "That drops the user's newest intent instead of the stale answer, so the table ends up showing an older filter set on purpose."
+              }
+            ]
+          },
+          "explanationMarkdown": "Every alternative here narrows the window or reorders the symptom. Only the identity check answers the question that matters: is this response still the answer to what the user is asking now?"
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

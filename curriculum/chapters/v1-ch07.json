@@ -1,0 +1,1184 @@
+{
+  "note": "Chapter 7 — React fundamentals (L19-L21). The V1 grader runs plain JavaScript with no DOM and no React runtime, so JSX is taught through code-reading, prediction and rubric review, while the runnable tasks target the pure logic React sits on top of: props-to-view-model mapping, reducers and derived selections.",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "React fundamentals",
+      "conceptIds": [
+        "react.components",
+        "react.props",
+        "react.responsibility",
+        "react.keys",
+        "react.state-updates",
+        "react.stale-closure",
+        "react.mutation",
+        "react.effects",
+        "react.derived-state",
+        "react.dependencies"
+      ],
+      "prerequisiteIds": ["js.functions", "js.immutable-update"],
+      "bodyMarkdown": "The Wrenly Support Desk queue is the first screen this course builds in React. It is a list of tickets with a filter box, a status badge per row, and a detail panel that opens beside the list.\n\nThree ideas carry that screen. A **component** is a function that turns data into a description of what should be on screen. **Props** are the data a parent hands a child, and a child never edits them. **State** is the data a component owns, and changing it is what asks React to render again.\n\nThe defects in this chapter are the ones that actually stall beginners: a list that reuses the wrong row after a sort because the key was the array index, a counter that only moves by one because two updates both read the same old value, and an effect that copies one piece of state into another when a plain expression during render would have been correct and cheaper.",
+      "trackId": "v1-track",
+      "lessonIds": ["v1-l19", "v1-l20", "v1-l21"],
+      "assessmentId": "v1-a07",
+      "objectiveIds": [
+        "react.components",
+        "react.props",
+        "react.responsibility",
+        "react.keys",
+        "react.state-updates",
+        "react.stale-closure",
+        "react.mutation",
+        "react.effects",
+        "react.derived-state",
+        "react.dependencies"
+      ],
+      "missionIds": [],
+      "sortOrder": 6
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l19",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Components and props",
+      "conceptIds": ["react.components", "react.props", "react.responsibility", "react.keys"],
+      "prerequisiteIds": ["js.functions", "js.array-map"],
+      "bodyMarkdown": "A React component is an ordinary function. It receives one argument — an object of props — and returns a description of what should appear. React calls it whenever the data it depends on changes, so the function must be able to run again at any moment and produce the same answer for the same input.\n\nThat single rule decides most component design questions. If a component reads its inputs from props and returns a description, it can be rendered in a list, in a test, or in a preview page without any setup. If it reaches out to a module-level variable or edits the props object it was handed, it stops being predictable, and the parent that passed the data starts seeing changes it never asked for.\n\nDeciding *what one component owns* is the other half. A row in the Wrenly queue should know how to display one ticket. It should not know how tickets are fetched, which filter the toolbar has selected, or how the detail panel opens. When one component tries to hold all of that, every unrelated change forces you to re-read the whole file before you can touch anything.\n\nLists add one extra requirement. When you render an array, React needs to match each rendered row to the same item on the next render. That match is made through the `key` prop. A key must come from the data — a ticket id, a row uuid — and never from the position in the array, because positions change whenever the list is sorted, filtered or has an item removed.",
+      "chapterId": "v1-ch07",
+      "sortOrder": 0,
+      "objectives": [
+        "Split a screen into components that each own one clearly nameable job.",
+        "Pass data down through props and treat the props object as read-only.",
+        "Give list items a stable key taken from the data rather than the index."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "```jsx\n// One job: describe a single ticket row.\nfunction TicketRow({ subject, assignee, status }) {\n  return (\n    <li className=\"ticket-row\">\n      <span className=\"subject\">{subject}</span>\n      <span className=\"assignee\">{assignee}</span>\n      <StatusBadge status={status} />\n    </li>\n  );\n}\n\n// One job: describe the list, and give every row a stable identity.\nfunction TicketList({ tickets }) {\n  return (\n    <ul>\n      {tickets.map((ticket) => (\n        <TicketRow\n          key={ticket.id}\n          subject={ticket.subject}\n          assignee={ticket.assignee ?? 'Unassigned'}\n          status={ticket.status}\n        />\n      ))}\n    </ul>\n  );\n}\n```\n\nNotice what `TicketRow` does *not* do. It does not fetch, it does not sort, and it does not decide what `Unassigned` means — the parent settles that before it hands the value down. `TicketRow` can therefore be rendered in a style guide with three hard-coded props and it will look exactly as it does in production.\n\nAlso notice `key={ticket.id}`. It is set on the element produced *inside* `map`, not on the JSX inside `TicketRow`. React reads the key from the element it is placing into the list.",
+      "commonMistakes": [
+        "Writing `key={index}` because it silences the console warning, then finding that after a sort the rows show the wrong text or a typed-in value follows the wrong ticket.",
+        "Editing a prop directly (`props.assignee = 'Unassigned'`) instead of computing a new value, which changes the object the parent still holds.",
+        "Putting the `key` on the root element inside the child component rather than on the element returned by `map`.",
+        "Letting one component fetch, filter, sort and render, so that changing the sort order means reading two hundred lines first.",
+        "Calling a component like a plain function (`TicketRow({ ... })`) instead of rendering `<TicketRow ... />`, which quietly breaks hooks and reconciliation."
+      ],
+      "summaryMarkdown": "A component is a function from props to a description of the screen. Keep each one to a single nameable job, treat props as read-only, and key list items by an id from the data so React can follow a row when the list moves.",
+      "exerciseIds": ["v1-e055", "v1-e056", "v1-e057"],
+      "reviewCardIds": ["v1-c037", "v1-c038"],
+      "references": [
+        {
+          "label": "React: Passing props to a component",
+          "url": "https://react.dev/learn/passing-props-to-a-component"
+        },
+        {
+          "label": "React: Rendering lists (keys)",
+          "url": "https://react.dev/learn/rendering-lists"
+        },
+        {
+          "label": "React: Keeping components pure",
+          "url": "https://react.dev/learn/keeping-components-pure"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e055",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Build the row props for a ticket list",
+      "conceptIds": ["react.props", "react.components", "react.keys"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The parent decides what a row displays before the row ever renders. That decision is plain data work, so it can be written and tested without React.",
+      "lessonId": "v1-l19",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "`TicketList` needs a view model before it renders anything. Write `toTicketRows(tickets)`.\n\nEach input ticket looks like `{ id, subject, assignee }`. Return a **new** array with one object per ticket, in the same order, shaped exactly:\n\n- `key` — the ticket's `id` (never the position in the array)\n- `title` — the ticket's `subject`\n- `assignee` — the ticket's `assignee`, except that a missing assignee becomes the string `Unassigned`. \"Missing\" means `null`, `undefined`, or a string that is empty or only whitespace.\n\nDo not modify the input array or any ticket in it.",
+      "hints": [
+        "Every ticket produces exactly one row object, so this is a one-to-one transformation over the array rather than a filter or a fold.",
+        "`Array.prototype.map` returns a new array and leaves the source alone. Build a brand-new object literal for each row instead of adding fields to the ticket you were given.",
+        "For the assignee, a value counts as present only if it is a string with at least one non-whitespace character: check `typeof value === 'string' && value.trim() !== ''` before using it, and fall back to `'Unassigned'` otherwise."
+      ],
+      "solution": {
+        "code": "function toTicketRows(tickets) {\n  return tickets.map(function (ticket) {\n    const named = typeof ticket.assignee === 'string' && ticket.assignee.trim() !== '';\n    return {\n      key: ticket.id,\n      title: ticket.subject,\n      assignee: named ? ticket.assignee : 'Unassigned',\n    };\n  });\n}",
+        "explanationMarkdown": "The row list is derived data: it depends only on the tickets, so it can be recomputed at any time and never needs to be stored. Because each row is a fresh object literal, the tickets the parent still holds are untouched — the fallback to `Unassigned` is a display decision, not an edit to the record.\n\nThe `key` comes from `ticket.id` for the same reason React insists on it: the id belongs to the ticket and survives sorting, filtering and removal, while an index describes only where the ticket happened to sit on this particular render."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "toTicketRows",
+        "starterCode": "function toTicketRows(tickets) {\n  return [];\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-queue",
+            "args": [[]],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "keeps-order-and-ids",
+            "args": [
+              [
+                { "id": "T-9", "subject": "Printer jam", "assignee": "Ada" },
+                { "id": "T-3", "subject": "Login loop", "assignee": "Bo" }
+              ]
+            ],
+            "expected": [
+              { "key": "T-9", "title": "Printer jam", "assignee": "Ada" },
+              { "key": "T-3", "title": "Login loop", "assignee": "Bo" }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "null-assignee",
+            "args": [[{ "id": "T-1", "subject": "Card declined", "assignee": null }]],
+            "expected": [{ "key": "T-1", "title": "Card declined", "assignee": "Unassigned" }],
+            "hidden": false
+          },
+          {
+            "id": "missing-assignee-property",
+            "args": [[{ "id": "T-2", "subject": "Export fails" }]],
+            "expected": [{ "key": "T-2", "title": "Export fails", "assignee": "Unassigned" }],
+            "hidden": false
+          },
+          {
+            "id": "whitespace-assignee",
+            "args": [[{ "id": "T-4", "subject": "Slow search", "assignee": "   " }]],
+            "expected": [{ "key": "T-4", "title": "Slow search", "assignee": "Unassigned" }],
+            "hidden": false
+          },
+          {
+            "id": "single-character-assignee-is-kept",
+            "args": [[{ "id": "T-5", "subject": "Typo on invoice", "assignee": "M" }]],
+            "expected": [{ "key": "T-5", "title": "Typo on invoice", "assignee": "M" }],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "react.props",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e056",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The reordered list that keeps the wrong text",
+      "conceptIds": ["react.keys", "react.components"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A defect report with a reproduction, a snippet, and four explanations. Only one of them accounts for every detail in the report.",
+      "lessonId": "v1-l19",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "foundation",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "A Wrenly agent reports this: she types a note into the box on the **first** row, then clicks *Sort by newest*. The rows visibly reorder, but her half-typed note is now attached to a different ticket.\n\n```jsx\nfunction Queue({ tickets }) {\n  return (\n    <ul>\n      {tickets.map((ticket, index) => (\n        <li key={index}>\n          <span>{ticket.subject}</span>\n          <input aria-label=\"Add a note\" />\n        </li>\n      ))}\n    </ul>\n  );\n}\n```\n\nThe `tickets` array really is re-sorted, and every subject shown after the sort is correct. Which explanation fits?",
+      "hints": [
+        "The subjects are right and only the input's contents are wrong, so React did re-render the text but kept something else in place.",
+        "React uses the key to decide whether the element in position N on this render is the *same* element as before. If it is the same, React keeps the existing DOM node — including whatever the user typed into it.",
+        "After sorting, position 0 still has `key={0}`, so React concludes the first `<li>` is unchanged and reuses its `<input>` element, even though the ticket in that position is now a different ticket."
+      ],
+      "solution": {
+        "modelAnswer": "Using the array index as the key tells React that the element in each position is the same element as before, so it reuses the existing input node while re-rendering the subject text around it. The key must be `ticket.id`.",
+        "explanationMarkdown": "React reconciles a list by key. With `key={index}` the keys are `0, 1, 2` before and after the sort, so React sees no identity change at all: it patches the changed text into the existing nodes and leaves the uncontrolled `<input>` — whose value lives in the DOM, not in React — exactly where it was. Keying by `ticket.id` makes the identities move with the data, so React moves the whole `<li>`, input included."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "index-key-reuses-node",
+            "textMarkdown": "The index key makes React treat each position as the same element across renders, so it reuses the existing `<input>` (and the text typed into it) while updating the subject around it.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The keys are `0, 1, 2` before and after the sort, so React sees no identity change and patches in place. `key={ticket.id}` makes identity follow the data."
+          },
+          {
+            "id": "needs-value-prop",
+            "textMarkdown": "The `<input>` has no `value` prop, so React cannot render it at all and falls back to the previous list.",
+            "correct": false,
+            "explanationMarkdown": "An input without `value` is simply uncontrolled, which is legal. React renders it fine — the problem is which node gets reused, not whether it renders."
+          },
+          {
+            "id": "sort-mutates",
+            "textMarkdown": "`Array.prototype.sort` mutated the `tickets` prop, so the component is rendering stale data.",
+            "correct": false,
+            "explanationMarkdown": "Sorting in place is a real defect worth avoiding, but the report says every subject shown after the sort is correct — the rendered data is up to date. Only the input contents are misplaced."
+          },
+          {
+            "id": "keys-cosmetic",
+            "textMarkdown": "Keys only exist to silence a console warning, so any unique-looking value works; the real fault is the missing `onChange` handler.",
+            "correct": false,
+            "explanationMarkdown": "The warning is a symptom, not the purpose. Keys drive reconciliation. Adding `onChange` without fixing the key would move the bug into state instead of the DOM."
+          }
+        ]
+      },
+      "primaryConceptId": "react.keys",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e057",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Split a component that does too much",
+      "conceptIds": ["react.responsibility", "react.components", "react.props"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short written answer. You are judged on the boundaries you draw and the reason you give for each, not on naming things exactly as the model answer does.",
+      "lessonId": "v1-l19",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "`TicketQueuePage` is 240 lines. In one function it: loads tickets from the API, holds the search text and the status filter, sorts the results, formats each ticket's date into `3 days ago`, renders the toolbar, renders every row's markup inline, and renders the empty state.\n\nA teammate says \"it all works, and splitting it just means more files\".\n\nExplain what this shape costs the team, then describe how you would split it: name the components you would create, say what each one owns, and say what props flow between them. Name at least one thing that should stay in `TicketQueuePage`.",
+      "hints": [
+        "Argue from concrete costs rather than tidiness: what happens when two people change this file in the same week, and what does it take to see the empty state in isolation?",
+        "A useful cut line is 'what does this piece need to know?'. Row markup needs one ticket. The toolbar needs the current filter values and a way to report changes. Neither needs to know the API exists.",
+        "A workable split is `TicketQueuePage` (owns the data fetch and the filter state), `QueueToolbar` (props: `query`, `status`, `onQueryChange`, `onStatusChange`), `TicketList` (props: the already-filtered tickets), `TicketRow` (props: one ticket's display fields), and `EmptyQueue`. Date formatting becomes a plain function, not a component."
+      ],
+      "solution": {
+        "modelAnswer": "The cost is that every change touches the same file, so unrelated work collides, and no piece can be looked at on its own: to see the empty state you must make the API return nothing. I would keep the data load and the filter state in TicketQueuePage, because someone has to own them and they are what the whole page is about. QueueToolbar takes query, status, onQueryChange and onStatusChange. TicketList takes the already-filtered list and renders TicketRow, which takes one ticket's display fields. EmptyQueue takes nothing. Date formatting is not a component at all — it is a pure function the page or the row calls.",
+        "explanationMarkdown": "The point of the split is that each piece becomes independently understandable and independently viewable. A component that takes only props can be rendered in a test or a style guide with three lines of setup, which is why the empty state and the row are the first things worth extracting.\n\nEqually important is what stays. Pushing the fetch down into `TicketList` would make the list untestable without a network stub and would mean two lists on one page fetch twice. State that several children coordinate around belongs to their common parent."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Names a concrete cost of the single-file shape — for example unrelated changes colliding in the same file, or the empty state being impossible to look at without breaking the API.",
+          "Proposes at least three named components and states what each one owns, rather than only saying 'split it up'.",
+          "States the props flowing into at least one child, including how a child reports a change back up (a callback prop rather than the child editing shared data).",
+          "Identifies something that should stay in the page — the data fetch or the filter state — and gives a reason for keeping it there.",
+          "Recognises that date formatting is plain function work and does not need to become a component."
+        ],
+        "modelAnswerMarkdown": "**Cost.** Everything lives in one file, so two people changing the toolbar and the row collide on every merge, and there is no way to render the empty state without making the API return nothing. Nothing here can be checked in isolation.\n\n**Split.**\n- `TicketQueuePage` keeps the API load and the `query`/`status` state. Both children depend on them, so their common parent is the right owner.\n- `QueueToolbar` — props `query`, `status`, `onQueryChange`, `onStatusChange`. It renders controls and reports changes upward; it never learns where tickets come from.\n- `TicketList` — props: the already-filtered, already-sorted tickets. It maps them to rows, keyed by `ticket.id`.\n- `TicketRow` — props: one ticket's display fields. Renderable in a style guide with hard-coded props.\n- `EmptyQueue` — no props; the page chooses when to show it.\n\n**Not a component.** `formatRelativeDate(iso)` is a pure function. Wrapping it in a component would add a render boundary for no gain and make it harder to test."
+      },
+      "primaryConceptId": "react.responsibility",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c037",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What props are, and who may change them",
+      "conceptIds": ["react.props"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the direction data flows in React and the rule about editing what you were handed.",
+      "lessonId": "v1-l19",
+      "type": "recall",
+      "promptMarkdown": "What are props, which direction do they travel, and what may a component do to the props object it receives?",
+      "answerMarkdown": "Props are the data a parent passes to a child when it renders it. They travel **downwards** only. A component may read them and derive new values from them, but it must never write to the props object — to change something, it calls a function the parent passed down so the parent updates its own state and re-renders.",
+      "explanationMarkdown": "Read-only props are what make a component predictable: given the same props it produces the same output, so it can be rendered anywhere without surprises. A child that writes to props is silently editing data the parent still holds, and React will not re-render because nothing told it anything changed.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "react.props"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c038",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Pick the key for a list of ticket rows",
+      "conceptIds": ["react.keys"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An objectively checkable card: choose the key expression that survives sorting and deletion.",
+      "lessonId": "v1-l19",
+      "type": "debugging",
+      "promptMarkdown": "A queue renders `tickets.map((ticket, index) => <TicketRow ... />)`. The list can be sorted and individual tickets can be deleted. Which `key` is correct?",
+      "answerMarkdown": "`key={ticket.id}` — an identifier that belongs to the ticket itself and does not change when the list is reordered or shortened.",
+      "explanationMarkdown": "The index and `Math.random()` both break the guarantee a key is supposed to give. The index changes when the list moves, so React reuses the wrong node; a random key changes on every single render, so React throws every row away and rebuilds it, losing focus and scroll position along the way.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "ticket-id",
+            "textMarkdown": "`key={ticket.id}`",
+            "correct": true,
+            "explanationMarkdown": "Correct. The id belongs to the ticket, so identity moves with the data through sorts and deletions."
+          },
+          {
+            "id": "index",
+            "textMarkdown": "`key={index}`",
+            "correct": false,
+            "explanationMarkdown": "The index describes a position, not a ticket. After a sort or a deletion, position 0 holds a different ticket but keeps key 0, so React patches the wrong node."
+          },
+          {
+            "id": "random",
+            "textMarkdown": "`key={Math.random()}`",
+            "correct": false,
+            "explanationMarkdown": "Unique but unstable: it differs on every render, so React unmounts and remounts every row each time, discarding focus, scroll and any input state."
+          },
+          {
+            "id": "subject",
+            "textMarkdown": "`key={ticket.subject}`",
+            "correct": false,
+            "explanationMarkdown": "Subjects are not unique — two tickets can both say \"Printer jam\" — and an agent editing a subject would change the key, remounting the row."
+          }
+        ]
+      },
+      "primaryConceptId": "react.keys"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l20",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "State updates",
+      "conceptIds": ["react.state-updates", "react.stale-closure", "react.mutation"],
+      "prerequisiteIds": ["js.immutable-update", "js.mutation"],
+      "bodyMarkdown": "Calling a state setter does not change a variable. It **schedules** a render with a new value. Everything confusing about state follows from that one fact.\n\nInside the event handler that called the setter, the state variable still holds the value it had when this render started. It is an ordinary `const` captured by the handler's closure; nothing can reach back and reassign it. React finishes the handler, then renders the component function again, and the *new* call gets the new value.\n\nThat is why `setCount(count + 1)` twice in a row moves the counter by one: both calls read the same `count` from the same render. The fix is to describe the change instead of the result — `setCount(c => c + 1)` hands React a function that receives the latest queued value, so two of them compose.\n\nThe second rule is that the new value must be a new object. React decides whether to re-render by comparing the previous value with the next one by reference. Pushing onto the array already in state and handing that same array back means the reference is identical, so React concludes nothing changed and skips the render — while the data has quietly changed underneath, which is worse than nothing happening at all.",
+      "chapterId": "v1-ch07",
+      "sortOrder": 1,
+      "objectives": [
+        "Explain when a state update becomes visible and why a handler still sees the old value.",
+        "Use an updater function when the next value depends on the current one.",
+        "Replace state with a new object or array instead of editing the existing one."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "```jsx\nfunction NoteBox({ ticketId }) {\n  const [notes, setNotes] = useState([]);\n  const [draft, setDraft] = useState('');\n\n  function addNote() {\n    // WRONG: same array back means React sees no change.\n    // notes.push({ id: crypto.randomUUID(), text: draft });\n    // setNotes(notes);\n\n    // RIGHT: a new array, built from the latest queued value.\n    setNotes((current) => [...current, { id: `${ticketId}-${current.length}`, text: draft }]);\n    setDraft('');\n    console.log(draft); // still the OLD draft — this render's binding\n  }\n\n  return <button onClick={addNote}>Add note</button>;\n}\n```\n\nTwo things are worth staring at. `setNotes` is given a function, so if two notes are added in the same handler the second one sees the first one's result. And the `console.log` after `setDraft('')` prints the old draft, because `draft` is a `const` belonging to the render that is still running.",
+      "commonMistakes": [
+        "Calling `setCount(count + 1)` twice in one handler and expecting the counter to move by two.",
+        "Reading state immediately after calling its setter to confirm the change, and concluding React is broken when the old value prints.",
+        "Calling `items.push(newItem)` and then `setItems(items)`, which mutates state in place and re-renders nothing because the reference is unchanged.",
+        "Using `setState` inside a `setTimeout` or `setInterval` with a plain value, so the callback keeps using the value captured when the timer was created.",
+        "Building a new object with `Object.assign(state, changes)`, which writes into `state` rather than producing a copy — `{ ...state, ...changes }` is the safe form."
+      ],
+      "summaryMarkdown": "A setter schedules a render; it does not assign a variable. When the next value depends on the current one, pass an updater function. Always hand back a new object or array, because React compares by reference to decide whether to render.",
+      "exerciseIds": ["v1-e058", "v1-e059", "v1-e060"],
+      "reviewCardIds": ["v1-c039", "v1-c040"],
+      "references": [
+        {
+          "label": "React: Queueing a series of state updates",
+          "url": "https://react.dev/learn/queueing-a-series-of-state-updates"
+        },
+        {
+          "label": "React: Updating objects in state",
+          "url": "https://react.dev/learn/updating-objects-in-state"
+        },
+        {
+          "label": "React: State as a snapshot",
+          "url": "https://react.dev/learn/state-as-a-snapshot"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e058",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Predict the log from a double increment",
+      "conceptIds": ["react.state-updates", "react.stale-closure"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Predict exactly what reaches the console. The value of this exercise is that a wrong prediction tells you precisely which mental model needs replacing.",
+      "lessonId": "v1-l20",
+      "sortOrder": 0,
+      "type": "predict-output",
+      "difficulty": "foundation",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "This component is mounted, and then the button is clicked **once**.\n\n```jsx\nfunction Escalations() {\n  const [count, setCount] = useState(0);\n  console.log('render', count);\n\n  function handleClick() {\n    setCount(count + 1);\n    setCount(count + 1);\n    console.log('after', count);\n  }\n\n  return <button onClick={handleClick}>Escalate</button>;\n}\n```\n\nWrite every line the console prints, in order, from mount through the click. One line per console call. (React's development-mode double rendering is switched off for this question.)",
+      "hints": [
+        "Three lines are printed in total: one from the first render, one from inside the handler, and one from the render the click causes.",
+        "`count` is a `const` created when the render that is currently running began. Calling `setCount` never reassigns it, so the `console.log` inside the handler prints whatever this render started with.",
+        "Both `setCount(count + 1)` calls compute `0 + 1`, so React queues the value 1 twice and the next render receives 1, not 2."
+      ],
+      "solution": {
+        "modelAnswer": "render 0\nafter 0\nrender 1",
+        "explanationMarkdown": "The first render logs `render 0`. Inside the handler, `count` is still the `0` captured by that render, so both setter calls queue the value `1` and the log prints `after 0`. React then re-renders with `1`, printing `render 1`.\n\nThe counter moves by one because both updates described the *result* (`1`) rather than the *change*. `setCount(c => c + 1)` twice would queue two transformations, the second receiving the first one's output, and the final line would read `render 2`."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": {
+          "trim": true,
+          "collapseWhitespace": true,
+          "caseSensitive": true
+        },
+        "expected": "render 0\nafter 0\nrender 1",
+        "acceptedAlternatives": ["render 0 after 0 render 1"]
+      },
+      "primaryConceptId": "react.stale-closure",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e059",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Write the queue reducer",
+      "conceptIds": ["react.state-updates", "react.mutation", "js.immutable-update"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A reducer is the pure core of a stateful component: old state plus an action gives new state. It needs no React to run, which is exactly why it is worth extracting.",
+      "lessonId": "v1-l20",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Write `ticketReducer(state, action)` for the Wrenly queue.\n\nState looks like `{ tickets: [ { id, status }, ... ] }`. Handle exactly these actions:\n\n- `{ type: 'add', ticket }` — append `ticket` to the end of `tickets`.\n- `{ type: 'resolve', id }` — set that ticket's `status` to `'resolved'`. If no ticket has that id, the tickets are unchanged.\n- `{ type: 'remove', id }` — drop the ticket with that id. If no ticket has that id, the tickets are unchanged.\n- any other `type` — return the state exactly as it was.\n\nAlways return a value with the same shape. **Never modify `state`, `state.tickets`, or any ticket object inside it** — a reducer that edits its input is the single most common reason a React list stops re-rendering.",
+      "hints": [
+        "Every branch has to produce a value that could be handed straight to `setState`. Ask, for each one, whether anything the caller already holds was touched.",
+        "`[...state.tickets, ticket]`, `state.tickets.map(...)` and `state.tickets.filter(...)` all build new arrays. `push`, `splice` and assigning to `state.tickets[i]` all edit the array in place.",
+        "For `resolve`, map over the tickets and return `{ ...ticket, status: 'resolved' }` for the matching id and the original object for every other one; then wrap the result as `{ ...state, tickets: updated }`."
+      ],
+      "solution": {
+        "code": "function ticketReducer(state, action) {\n  switch (action.type) {\n    case 'add':\n      return { ...state, tickets: [...state.tickets, action.ticket] };\n    case 'resolve':\n      return {\n        ...state,\n        tickets: state.tickets.map(function (ticket) {\n          return ticket.id === action.id ? { ...ticket, status: 'resolved' } : ticket;\n        }),\n      };\n    case 'remove':\n      return { ...state, tickets: state.tickets.filter(t => t.id !== action.id) };\n    default:\n      return state;\n  }\n}",
+        "explanationMarkdown": "Each branch answers the question \"what is the next state?\" with a fresh object, so React can compare the old and new references and see that something changed. The unmatched tickets in the `resolve` branch are deliberately passed through unchanged — reusing objects that did not change is what lets React skip re-rendering the rows that did not move.\n\nThe `default` branch returning `state` itself is not laziness. Returning the identical reference for an action you do not handle is how you tell React there is nothing to do, and it keeps unknown actions from silently emptying the queue."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "ticketReducer",
+        "starterCode": "function ticketReducer(state, action) {\n  return state;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "add-to-empty-queue",
+            "args": [{ "tickets": [] }, { "type": "add", "ticket": { "id": "T-1", "status": "open" } }],
+            "expected": { "tickets": [{ "id": "T-1", "status": "open" }] },
+            "hidden": false
+          },
+          {
+            "id": "add-appends-at-the-end",
+            "args": [
+              { "tickets": [{ "id": "T-1", "status": "open" }] },
+              { "type": "add", "ticket": { "id": "T-2", "status": "open" } }
+            ],
+            "expected": {
+              "tickets": [
+                { "id": "T-1", "status": "open" },
+                { "id": "T-2", "status": "open" }
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "resolve-marks-only-the-match",
+            "args": [
+              {
+                "tickets": [
+                  { "id": "T-1", "status": "open" },
+                  { "id": "T-2", "status": "open" }
+                ]
+              },
+              { "type": "resolve", "id": "T-2" }
+            ],
+            "expected": {
+              "tickets": [
+                { "id": "T-1", "status": "open" },
+                { "id": "T-2", "status": "resolved" }
+              ]
+            },
+            "hidden": false
+          },
+          {
+            "id": "resolve-unknown-id-changes-nothing",
+            "args": [
+              { "tickets": [{ "id": "T-1", "status": "open" }] },
+              { "type": "resolve", "id": "T-99" }
+            ],
+            "expected": { "tickets": [{ "id": "T-1", "status": "open" }] },
+            "hidden": false
+          },
+          {
+            "id": "remove-drops-one-ticket",
+            "args": [
+              {
+                "tickets": [
+                  { "id": "T-1", "status": "open" },
+                  { "id": "T-2", "status": "resolved" }
+                ]
+              },
+              { "type": "remove", "id": "T-1" }
+            ],
+            "expected": { "tickets": [{ "id": "T-2", "status": "resolved" }] },
+            "hidden": false
+          },
+          {
+            "id": "remove-unknown-id-keeps-everything",
+            "args": [
+              { "tickets": [{ "id": "T-1", "status": "open" }] },
+              { "type": "remove", "id": "T-99" }
+            ],
+            "expected": { "tickets": [{ "id": "T-1", "status": "open" }] },
+            "hidden": false
+          },
+          {
+            "id": "unknown-action-returns-state",
+            "args": [
+              { "tickets": [{ "id": "T-1", "status": "open" }] },
+              { "type": "archive", "id": "T-1" }
+            ],
+            "expected": { "tickets": [{ "id": "T-1", "status": "open" }] },
+            "hidden": true
+          },
+          {
+            "id": "remove-the-last-remaining-ticket",
+            "args": [{ "tickets": [{ "id": "T-7", "status": "open" }] }, { "type": "remove", "id": "T-7" }],
+            "expected": { "tickets": [] },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "react.state-updates",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e060",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The list that will not re-render",
+      "conceptIds": ["react.mutation", "react.state-updates"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read the handler and say what React sees. The symptom here is the hardest kind: the data really did change, and the screen really did not.",
+      "lessonId": "v1-l20",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "Clicking *Mark seen* does nothing visible. No error appears in the console, and if the component re-renders later for an unrelated reason, the badge suddenly updates.\n\n```jsx\nfunction Queue() {\n  const [tickets, setTickets] = useState(initialTickets);\n\n  function markSeen(id) {\n    const ticket = tickets.find((t) => t.id === id);\n    ticket.seen = true;\n    setTickets(tickets);\n  }\n\n  return tickets.map((t) => (\n    <TicketRow key={t.id} ticket={t} onSeen={() => markSeen(t.id)} />\n  ));\n}\n```\n\nWhat is React doing, and why does the change appear later?",
+      "hints": [
+        "The handler definitely ran and the data definitely changed — so the question is what React compares when it decides whether a render is needed.",
+        "React compares the value you pass to the setter with the current state using `Object.is`. `tickets` is the very same array object it already holds.",
+        "`ticket.seen = true` edited an object inside the existing array, and `setTickets(tickets)` passed that identical array back, so React bails out. The stale screen catches up on the next render for any other reason, because the mutated data was there all along."
+      ],
+      "solution": {
+        "modelAnswer": "The handler mutates a ticket inside the current state array and then passes the same array reference back to the setter. React compares references, sees no change, and skips rendering — but the data was already modified, so a later unrelated render displays it.",
+        "explanationMarkdown": "This is the failure mode that makes mutation worse than doing nothing: state and screen disagree, and the disagreement resolves itself at an unpredictable moment, which makes the bug look intermittent.\n\nThe fix produces new objects the whole way down the changed path: `setTickets(current => current.map(t => t.id === id ? { ...t, seen: true } : t))`. New array, new object for the one ticket that changed, existing objects reused for the rest."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "same-reference-bailout",
+            "textMarkdown": "The ticket was mutated in place and the identical array was passed to the setter, so React's reference comparison finds no change and skips the render — while the mutated data waits to appear on some later render.",
+            "correct": true,
+            "explanationMarkdown": "Correct. `setTickets(tickets)` hands back the same array object React already holds, so it bails out. Build a new array with a new object for the changed ticket."
+          },
+          {
+            "id": "batching",
+            "textMarkdown": "React batched the update and will flush it after the current event loop turn, so the delay is expected behaviour.",
+            "correct": false,
+            "explanationMarkdown": "Batching delays an update to the end of the event, not until some unrelated future render. Here no update is queued at all — the reference never changed."
+          },
+          {
+            "id": "needs-key",
+            "textMarkdown": "`TicketRow` is missing a `key`, so React cannot tell which row changed.",
+            "correct": false,
+            "explanationMarkdown": "The key is present (`key={t.id}`) and is correct. Keys affect which node is reused during a render; they do not decide whether a render happens."
+          },
+          {
+            "id": "find-returns-copy",
+            "textMarkdown": "`Array.prototype.find` returns a copy of the element, so `ticket.seen = true` never reached the real ticket.",
+            "correct": false,
+            "explanationMarkdown": "`find` returns the element itself, not a copy — which is exactly why the mutation did reach the real ticket and showed up later."
+          }
+        ]
+      },
+      "primaryConceptId": "react.mutation",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c039",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "When does a state setter change the variable?",
+      "conceptIds": ["react.state-updates"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what a setter actually does and when the new value becomes readable.",
+      "lessonId": "v1-l20",
+      "type": "recall",
+      "promptMarkdown": "After you call `setValue(next)`, when does the `value` variable in the currently running function hold `next`?",
+      "answerMarkdown": "Never. `value` is a `const` belonging to the render that is running now, and nothing reassigns it. The setter schedules a re-render; the **next** call of the component function receives the new value in its own `value` binding.",
+      "explanationMarkdown": "Thinking of each render as a separate snapshot removes most state confusion at once. Event handlers close over the snapshot they were created in, which is why logging state right after setting it prints the old value — and why an update that depends on the current value must be expressed as `setValue(v => ...)` rather than `setValue(value + 1)`.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "react.state-updates"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c040",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Apply the updater rule to a debounced save",
+      "conceptIds": ["react.stale-closure", "react.state-updates"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the snapshot rule to code that runs after a delay rather than during the click.",
+      "lessonId": "v1-l20",
+      "type": "transfer",
+      "promptMarkdown": "A component runs `setTimeout(() => setSaveCount(saveCount + 1), 2000)` every time the agent stops typing. The agent pauses three times in quick succession, and `saveCount` ends up at 1 instead of 3. Explain why, and give the one-line fix.",
+      "answerMarkdown": "Each timeout callback captured `saveCount` from the render that created it, and all three renders started with `0`, so all three callbacks compute `0 + 1`. The fix is `setSaveCount(c => c + 1)`, which asks React to apply a transformation to whatever the latest value is rather than to a value read two seconds ago.",
+      "explanationMarkdown": "The delay makes the stale value obvious, but the mechanism is the same as two setters in one handler: a closure holds the value from its own render forever. Whenever the next value is computed from the current one, the updater form is the correct tool, and it is never wrong to use it.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "react.stale-closure"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l21",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Effects and derived state",
+      "conceptIds": ["react.effects", "react.derived-state", "react.dependencies"],
+      "prerequisiteIds": ["js.purity", "js.scope"],
+      "bodyMarkdown": "An effect exists to synchronise your component with something **outside** React: a network request, a subscription, a timer, the page title, a third-party widget. That is the whole list. Rendering is not outside React, and neither is computing a value from other values you already have.\n\nThe most common misuse is copying one piece of state into another. If `visibleTickets` can be computed from `tickets` and `query`, then it is not state at all — it is an expression. Storing it means React renders once with the old list, runs the effect, sets state, and renders again; for one frame the screen shows the previous answer, and now two sources of truth can drift apart.\n\nWhen you genuinely need an effect, its dependency array is a promise: *these are all the values from the render that this effect reads*. Break the promise by leaving one out and the effect keeps running with values from an old render — a stale closure, exactly like the one in the previous lesson but harder to see because the code runs later. Add a value that changes on every render and the effect runs on every render instead.\n\nEffects that start something must also stop it. The cleanup function React calls before the next run — and on unmount — is where the interval is cleared, the socket closed, and the in-flight request marked as no longer wanted.",
+      "chapterId": "v1-ch07",
+      "sortOrder": 2,
+      "objectives": [
+        "Decide whether a value should be state or simply computed during render.",
+        "Identify what an effect reads and declare exactly those values as dependencies.",
+        "Write the cleanup that stops whatever the effect started."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "```jsx\nfunction Queue({ tickets }) {\n  const [query, setQuery] = useState('');\n  const [seconds, setSeconds] = useState(0);\n\n  // NOT state. Derived during render, so it can never disagree with its inputs.\n  const visible = tickets.filter((t) =>\n    t.subject.toLowerCase().includes(query.trim().toLowerCase()),\n  );\n\n  // A real effect: a timer is outside React, and it must be stopped.\n  useEffect(() => {\n    const id = setInterval(() => setSeconds((s) => s + 1), 1000);\n    return () => clearInterval(id);\n  }, []); // reads nothing from this render, so the list is genuinely empty\n\n  return <TicketList tickets={visible} idleSeconds={seconds} />;\n}\n```\n\nThe filter needs no effect, no second state and no dependency array; it is recomputed whenever anything it reads changes, because that is what a render is.\n\nThe interval's dependency list is empty and that is *honest*, because the updater form `s => s + 1` means the callback reads nothing from the render that created it. Writing `setSeconds(seconds + 1)` there would make the empty array a lie, and the counter would stick at 1.",
+      "commonMistakes": [
+        "Storing a filtered or sorted list in state and refreshing it from an effect, which renders stale content for one frame and creates a second source of truth.",
+        "Deleting a dependency to stop an effect looping, which converts a visible loop into an invisible stale value.",
+        "Omitting the cleanup, so every re-render adds another interval or another subscription until the tab crawls.",
+        "Listing an object or array literal as a dependency; it is a new reference on every render, so the effect runs every time.",
+        "Using an effect to reset state when a prop changes, where re-mounting the child with a `key` — or simply computing the value — is simpler and has no stale frame.",
+        "Fetching in an effect without ignoring the result on cleanup, so a response that arrives after the component moved on writes into state anyway."
+      ],
+      "summaryMarkdown": "Effects are for synchronising with the world outside React. If a value can be computed from props and state, compute it during render instead of storing it. Declare every value the effect reads, and return the cleanup that stops what it started.",
+      "exerciseIds": ["v1-e061", "v1-e062", "v1-e063"],
+      "reviewCardIds": ["v1-c041", "v1-c042"],
+      "references": [
+        {
+          "label": "React: You might not need an effect",
+          "url": "https://react.dev/learn/you-might-not-need-an-effect"
+        },
+        {
+          "label": "React: Synchronizing with effects",
+          "url": "https://react.dev/learn/synchronizing-with-effects"
+        },
+        {
+          "label": "React reference: useEffect",
+          "url": "https://react.dev/reference/react/useEffect"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e061",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The effect that copies state into state",
+      "conceptIds": ["react.derived-state", "react.effects"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "This code works most of the time, which is what makes it worth reading carefully. Identify the strongest reason to change it.",
+      "lessonId": "v1-l21",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "```jsx\nfunction Queue({ tickets }) {\n  const [query, setQuery] = useState('');\n  const [visible, setVisible] = useState([]);\n\n  useEffect(() => {\n    setVisible(tickets.filter((t) => t.subject.includes(query)));\n  }, [tickets, query]);\n\n  return (\n    <>\n      <input value={query} onChange={(e) => setQuery(e.target.value)} />\n      <TicketList tickets={visible} />\n    </>\n  );\n}\n```\n\nTesters report that when they type quickly, the list \"lags one character behind\" for a moment. Which statement best describes the defect and the fix?",
+      "hints": [
+        "Count the renders caused by a single keystroke, and ask what is on screen between the first one and the last one.",
+        "`visible` holds nothing that could not be recomputed from `tickets` and `query`, which are both already available while rendering.",
+        "Delete the `visible` state and the effect entirely, and compute `const visible = tickets.filter(...)` in the component body — one render per keystroke, and no window in which the list disagrees with the box."
+      ],
+      "solution": {
+        "modelAnswer": "`visible` is derived data being stored as state. Each keystroke renders once with the previous list, then the effect sets state and renders again — the visible lag. Computing `visible` during render removes the extra render, the stale frame and the second source of truth.",
+        "explanationMarkdown": "The lag is not a performance problem to be optimised; it is a structural one. Any value stored in state can disagree with the values it was derived from, and here the disagreement is guaranteed for exactly one render on every keystroke.\n\nComputing during render also deletes the dependency array, which is one fewer thing to keep truthful as the component grows. If the filter were ever genuinely expensive, `useMemo` caches the same computation — it still is not state."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "derive-during-render",
+            "textMarkdown": "`visible` is derived from `tickets` and `query`, so storing it in state forces an extra render in which the list still shows the previous result. Compute it in the component body and delete both the state and the effect.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Derived values belong in an expression, not in state — that removes the extra render, the stale frame and the risk of the two drifting apart."
+          },
+          {
+            "id": "add-debounce",
+            "textMarkdown": "The effect runs too often while typing; debounce the query by 300 ms before filtering.",
+            "correct": false,
+            "explanationMarkdown": "Debouncing would make the lag longer and deliberate rather than removing it. The extra render is caused by storing derived data, not by frequency."
+          },
+          {
+            "id": "missing-dependency",
+            "textMarkdown": "The dependency array is missing `visible`, so the effect reads a stale list.",
+            "correct": false,
+            "explanationMarkdown": "The effect never reads `visible`; it only writes it. Adding it as a dependency would create an infinite update loop."
+          },
+          {
+            "id": "use-layout-effect",
+            "textMarkdown": "Switch to `useLayoutEffect` so the second render happens before the browser paints, which hides the lag.",
+            "correct": false,
+            "explanationMarkdown": "That would hide the symptom at the cost of blocking paint, and it leaves two sources of truth in place. Removing the derived state fixes the cause."
+          }
+        ]
+      },
+      "primaryConceptId": "react.derived-state",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e062",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Derive the visible queue",
+      "conceptIds": ["react.derived-state", "react.effects", "js.array-filter"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The selection that a render computes, extracted as a pure function. If this function is right, the component that uses it needs no effect and no second state.",
+      "lessonId": "v1-l21",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "stretch",
+      "estimatedMinutes": 18,
+      "promptMarkdown": "Write `selectVisibleTickets(tickets, filters)`.\n\n`tickets` is an array of `{ id, subject, status, createdAt }` where `createdAt` is a number (higher means more recent). `filters` is `{ query, status, sortBy }`:\n\n- `query` — keep a ticket when its `subject` contains the query, ignoring case and ignoring leading/trailing whitespace in the query. An empty or whitespace-only query keeps everything.\n- `status` — `'all'` keeps everything; otherwise keep only tickets whose `status` matches exactly.\n- `sortBy` — `'oldest'` orders by `createdAt` ascending; anything else orders by `createdAt` descending.\n\nReturn a new array of the matching ticket objects in the required order. **Do not modify `tickets`** — remember that `Array.prototype.sort` reorders the array it is called on.",
+      "hints": [
+        "Do the two jobs separately: first select the tickets that match, then order the selection. Mixing them into one pass makes both harder to check.",
+        "Normalise the query once, before the loop: `filters.query.trim().toLowerCase()`. Comparing a normalised subject against a normalised query is what makes the match case-insensitive.",
+        "`sort` mutates, so sort a copy: `[...matching].sort((a, b) => ...)`. For descending order the comparator is `b.createdAt - a.createdAt`; for ascending it is `a.createdAt - b.createdAt`."
+      ],
+      "solution": {
+        "code": "function selectVisibleTickets(tickets, filters) {\n  const query = filters.query.trim().toLowerCase();\n  const matching = tickets.filter(function (ticket) {\n    const subjectMatches = query === '' || ticket.subject.toLowerCase().includes(query);\n    const statusMatches = filters.status === 'all' || ticket.status === filters.status;\n    return subjectMatches && statusMatches;\n  });\n  const ordered = [...matching];\n  ordered.sort(function (a, b) {\n    return filters.sortBy === 'oldest' ? a.createdAt - b.createdAt : b.createdAt - a.createdAt;\n  });\n  return ordered;\n}",
+        "explanationMarkdown": "Selection and ordering are two different questions, so they are two different steps. `filter` already returns a new array, but sorting it directly would still be safe only by accident — copying before `sort` states the intention and survives someone later moving the sort above the filter.\n\nNormalising the query once outside the predicate matters for more than speed: it puts the definition of \"matching\" in one place, so the empty-query rule and the case rule cannot disagree with each other."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "selectVisibleTickets",
+        "starterCode": "function selectVisibleTickets(tickets, filters) {\n  return tickets;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-queue",
+            "args": [[], { "query": "", "status": "all", "sortBy": "newest" }],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "no-filters-sorts-newest-first",
+            "args": [
+              [
+                { "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 },
+                { "id": "T-2", "subject": "Login loop", "status": "open", "createdAt": 30 },
+                { "id": "T-3", "subject": "Card declined", "status": "resolved", "createdAt": 20 }
+              ],
+              { "query": "", "status": "all", "sortBy": "newest" }
+            ],
+            "expected": [
+              { "id": "T-2", "subject": "Login loop", "status": "open", "createdAt": 30 },
+              { "id": "T-3", "subject": "Card declined", "status": "resolved", "createdAt": 20 },
+              { "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "oldest-first",
+            "args": [
+              [
+                { "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 },
+                { "id": "T-2", "subject": "Login loop", "status": "open", "createdAt": 30 }
+              ],
+              { "query": "", "status": "all", "sortBy": "oldest" }
+            ],
+            "expected": [
+              { "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 },
+              { "id": "T-2", "subject": "Login loop", "status": "open", "createdAt": 30 }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "query-is-case-insensitive-and-trimmed",
+            "args": [
+              [
+                { "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 },
+                { "id": "T-2", "subject": "Login loop", "status": "open", "createdAt": 30 }
+              ],
+              { "query": "  PRINTER ", "status": "all", "sortBy": "newest" }
+            ],
+            "expected": [{ "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 }],
+            "hidden": false
+          },
+          {
+            "id": "status-filter-excludes-others",
+            "args": [
+              [
+                { "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 },
+                { "id": "T-3", "subject": "Card declined", "status": "resolved", "createdAt": 20 }
+              ],
+              { "query": "", "status": "resolved", "sortBy": "newest" }
+            ],
+            "expected": [{ "id": "T-3", "subject": "Card declined", "status": "resolved", "createdAt": 20 }],
+            "hidden": false
+          },
+          {
+            "id": "query-and-status-must-both-match",
+            "args": [
+              [
+                { "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 },
+                { "id": "T-4", "subject": "Printer offline", "status": "resolved", "createdAt": 40 }
+              ],
+              { "query": "printer", "status": "open", "sortBy": "newest" }
+            ],
+            "expected": [{ "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 }],
+            "hidden": false
+          },
+          {
+            "id": "no-matches-returns-empty",
+            "args": [
+              [{ "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 }],
+              { "query": "refund", "status": "all", "sortBy": "newest" }
+            ],
+            "expected": [],
+            "hidden": true
+          },
+          {
+            "id": "whitespace-only-query-keeps-everything",
+            "args": [
+              [
+                { "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 },
+                { "id": "T-2", "subject": "Login loop", "status": "open", "createdAt": 30 }
+              ],
+              { "query": "   ", "status": "all", "sortBy": "oldest" }
+            ],
+            "expected": [
+              { "id": "T-1", "subject": "Printer jam", "status": "open", "createdAt": 10 },
+              { "id": "T-2", "subject": "Login loop", "status": "open", "createdAt": 30 }
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "react.derived-state",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e063",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain the interval that stops at one",
+      "conceptIds": ["react.dependencies", "react.effects", "react.stale-closure"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A written diagnosis. Explain the mechanism, not just the fix — two different repairs are correct here and they are correct for different reasons.",
+      "lessonId": "v1-l21",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "The \"time on this ticket\" badge freezes at `1s` and never moves again.\n\n```jsx\nfunction IdleTimer() {\n  const [seconds, setSeconds] = useState(0);\n\n  useEffect(() => {\n    const id = setInterval(() => setSeconds(seconds + 1), 1000);\n    return () => clearInterval(id);\n  }, []);\n\n  return <span>{seconds}s</span>;\n}\n```\n\nExplain why it stops at 1. Then give **two** different corrections: one that keeps the empty dependency array, and one that changes the dependency array. Say which you would ship and why.",
+      "hints": [
+        "The interval keeps firing — add a log inside it and you will see it tick every second. So the question is what value it computes each time.",
+        "The callback was created during the first render and captured that render's `seconds`, which was `0`. `[]` tells React never to tear the effect down and rebuild it, so that first callback lives forever.",
+        "Fix one: `setSeconds(s => s + 1)`, which reads nothing from the render and so makes `[]` truthful. Fix two: list `[seconds]`, which makes React clear and recreate the interval every second with a fresh capture — correct, but it resets the timer's phase on every tick."
+      ],
+      "solution": {
+        "modelAnswer": "The interval callback closed over `seconds` from the first render, where it was 0, so every tick computes 0 + 1 and sets the state to 1. The empty dependency array means the effect is never rebuilt, so that stale callback runs forever. Fix A keeps `[]` and uses the updater form `setSeconds(s => s + 1)`, which reads nothing from the render, so the empty array is honest. Fix B lists `[seconds]`, which makes React clear and recreate the interval after every change so the callback is fresh. I would ship Fix A: it keeps one interval for the component's whole life, whereas Fix B tears down and restarts the timer every second, so the tick phase drifts.",
+        "explanationMarkdown": "The important idea is that a dependency array is a *claim about what the effect reads*. The original code reads `seconds` and claims it reads nothing, and the two available repairs work by making the claim true from opposite directions: stop reading the value, or admit that you read it.\n\nThe reason to prefer the updater form is not style. Recreating an interval on every tick means the countdown restarts its 1000 ms window each time, so the badge drifts slowly behind real time, and any render for an unrelated reason also restarts the timer."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Explains that the interval callback captured `seconds` from the first render, so every tick computes the same `0 + 1`.",
+          "Connects the empty dependency array to the cause: the effect is never rebuilt, so the stale callback survives for the component's whole life.",
+          "Gives the updater-function fix (`setSeconds(s => s + 1)`) and explains that it makes the empty array truthful because the callback then reads nothing from the render.",
+          "Gives the dependency fix (`[seconds]`) and explains that React clears and recreates the interval so the callback is fresh.",
+          "Chooses between them with a real trade-off, such as the dependency version restarting the timer on every tick and drifting."
+        ],
+        "modelAnswerMarkdown": "**Why it stops at 1.** The arrow function passed to `setInterval` was created during the first render and captured that render's `seconds`, which is `0`. It is never recreated, because `[]` tells React the effect depends on nothing, so React sets the interval up once on mount and only tears it down on unmount. Every tick therefore evaluates `setSeconds(0 + 1)` and React sees the same value it already has.\n\n**Fix A — keep `[]`.** `setInterval(() => setSeconds((s) => s + 1), 1000)`. The updater receives the latest value from React, so the callback reads nothing from the render that created it and the empty array becomes an accurate claim.\n\n**Fix B — change the dependencies.** Keep `setSeconds(seconds + 1)` and declare `[seconds]`. React now runs the cleanup and re-creates the interval after every change, so the callback always holds the current value.\n\n**What I would ship.** Fix A. Fix B is correct but restarts the 1000 ms window on every tick, so the badge drifts behind real time, and any unrelated re-render also resets the timer. Fix A keeps a single interval for the lifetime of the component."
+      },
+      "primaryConceptId": "react.dependencies",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c041",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "When is an effect the right tool?",
+      "conceptIds": ["react.effects", "react.derived-state"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the test for whether code belongs in an effect at all.",
+      "lessonId": "v1-l21",
+      "type": "recall",
+      "promptMarkdown": "What single question decides whether a piece of work belongs in `useEffect`, and what should you do instead when the answer is no?",
+      "answerMarkdown": "Ask: **is this synchronising the component with something outside React?** A subscription, a timer, a network request, the page title, a non-React widget — yes. If the work only produces a value from props and state, the answer is no: compute it during render as a plain expression (and reach for `useMemo` only if the computation is genuinely expensive).",
+      "explanationMarkdown": "Almost every \"my UI is one render behind\" report traces back to a value stored in state that could have been an expression. Deriving during render means the value cannot disagree with its inputs, needs no dependency array, and adds no extra render pass.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "react.effects"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c042",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which effect leaks?",
+      "conceptIds": ["react.effects", "react.dependencies"],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An objectively checkable card about cleanup: find the effect that keeps running after the component is gone.",
+      "lessonId": "v1-l21",
+      "type": "code-reading",
+      "promptMarkdown": "Which of these effects leaves something running after the component unmounts?",
+      "answerMarkdown": "The one that subscribes with `socket.on('ticket', handler)` and returns nothing. Without a cleanup that calls `socket.off('ticket', handler)`, the handler stays registered and keeps firing — and it writes to the state of a component that no longer exists.",
+      "explanationMarkdown": "Anything an effect starts, its cleanup must stop: intervals cleared, subscriptions removed, requests marked as unwanted. React calls the cleanup before every re-run of the effect and once more on unmount, so it must be safe to call more than once.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "socket-no-cleanup",
+            "textMarkdown": "`useEffect(() => { socket.on('ticket', handler); }, [])`",
+            "correct": true,
+            "explanationMarkdown": "Correct. The subscription is never removed, so the handler keeps firing after unmount and writes into dead state. It needs `return () => socket.off('ticket', handler)`."
+          },
+          {
+            "id": "interval-with-cleanup",
+            "textMarkdown": "`useEffect(() => { const id = setInterval(tick, 1000); return () => clearInterval(id); }, [])`",
+            "correct": false,
+            "explanationMarkdown": "This one is correct: the cleanup clears the interval it created, on unmount and before any re-run."
+          },
+          {
+            "id": "title-write",
+            "textMarkdown": "`useEffect(() => { setPageTitle(ticket.subject); }, [ticket.subject])`",
+            "correct": false,
+            "explanationMarkdown": "Writing a title starts nothing that keeps running, so there is nothing to tear down. It is a one-shot synchronisation."
+          },
+          {
+            "id": "log-on-mount",
+            "textMarkdown": "`useEffect(() => { logView(ticket.id); }, [ticket.id])`",
+            "correct": false,
+            "explanationMarkdown": "A single call that completes on its own leaves nothing running. You might debounce it, but it does not leak."
+          }
+        ]
+      },
+      "primaryConceptId": "react.effects"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v1-a07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "React fundamentals placement check",
+      "conceptIds": [
+        "react.components",
+        "react.props",
+        "react.keys",
+        "react.state-updates",
+        "react.mutation",
+        "react.derived-state",
+        "react.dependencies"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering components and props, state updates, and effects versus derived state. Two of them are critical and must both be answered correctly.",
+      "chapterId": "v1-ch07",
+      "items": [
+        {
+          "id": "v1-a07-i1",
+          "objectiveIds": ["react.state-updates"],
+          "critical": true,
+          "promptMarkdown": "A handler runs `setTotal(total + 10); setTotal(total + 5);` where `total` is currently `100`. What is `total` on the next render?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "one-oh-five",
+                "textMarkdown": "`105` — the last call wins, because both read the same snapshot of `total`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Both calls compute from the `100` captured by this render, so React queues `110` then `105`, and the last queued value is what the next render receives."
+              },
+              {
+                "id": "one-fifteen",
+                "textMarkdown": "`115` — the two updates are added together.",
+                "correct": false,
+                "explanationMarkdown": "That is what `setTotal(t => t + 10)` followed by `setTotal(t => t + 5)` would do. Plain values do not compose; each one replaces the queued result."
+              },
+              {
+                "id": "one-ten",
+                "textMarkdown": "`110` — the first call wins because later calls in the same handler are ignored.",
+                "correct": false,
+                "explanationMarkdown": "Later calls are not ignored; they overwrite the queued value. The final queued value is `105`."
+              },
+              {
+                "id": "hundred",
+                "textMarkdown": "`100` — nothing changes, because `total` is a `const`.",
+                "correct": false,
+                "explanationMarkdown": "`total` really is a `const` within this render, but the setter schedules a re-render whose own `total` binding holds the queued value."
+              }
+            ]
+          },
+          "explanationMarkdown": "Plain-value updates replace each other because each one is computed from the same render snapshot. Updater functions queue transformations instead, and those compose."
+        },
+        {
+          "id": "v1-a07-i2",
+          "objectiveIds": ["react.keys", "react.components"],
+          "critical": true,
+          "promptMarkdown": "A list of draggable ticket cards uses `key={index}`. Reordering by drag leaves each card's *collapsed/expanded* toggle attached to the wrong card, though every card's title is correct. What is the most accurate statement?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "identity-by-position",
+                "textMarkdown": "The key ties identity to position, so React reuses the component instance — and its internal state — that already sat in that slot, while updating the props around it.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Titles come from props and are updated; the toggle lives in the reused instance's own state and therefore stays behind."
+              },
+              {
+                "id": "state-must-lift",
+                "textMarkdown": "Component state can never survive a re-render, so the toggle state is being recreated at random.",
+                "correct": false,
+                "explanationMarkdown": "State survives re-renders by design; that is the point of `useState`. It is destroyed only when the instance unmounts, which the index key is specifically preventing."
+              },
+              {
+                "id": "drag-mutates",
+                "textMarkdown": "Drag-and-drop reordered the array in place, so React received a mutated prop and gave up on reconciliation.",
+                "correct": false,
+                "explanationMarkdown": "Titles render correctly after the drag, so React reconciled successfully with fresh data. Mutation would be worth fixing separately but is not this symptom."
+              },
+              {
+                "id": "needs-memo",
+                "textMarkdown": "The cards need `React.memo` so that reordering does not re-render them with stale props.",
+                "correct": false,
+                "explanationMarkdown": "`memo` skips renders when props are unchanged; it does nothing about identity. Adding it here would leave the defect and add a comparison cost."
+              }
+            ]
+          },
+          "explanationMarkdown": "Keys decide which existing instance a rendered element corresponds to. Index keys make that correspondence positional, so any state living inside the instance stays with the slot rather than with the data."
+        },
+        {
+          "id": "v1-a07-i3",
+          "objectiveIds": ["react.derived-state"],
+          "critical": false,
+          "promptMarkdown": "A profile screen has `user` in state. Which of these values should **not** also be stored in state?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "full-name",
+                "textMarkdown": "`fullName`, computed as `` `${user.firstName} ${user.lastName}` ``.",
+                "correct": true,
+                "explanationMarkdown": "Correct. It is a pure function of `user`, so storing it creates a second copy that can fall out of step. Compute it during render."
+              },
+              {
+                "id": "is-editing",
+                "textMarkdown": "`isEditing`, toggled when the agent clicks *Edit*.",
+                "correct": false,
+                "explanationMarkdown": "This is genuine state: nothing else on the screen determines it, and it changes in response to a user action."
+              },
+              {
+                "id": "draft-email",
+                "textMarkdown": "`draftEmail`, the value currently typed into the email field before saving.",
+                "correct": false,
+                "explanationMarkdown": "Also genuine state. It deliberately differs from `user.email` until the form is submitted, which is the whole reason it exists."
+              },
+              {
+                "id": "save-error",
+                "textMarkdown": "`saveError`, the message returned by the last failed save attempt.",
+                "correct": false,
+                "explanationMarkdown": "Genuine state: it records something that happened, and it cannot be recomputed from `user`."
+              }
+            ]
+          },
+          "explanationMarkdown": "The test is whether the value can be recomputed from something you already have. If it can, it is an expression; if it records a choice, an edit in progress, or an event, it is state."
+        },
+        {
+          "id": "v1-a07-i4",
+          "objectiveIds": ["react.mutation", "react.state-updates"],
+          "critical": false,
+          "promptMarkdown": "`settings` is an object in state. Which line correctly updates only `settings.theme` and causes a re-render?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "spread-copy",
+                "textMarkdown": "`setSettings({ ...settings, theme: 'dark' })`",
+                "correct": true,
+                "explanationMarkdown": "Correct. A new object with the other fields copied across, so the reference changes and React renders."
+              },
+              {
+                "id": "direct-write",
+                "textMarkdown": "`settings.theme = 'dark'; setSettings(settings);`",
+                "correct": false,
+                "explanationMarkdown": "The same object comes back, so React's reference comparison sees no change and skips the render — while the data has already been altered."
+              },
+              {
+                "id": "object-assign-in-place",
+                "textMarkdown": "`setSettings(Object.assign(settings, { theme: 'dark' }))`",
+                "correct": false,
+                "explanationMarkdown": "`Object.assign` writes into its first argument and returns it, so this is the previous option in disguise. `Object.assign({}, settings, { theme: 'dark' })` would be safe."
+              },
+              {
+                "id": "replace-whole",
+                "textMarkdown": "`setSettings({ theme: 'dark' })`",
+                "correct": false,
+                "explanationMarkdown": "This does re-render, but it silently deletes every other setting because nothing was copied across."
+              }
+            ]
+          },
+          "explanationMarkdown": "React compares the old and new state by reference. An update must therefore produce a new object, and it must carry the untouched fields across."
+        },
+        {
+          "id": "v1-a07-i5",
+          "objectiveIds": ["react.dependencies", "react.effects"],
+          "critical": false,
+          "promptMarkdown": "An effect reads `filters` and `pageSize` but declares `[pageSize]`. A teammate suggests declaring `[]` instead \"so it only runs once\". What actually happens with `[]`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "frozen-first-render",
+                "textMarkdown": "The effect runs once with the values from the first render and keeps using them forever, so later filter and page-size changes are ignored.",
+                "correct": true,
+                "explanationMarkdown": "Correct. An empty array does not make the effect independent of those values; it just stops React from ever refreshing the closure that holds them."
+              },
+              {
+                "id": "runs-every-render",
+                "textMarkdown": "The effect runs after every render, because an empty array means 'no restrictions'.",
+                "correct": false,
+                "explanationMarkdown": "That is what *omitting* the array entirely does. An empty array means the opposite: run on mount only."
+              },
+              {
+                "id": "react-infers",
+                "textMarkdown": "React reads the effect body and re-runs it whenever anything it references changes, so the array is only a hint.",
+                "correct": false,
+                "explanationMarkdown": "React does not inspect the body at runtime. The lint rule inspects it at build time, which is why ignoring that rule is dangerous."
+              },
+              {
+                "id": "throws",
+                "textMarkdown": "React throws a warning and refuses to run the effect until every referenced value is declared.",
+                "correct": false,
+                "explanationMarkdown": "Nothing throws. The effect runs happily with stale values, which is precisely what makes this defect hard to spot."
+              }
+            ]
+          },
+          "explanationMarkdown": "A dependency array is a claim about which render values the effect reads. Shrinking it does not reduce what the effect reads; it only stops React from refreshing those values."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

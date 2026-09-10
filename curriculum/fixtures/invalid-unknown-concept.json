@@ -1,0 +1,564 @@
+{
+  "schemaVersion": 1,
+  "packageId": "fixture-unknown-concept",
+  "packageVersion": "1.0.0",
+  "baseReleaseId": null,
+  "mode": "snapshot",
+  "title": "Valid one-chapter fixture",
+  "items": [
+    {
+      "kind": "track",
+      "id": "fx-track",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Fixture track",
+      "conceptIds": [
+        "js.array-filter"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Fixture track used by the content-tools test suite.",
+      "description": "A minimal but complete track used to test the content pipeline.",
+      "targetOutcomes": [
+        "Prove the content pipeline validates a complete package."
+      ],
+      "chapterIds": [
+        "fx-chapter"
+      ]
+    },
+    {
+      "kind": "chapter",
+      "id": "fx-chapter",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Selections over collections",
+      "conceptIds": [
+        "js.array-filter",
+        "js.purity",
+        "js.shallow-copy"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A single-chapter fixture used to exercise the content pipeline end to end.",
+      "trackId": "fx-track",
+      "lessonIds": [
+        "fx-lesson"
+      ],
+      "assessmentId": "fx-assessment",
+      "objectiveIds": [
+        "js.array-filter",
+        "js.purity",
+        "js.shallow-copy"
+      ],
+      "missionIds": [],
+      "sortOrder": 0
+    },
+    {
+      "kind": "lesson",
+      "id": "fx-lesson",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Selecting records without changing them",
+      "conceptIds": [
+        "js.array-filter",
+        "js.purity",
+        "js.shallow-copy",
+        "js.not-a-real-concept"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A support desk constantly asks narrow questions of a wide list: how many tickets are open, which ones belong to this customer, which breached their response time. Each of those is a selection over the same array, and none of them should change the array itself.\n\nJavaScript gives you `filter` for exactly this. It walks the array, keeps the records your predicate accepts, and hands back a **new** array. The original is untouched, which means the caller can ask a second question of the same data and get an answer that still makes sense.",
+      "chapterId": "fx-chapter",
+      "sortOrder": 0,
+      "objectives": [
+        "Select matching records from an array with filter.",
+        "Explain why a selection must not modify its input."
+      ],
+      "estimatedMinutes": 8,
+      "workedExampleMarkdown": "```js\nconst tickets = [\n  { id: 'T-1', status: 'open' },\n  { id: 'T-2', status: 'closed' },\n];\n\n// filter builds a NEW array; `tickets` is unchanged afterwards.\nconst open = tickets.filter((ticket) => ticket.status === 'open');\n\nopen.length;    // 1\ntickets.length; // still 2\n```\n\nThe predicate answers one question per record: keep it, or not. Because `filter` returns a new array, you can chain a second selection without disturbing the first result.",
+      "commonMistakes": [
+        "Using `forEach` with a counter and accidentally editing the records while counting them.",
+        "Comparing with `==` so that a status of `null` or `0` matches unexpectedly.",
+        "Assuming `filter` edits the array in place and then wondering why the original still has every record."
+      ],
+      "summaryMarkdown": "`filter` selects; it never edits. Keep selections pure so the same data can answer several questions in a row.",
+      "exerciseIds": [
+        "js-arrays-filter-open",
+        "fx-ex-shallow-copy",
+        "fx-ex-explain-purity"
+      ],
+      "reviewCardIds": [
+        "fx-card-filter",
+        "fx-card-transfer"
+      ],
+      "references": [
+        {
+          "label": "MDN: Array.prototype.filter()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/filter"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "js-arrays-filter-open",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Count open support tickets",
+      "conceptIds": [
+        "js.array-filter",
+        "js.purity"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Practice selecting records without changing the input.",
+      "lessonId": "fx-lesson",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "foundation",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "Return the number of tickets whose status is exactly `open`. Do not mutate the input. Status comparisons are case-sensitive.",
+      "hints": [
+        "Separate selecting the matching tickets from counting them.",
+        "Array.filter returns a new array containing only the records that match.",
+        "Filter by ticket.status === 'open', then read the resulting array's length."
+      ],
+      "solution": {
+        "code": "function countOpen(tickets) { return tickets.filter(ticket => ticket.status === 'open').length; }",
+        "explanationMarkdown": "Filtering selects matching records without changing the original array, and the resulting length is the count. An empty input produces zero. A loop with a counter is equally valid."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "countOpen",
+        "starterCode": "function countOpen(tickets) { return 0; }",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty",
+            "args": [
+              []
+            ],
+            "expected": 0,
+            "hidden": false
+          },
+          {
+            "id": "mixed",
+            "args": [
+              [
+                {
+                  "status": "open"
+                },
+                {
+                  "status": "closed"
+                },
+                {
+                  "status": "open"
+                }
+              ]
+            ],
+            "expected": 2,
+            "hidden": false
+          },
+          {
+            "id": "all-closed",
+            "args": [
+              [
+                {
+                  "status": "closed"
+                }
+              ]
+            ],
+            "expected": 0,
+            "hidden": false
+          },
+          {
+            "id": "uppercase-open-is-not-open",
+            "args": [
+              [
+                {
+                  "status": "Open"
+                },
+                {
+                  "status": "open"
+                }
+              ]
+            ],
+            "expected": 1,
+            "hidden": false
+          },
+          {
+            "id": "all-open",
+            "args": [
+              [
+                {
+                  "status": "open"
+                },
+                {
+                  "status": "open"
+                },
+                {
+                  "status": "open"
+                }
+              ]
+            ],
+            "expected": 3,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.array-filter",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "fx-ex-shallow-copy",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a shared nested record",
+      "conceptIds": [
+        "js.shallow-copy",
+        "js.mutation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read the code and decide what the spread actually copied.",
+      "lessonId": "fx-lesson",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 5,
+      "promptMarkdown": "A dispatcher copies a ticket with `const copy = { ...ticket }` and then edits `copy.customer.name`. The original ticket changes too. Why?",
+      "hints": [
+        "Ask how many levels deep the copy went.",
+        "A spread copies the top-level properties only; nested objects are shared by reference.",
+        "`copy.customer` and `ticket.customer` point at the same object, so editing one is editing both."
+      ],
+      "solution": {
+        "modelAnswer": "The spread is a shallow copy, so the nested customer object is shared.",
+        "explanationMarkdown": "A spread copies each top-level property value. For a nested object that value is a reference, so the copy and the original point at the same customer record. Copying the nested object as well fixes it."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "shallow",
+            "textMarkdown": "The spread copied only the top level, so `customer` is shared.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A spread copies one level; nested values stay shared references."
+          },
+          {
+            "id": "spread-broken",
+            "textMarkdown": "Object spread does not copy anything.",
+            "correct": false,
+            "explanationMarkdown": "It does copy: `copy` is a new object. The issue is only that the copy is one level deep."
+          },
+          {
+            "id": "const-blocks",
+            "textMarkdown": "`const` prevents the copy from being modified.",
+            "correct": false,
+            "explanationMarkdown": "`const` stops the binding being reassigned. It does not freeze the object it refers to."
+          },
+          {
+            "id": "needs-json",
+            "textMarkdown": "Only `JSON.parse(JSON.stringify(x))` can copy an object at all.",
+            "correct": false,
+            "explanationMarkdown": "That produces a deep copy, but it is not the only way, and it silently drops dates and functions."
+          }
+        ]
+      },
+      "primaryConceptId": "js.shallow-copy",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "fx-ex-explain-purity",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain why the filter helper stays pure",
+      "conceptIds": [
+        "js.purity"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Put the reasoning into your own words; the criteria are shown after you answer.",
+      "lessonId": "fx-lesson",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "A colleague proposes changing `countOpen` to also mark each open ticket as seen. Explain what that would cost the caller and what you would suggest instead.",
+      "hints": [
+        "Think about what the caller assumes when it passes its own array in.",
+        "A function that both answers a question and changes data is hard to reuse and hard to test.",
+        "Separate the query from the command: return the count, and let a separate function record that tickets were seen."
+      ],
+      "solution": {
+        "modelAnswer": "Marking tickets inside countOpen makes the function impure: calling it twice would change the data, callers could no longer use it for a simple count, and tests would need to rebuild fixtures between assertions. Keep the count as a pure query and move the marking into an explicit separate operation.",
+        "explanationMarkdown": "The point is separating a query from a command. A pure count can be called anywhere, cached and tested trivially. Once it also mutates, every caller inherits that side effect whether it wanted it or not."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Identifies that the function would no longer be pure, because it changes data the caller owns.",
+          "Names a concrete consequence, such as repeat calls differing, or tests needing fresh fixtures each time.",
+          "Proposes separating the count from the marking rather than adding a flag argument."
+        ],
+        "modelAnswerMarkdown": "Marking tickets inside `countOpen` makes it impure. Calling it twice would produce different data, so callers can no longer treat it as a simple question, and every test needs a fresh fixture. I would keep `countOpen` as a pure query and add a separate `markTicketsSeen` operation the caller invokes deliberately."
+      },
+      "primaryConceptId": "js.purity",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "fx-card-filter",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does filter return?",
+      "conceptIds": [
+        "js.array-filter"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the return value and its effect on the original array.",
+      "lessonId": "fx-lesson",
+      "type": "recall",
+      "promptMarkdown": "What does `Array.prototype.filter` return, and what happens to the array you called it on?",
+      "answerMarkdown": "It returns a **new** array containing the elements the predicate accepted. The original array is not modified.",
+      "explanationMarkdown": "This is the property that makes selections composable: the source data survives, so you can ask another question of it.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.array-filter"
+    },
+    {
+      "kind": "review_card",
+      "id": "fx-card-transfer",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Spot the impure selection",
+      "conceptIds": [
+        "js.purity",
+        "js.mutation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the idea to unfamiliar code.",
+      "lessonId": "fx-lesson",
+      "type": "transfer",
+      "promptMarkdown": "A helper is written as `function urgent(t) { t.forEach(x => x.seen = true); return t.filter(x => x.priority === 1); }`. Name the defect and the symptom a caller would report.",
+      "answerMarkdown": "It mutates every ticket by setting `seen` before selecting. A caller would report that simply asking for urgent tickets marked the whole queue as seen.",
+      "explanationMarkdown": "The `filter` half is fine. The `forEach` above it is a hidden side effect, so the function is a command pretending to be a query.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.purity"
+    },
+    {
+      "kind": "assessment",
+      "id": "fx-assessment",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Selections and immutability placement check",
+      "conceptIds": [
+        "js.array-filter",
+        "js.purity",
+        "js.shallow-copy"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering this chapter. No hints are shown until you submit.",
+      "chapterId": "fx-chapter",
+      "items": [
+        {
+          "id": "fx-a-1",
+          "objectiveIds": [
+            "js.array-filter"
+          ],
+          "critical": true,
+          "promptMarkdown": "Given `[3, 8, 2, 9]`, what does `nums.filter(n => n > 4)` evaluate to, and what is `nums` afterwards?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a",
+                "textMarkdown": "`[8, 9]`, and `nums` still has four elements.",
+                "correct": true,
+                "explanationMarkdown": "Correct: a new array of the accepted values, source unchanged."
+              },
+              {
+                "id": "b",
+                "textMarkdown": "`[8, 9]`, and `nums` now has two elements.",
+                "correct": false,
+                "explanationMarkdown": "filter does not remove elements from the source array."
+              },
+              {
+                "id": "c",
+                "textMarkdown": "`[3, 2]`, and `nums` is unchanged.",
+                "correct": false,
+                "explanationMarkdown": "The predicate keeps values greater than 4, not the others."
+              },
+              {
+                "id": "d",
+                "textMarkdown": "`true`, because the predicate returns a boolean.",
+                "correct": false,
+                "explanationMarkdown": "The predicate returns booleans; filter itself returns an array."
+              }
+            ]
+          },
+          "explanationMarkdown": "filter builds a new array from the values the predicate accepted and leaves the source alone."
+        },
+        {
+          "id": "fx-a-2",
+          "objectiveIds": [
+            "js.purity"
+          ],
+          "critical": true,
+          "promptMarkdown": "Which of these makes a function impure?",
+          "grading": {
+            "kind": "choice",
+            "mode": "multiple",
+            "options": [
+              {
+                "id": "a",
+                "textMarkdown": "It writes a property on an object it received as an argument.",
+                "correct": true,
+                "explanationMarkdown": "Yes: it changes state the caller owns."
+              },
+              {
+                "id": "b",
+                "textMarkdown": "It reads a property of its argument.",
+                "correct": false,
+                "explanationMarkdown": "Reading is fine; purity restricts changes, not access."
+              },
+              {
+                "id": "c",
+                "textMarkdown": "It appends to an array declared outside the function.",
+                "correct": true,
+                "explanationMarkdown": "Yes: that is an observable side effect outside its own scope."
+              },
+              {
+                "id": "d",
+                "textMarkdown": "It declares a local variable.",
+                "correct": false,
+                "explanationMarkdown": "Local state is invisible to callers and keeps the function pure."
+              }
+            ]
+          },
+          "explanationMarkdown": "Impurity is about observable change outside the function, not about how much work happens inside it."
+        },
+        {
+          "id": "fx-a-3",
+          "objectiveIds": [
+            "js.shallow-copy"
+          ],
+          "critical": false,
+          "promptMarkdown": "After `const b = { ...a }`, which statement changes `a` as well as `b`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a",
+                "textMarkdown": "`b.meta.tag = \"x\"` where `a.meta` is an object.",
+                "correct": true,
+                "explanationMarkdown": "Correct: the nested object is shared between the two copies."
+              },
+              {
+                "id": "b",
+                "textMarkdown": "`b.title = \"x\"` where `a.title` is a string.",
+                "correct": false,
+                "explanationMarkdown": "Top-level properties were copied, so this only affects `b`."
+              },
+              {
+                "id": "c",
+                "textMarkdown": "`b = {}`.",
+                "correct": false,
+                "explanationMarkdown": "That reassigns the binding `b`; `a` is untouched."
+              },
+              {
+                "id": "d",
+                "textMarkdown": "None of them, because the spread is a deep copy.",
+                "correct": false,
+                "explanationMarkdown": "The spread copies one level only."
+              }
+            ]
+          },
+          "explanationMarkdown": "A spread copies top-level values. Nested objects are copied by reference, so both records share them."
+        },
+        {
+          "id": "fx-a-4",
+          "objectiveIds": [
+            "js.array-filter",
+            "js.purity"
+          ],
+          "critical": false,
+          "promptMarkdown": "A colleague replaces `list.filter(fn)` with a `for` loop that calls `list.splice()` when a record does not match. What breaks?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a",
+                "textMarkdown": "The caller’s array is emptied of non-matching records, and the loop skips elements as indices shift.",
+                "correct": true,
+                "explanationMarkdown": "Both problems are real: splice mutates in place and shifts every later index."
+              },
+              {
+                "id": "b",
+                "textMarkdown": "Nothing; splice and filter are equivalent.",
+                "correct": false,
+                "explanationMarkdown": "splice edits in place, filter returns a new array."
+              },
+              {
+                "id": "c",
+                "textMarkdown": "Only performance changes.",
+                "correct": false,
+                "explanationMarkdown": "Correctness changes first: the source array is modified."
+              },
+              {
+                "id": "d",
+                "textMarkdown": "The loop throws because splice cannot be used on arrays.",
+                "correct": false,
+                "explanationMarkdown": "splice is a standard array method; it works, which is exactly why the defect is quiet."
+              }
+            ]
+          },
+          "explanationMarkdown": "Mutating a collection while iterating over it shifts the indices under the loop, and it destroys data the caller still needed."
+        },
+        {
+          "id": "fx-a-5",
+          "objectiveIds": [
+            "js.array-filter"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which predicate counts only tickets whose status is exactly the lowercase word `open`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a",
+                "textMarkdown": "`t => t.status === \"open\"`",
+                "correct": true,
+                "explanationMarkdown": "Strict equality against the exact string is what the requirement asks for."
+              },
+              {
+                "id": "b",
+                "textMarkdown": "`t => t.status == \"open\"`",
+                "correct": false,
+                "explanationMarkdown": "Loose equality is unnecessary here and invites coercion surprises elsewhere."
+              },
+              {
+                "id": "c",
+                "textMarkdown": "`t => t.status.toLowerCase() === \"open\"`",
+                "correct": false,
+                "explanationMarkdown": "That also accepts `Open` and `OPEN`, which the requirement excludes."
+              },
+              {
+                "id": "d",
+                "textMarkdown": "`t => t.status`",
+                "correct": false,
+                "explanationMarkdown": "That accepts every non-empty status, not just `open`."
+              }
+            ]
+          },
+          "explanationMarkdown": "The requirement is case-sensitive, so normalising the case would accept records it should reject."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ],
+  "assets": []
+}

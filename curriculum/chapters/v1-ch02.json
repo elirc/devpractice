@@ -1,0 +1,1279 @@
+{
+  "note": "V1 chapter 2 — JavaScript values and control flow. prerequisiteIds hold CONCEPT ids and point only at concepts taught earlier in the release order (chapter 1 concepts, or earlier lessons of this chapter).",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "JavaScript values and control flow",
+      "conceptIds": [
+        "js.coercion",
+        "js.equality",
+        "js.truthiness",
+        "js.branching",
+        "js.boundaries",
+        "js.off-by-one",
+        "js.functions",
+        "js.scope",
+        "js.purity"
+      ],
+      "prerequisiteIds": [
+        "debug.next-step"
+      ],
+      "bodyMarkdown": "Most JavaScript defects that survive review are not exotic. They are a comparison that quietly converted a type, a condition whose edge was off by one, or a function that reached outside itself for a value.\n\nThis chapter builds the three habits that prevent them: knowing what a value *is* before comparing it, stating the exact boundary a branch is supposed to accept, and writing functions whose behaviour is fully determined by their arguments.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v1-l04",
+        "v1-l05",
+        "v1-l06"
+      ],
+      "assessmentId": "v1-a02",
+      "objectiveIds": [
+        "js.coercion",
+        "js.equality",
+        "js.truthiness",
+        "js.branching",
+        "js.boundaries",
+        "js.off-by-one",
+        "js.functions",
+        "js.scope",
+        "js.purity"
+      ],
+      "missionIds": [],
+      "sortOrder": 1
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l04",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Values and coercion",
+      "conceptIds": [
+        "js.coercion",
+        "js.equality",
+        "js.truthiness"
+      ],
+      "prerequisiteIds": [
+        "debug.stack-trace"
+      ],
+      "bodyMarkdown": "JavaScript will convert a value rather than refuse an operation. That is convenient exactly until it is not.\n\n**Coercion** is that conversion. `+` prefers string concatenation when either side is a string, so `1 + '2'` is `'12'`. Every other arithmetic operator prefers numbers, so `'6' - 2` is `4`. The same expression can therefore read as arithmetic and behave as text, which is why a total arriving from a form as a string can silently become `'1050'` instead of `15`.\n\n**Equality** comes in two forms. `===` compares type and value with no conversion. `==` converts first, and its conversion table has corners nobody remembers correctly. Use `===` by default; the single defensible use of `==` is `value == null`, which is true for exactly `null` and `undefined` and nothing else.\n\n**Truthiness** is a third, separate conversion: the one `if` performs. The falsy values are `false`, `0`, `-0`, `0n`, `''`, `null`, `undefined` and `NaN`. Everything else — including `'0'`, `'false'`, `[]` and `{}` — is truthy. The practical damage is almost always the same: a check written to mean \"was this supplied?\" also rejects a legitimate `0` or an intentionally empty string.\n\nThe habit that fixes all three is to say out loud what you mean. Not \"if quantity\", but \"if quantity was supplied\" or \"if quantity is greater than zero\" — and then write that.",
+      "chapterId": "v1-ch02",
+      "sortOrder": 0,
+      "objectives": [
+        "Predict the result of arithmetic and comparison across mixed types.",
+        "Choose between strict equality, loose equality and a truthiness check deliberately.",
+        "Recognise checks that discard a legitimate falsy value such as 0."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "A quantity field on the bakery order form arrives as a string, because form values always do.\n\n```js\nconst raw = '0';            // the customer typed 0\n\nif (raw) {\n  // runs: the string '0' is truthy, because only the EMPTY string is falsy\n}\n\nconst quantity = Number(raw); // 0\n\nif (quantity) {\n  // does NOT run: the number 0 is falsy\n}\n\nif (quantity > 0) {\n  // says what it means, and behaves the same next year\n}\n```\n\nThe two `if` statements above disagree about the same customer input, and neither of them is asking the question the feature actually cares about.\n\nEquality shows the same split:\n\n```js\nraw == quantity;   // true  — '0' is converted to 0 before comparing\nraw === quantity;  // false — a string is never strictly equal to a number\n\nconst shipped = null;\nshipped == undefined;   // true  — the one useful loose comparison\nshipped === undefined;  // false — null and undefined are distinct values\n```\n\nWrite the conversion where you can see it — `Number(raw)`, `String(id)` — and then compare with `===`. The bug you avoid is the one where a value silently changed type three functions ago.",
+      "commonMistakes": [
+        "Writing `if (quantity)` to mean 'a quantity was supplied' and thereby rejecting a deliberate 0.",
+        "Adding a form value to a number and getting concatenation because the form value is still a string.",
+        "Assuming `[]` or `'0'` is falsy because it looks empty or looks like zero.",
+        "Using `==` to compare a string id from the URL with a numeric id from the database and calling it fixed, instead of converting once at the boundary.",
+        "Comparing with `NaN` using `===`, which is always false; `Number.isNaN(value)` is the check."
+      ],
+      "summaryMarkdown": "Coercion converts values so operations never fail; `==` converts before comparing and `===` does not; truthiness is a third conversion with eight falsy values. Convert explicitly at the edge of your code, compare with `===`, and write the condition you actually mean rather than the shortest one that usually works.",
+      "exerciseIds": [
+        "v1-e010",
+        "v1-e011",
+        "v1-e012"
+      ],
+      "reviewCardIds": [
+        "v1-c007",
+        "v1-c008"
+      ],
+      "references": [
+        {
+          "label": "MDN: Equality comparisons and sameness",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Equality_comparisons_and_sameness"
+        },
+        {
+          "label": "MDN: Falsy",
+          "url": "https://developer.mozilla.org/en-US/docs/Glossary/Falsy"
+        },
+        {
+          "label": "MDN: Type coercion",
+          "url": "https://developer.mozilla.org/en-US/docs/Glossary/Type_coercion"
+        }
+      ]
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Branching and boundaries",
+      "conceptIds": [
+        "js.branching",
+        "js.boundaries",
+        "js.off-by-one"
+      ],
+      "prerequisiteIds": [
+        "js.equality",
+        "js.truthiness"
+      ],
+      "bodyMarkdown": "A branch is a claim about which values go which way. Most branch bugs are not in the middle of a range; they are at its two ends.\n\nWhen you write a set of conditions, write down the exact first and last value each one accepts. \"Under 100 grams\" and \"up to 100 grams\" differ by one value, and that value is the one a customer will eventually send. A range described in prose is ambiguous; a range described as `0 <= grams && grams < 100` is not.\n\nOrdered `if / else if` chains have a second property worth stating explicitly: **the first matching branch wins, and the later conditions are evaluated in a world where all the earlier ones were false.** That is why `if (grams < 100) … else if (grams < 1000)` needs no lower bound in the second condition. It also means reordering the chain changes behaviour even though no condition changed, which is a surprisingly common regression.\n\nOff-by-one errors are the same problem inside loops and slices. Array indices run from `0` to `length - 1`, so `i <= items.length` visits one index too many and reads `undefined`. `slice(start, end)` includes `start` and excludes `end`, so `slice(0, 10)` is ten items, not eleven. Neither of these needs memorising if you get into the habit of testing the first value, the last value, one past each, and the empty case.",
+      "chapterId": "v1-ch02",
+      "sortOrder": 1,
+      "objectives": [
+        "State the exact first and last value each branch of a chain accepts.",
+        "Predict which branch of an ordered if/else chain runs for a given input.",
+        "Find off-by-one errors in loop conditions and slice ranges."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "Postage bands for the fictional Larkspur Bakery mail-order service:\n\n```js\nfunction band(grams) {\n  if (grams < 0) return 'invalid';\n  if (grams < 100) return 'letter';\n  if (grams < 1000) return 'parcel';\n  return 'freight';\n}\n```\n\nWrite the boundaries down before trusting it:\n\n| input | branch | why |\n| --- | --- | --- |\n| `-1` | invalid | the only branch that accepts negatives |\n| `0` | letter | 0 is not negative, and it is below 100 |\n| `99` | letter | last accepted value of the band |\n| `100` | parcel | first value the letter band rejects |\n| `999` | parcel | last accepted value |\n| `1000` | freight | first value that falls through the chain |\n\nSix inputs, and every boundary in the function is pinned. Compare that with testing `50`, `500` and `5000`, which all pass whether or not a single `<` should have been `<=`.\n\nThe same discipline catches loop errors:\n\n```js\nconst items = ['a', 'b', 'c'];\n\nfor (let i = 0; i <= items.length; i += 1) {\n  console.log(items[i]);   // a, b, c, undefined  <- one too many\n}\n\nfor (let i = 0; i < items.length; i += 1) {\n  console.log(items[i]);   // a, b, c\n}\n```",
+      "commonMistakes": [
+        "Testing the middle of each range and never the edges, so a `<` that should be `<=` survives every test.",
+        "Reordering an if/else chain during a refactor and changing which branch wins for overlapping values.",
+        "Writing `i <= array.length` and reading `undefined` off the end.",
+        "Forgetting that `slice(start, end)` excludes `end`, and taking one item too few or too many.",
+        "Leaving a range with a gap — `< 100` then `> 100` — so exactly one input matches nothing and falls through to a default nobody designed."
+      ],
+      "summaryMarkdown": "Branches are defined by their edges, so name the first and last accepted value of every condition. In an ordered chain the first match wins and later conditions inherit the earlier failures. Test the boundary, one past the boundary, and the empty case; that is where off-by-one errors live.",
+      "exerciseIds": [
+        "v1-e013",
+        "v1-e014",
+        "v1-e015"
+      ],
+      "reviewCardIds": [
+        "v1-c009",
+        "v1-c010"
+      ],
+      "references": [
+        {
+          "label": "MDN: if...else",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/if...else"
+        },
+        {
+          "label": "MDN: Array.prototype.slice()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/slice"
+        }
+      ]
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Functions and scope",
+      "conceptIds": [
+        "js.functions",
+        "js.scope",
+        "js.purity"
+      ],
+      "prerequisiteIds": [
+        "js.branching"
+      ],
+      "bodyMarkdown": "A function is a promise: give me these arguments and I will give you this result. The more of that promise depends on things you cannot see in the call, the less useful the function is.\n\n**Scope** decides what a function can see. A binding declared with `let` or `const` is visible inside the block it was declared in and inside any function defined there. A function defined inside another function keeps access to those bindings even after the outer call has returned — that is a closure, and it is why the value a callback reads is the value at *call* time, not at definition time.\n\n`var` is the exception that still causes confusion, because it is function-scoped rather than block-scoped. A `var` declared in a loop body is one single binding shared by every iteration, so every closure created in that loop sees the same final value. `let` creates a fresh binding per iteration. This is the classic loop-and-callback puzzle, and it is a scope question, not a timing question.\n\n**Purity** is the other half. A pure function's result depends only on its arguments, and calling it changes nothing outside itself. Pure functions are trivial to test — no setup, no teardown, no ordering — and safe to call twice. Impure ones are not automatically wrong; a program that never touches the outside world does nothing. The rule is to keep the decision-making pure and push the effects to the edges, where they are few and visible.",
+      "chapterId": "v1-ch02",
+      "sortOrder": 2,
+      "objectives": [
+        "Predict which binding a function body sees, including in loops.",
+        "Distinguish a pure function from one that depends on or changes outside state.",
+        "Refactor a helper so its result depends only on its arguments."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "Two versions of the same helper.\n\n```js\n// Impure: the answer depends on a value the caller cannot see or control.\nlet taxRate = 0.2;\n\nfunction totalWithTax(subtotal) {\n  return subtotal * (1 + taxRate);\n}\n```\n\n```js\n// Pure: everything that affects the answer is in the argument list.\nfunction totalWithTax(subtotal, taxRate) {\n  return subtotal * (1 + taxRate);\n}\n```\n\nThe second version can be tested with one line and no arrangement. The first cannot: a test must set `taxRate` first, must reset it afterwards, and will fail mysteriously if another test forgets. Worse, two calls with identical arguments can return different numbers, which makes any bug report about it unreproducible.\n\nScope, meanwhile, decides what those bodies can even see:\n\n```js\nconst handlers = [];\n\nfor (var i = 0; i < 3; i += 1) {\n  handlers.push(() => i);\n}\nhandlers.map((h) => h());  // [3, 3, 3] — one shared `var` binding\n\nconst better = [];\nfor (let j = 0; j < 3; j += 1) {\n  better.push(() => j);\n}\nbetter.map((h) => h());    // [0, 1, 2] — a fresh `let` binding per iteration\n```\n\nThe callbacks were created identically. The only difference is how many bindings existed.",
+      "commonMistakes": [
+        "Reading a module-level variable inside a helper and then being unable to test it without arranging global state.",
+        "Expecting a `var` declared in a loop to give each callback its own copy.",
+        "Assuming a closure captures the value at the moment it was created rather than the binding itself.",
+        "Making a function both compute an answer and write it somewhere, so callers who only wanted the answer inherit the write.",
+        "Returning nothing and communicating the result by assigning to an outer variable."
+      ],
+      "summaryMarkdown": "Scope determines what a function body can see; closures keep those bindings alive, and `var` in a loop shares one binding while `let` creates one per iteration. A pure function's answer depends only on its arguments and changes nothing else, which is what makes it testable and safe to call twice. Keep decisions pure and push effects to the edges.",
+      "exerciseIds": [
+        "v1-e016",
+        "v1-e017",
+        "v1-e018"
+      ],
+      "reviewCardIds": [
+        "v1-c011",
+        "v1-c012"
+      ],
+      "references": [
+        {
+          "label": "MDN: Closures",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Closures"
+        },
+        {
+          "label": "MDN: let",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/let"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e010",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Predict four mixed-type results",
+      "conceptIds": [
+        "js.coercion",
+        "js.equality"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Work out each line before running anything, and say which operator caused which conversion.",
+      "lessonId": "v1-l04",
+      "sortOrder": 0,
+      "type": "predict-output",
+      "difficulty": "foundation",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "What does this program print? Give one result per line, in order.\n\n```js\nconsole.log(1 + '2');\nconsole.log('6' - 2);\nconsole.log('5' == 5);\nconsole.log('5' === 5);\n```",
+      "hints": [
+        "Two different operators are at work here, and they prefer different types.",
+        "`+` becomes string concatenation as soon as either operand is a string; `-` has no string meaning, so it converts to numbers instead.",
+        "The last two lines differ only in the operator: `==` converts the string to a number before comparing, `===` refuses to convert and so a string can never equal a number."
+      ],
+      "solution": {
+        "modelAnswer": "12\n4\ntrue\nfalse",
+        "explanationMarkdown": "`+` is overloaded: with a string operand it concatenates, so `1` becomes `'1'` and the result is the string `'12'`. Every other arithmetic operator has only a numeric meaning, so `'6' - 2` converts `'6'` to `6` and yields `4`. `==` applies the same numeric conversion before comparing, which is why `'5' == 5`. `===` compares type first and stops there, so a string and a number are never strictly equal. The practical lesson is that a value's type can change under you at an operator you did not think of as a conversion."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": {
+          "trim": true,
+          "collapseWhitespace": true,
+          "caseSensitive": true
+        },
+        "expected": "12\n4\ntrue\nfalse",
+        "acceptedAlternatives": [
+          "12 4 true false",
+          "'12'\n4\ntrue\nfalse"
+        ]
+      },
+      "primaryConceptId": "js.coercion",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e011",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Decide whether a field was filled in",
+      "conceptIds": [
+        "js.truthiness",
+        "js.coercion"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Write the check that means 'nothing was supplied' without also rejecting a real zero.",
+      "lessonId": "v1-l04",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "The bakery order form treats a field as *blank* when the customer supplied nothing at all. A quantity of `0` and an answer of `false` are real answers, not blanks.\n\nImplement `isBlank(value)` returning `true` when the value is `null`, or a string that is empty or contains only whitespace. Every other value — including `0`, `false`, `'0'` and an empty array — returns `false`.",
+      "hints": [
+        "The obvious one-liner `return !value` is exactly the misconception this exercise is about; list the values it wrongly reports as blank.",
+        "There are only two ways to be blank here, and one of them applies only to strings. Handle them as two separate checks.",
+        "Return `true` for `null` first, then, only when `typeof value === 'string'`, return whether `value.trim()` is the empty string; everything that reaches the end returns `false`."
+      ],
+      "solution": {
+        "code": "function isBlank(value) {\n  if (value === null) {\n    return true;\n  }\n  if (typeof value === 'string') {\n    return value.trim() === '';\n  }\n  return false;\n}",
+        "explanationMarkdown": "Truthiness answers a different question from the one a form needs answered. `!value` means \"is this one of the eight falsy values\", which lumps a deliberate `0` and an explicit `false` in with genuinely absent input. Splitting the question into 'absent' and 'string with no content' makes each rule visible and lets the remaining values pass through untouched. Checking `typeof` before calling `.trim()` is what keeps the string branch safe for numbers and arrays."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "isBlank",
+        "starterCode": "function isBlank(value) {\n  // The tempting shortcut. It also calls 0 and false blank.\n  return !value;\n}",
+        "assertInputUnchanged": false,
+        "cases": [
+          {
+            "id": "null-is-blank",
+            "args": [
+              null
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "empty-string-is-blank",
+            "args": [
+              ""
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "whitespace-is-blank",
+            "args": [
+              "  \t "
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "zero-is-a-real-answer",
+            "args": [
+              0
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "false-is-a-real-answer",
+            "args": [
+              false
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "text-is-not-blank",
+            "args": [
+              "sourdough"
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "string-zero-is-not-blank",
+            "args": [
+              "0"
+            ],
+            "expected": false,
+            "hidden": true
+          },
+          {
+            "id": "empty-array-is-not-blank",
+            "args": [
+              []
+            ],
+            "expected": false,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.truthiness",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e012",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a loose-equality filter that keeps too much",
+      "conceptIds": [
+        "js.equality",
+        "js.coercion"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read the comparison and enumerate the values it accidentally accepts.",
+      "lessonId": "v1-l04",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "A report is supposed to list orders that were never discounted. Some orders carry `discount: 0` (a discount of nothing was applied), some carry `discount: null` (no discount decision was recorded), and some carry a number.\n\n```js\nconst neverDiscounted = orders.filter((order) => order.discount == null);\n```\n\nSupport reports that orders with a discount of `0` are being listed as never discounted. Is that consistent with this code, and if not, where else should you look?",
+      "hints": [
+        "Work out precisely which values `x == null` is true for. It is a much shorter list than most people expect.",
+        "`== null` is true for exactly `null` and `undefined`. The number `0` is neither.",
+        "The code as written cannot produce the reported symptom, so the next observation is whether those orders really carry the number 0 or the string `\"0\"`, or whether `discount` is absent from them entirely."
+      ],
+      "solution": {
+        "modelAnswer": "No. `order.discount == null` matches only `null` and `undefined`, so a numeric `0` is excluded. The report must be produced somewhere else, or those orders have no `discount` property at all, which makes it `undefined` and therefore a match.",
+        "explanationMarkdown": "`== null` is the one loose comparison worth keeping, precisely because its behaviour is small and memorable: `null` and `undefined`, nothing else. That makes it a poor suspect and a good place to stop looking. The realistic cause of the report is a record where `discount` was never written, so reading it gives `undefined` — which is a data question, not a comparison question, and the fix belongs wherever those records are created."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "undefined-records",
+            "textMarkdown": "Not consistent: `== null` matches only `null` and `undefined`. Check whether those orders are missing the `discount` property entirely, which would make it `undefined`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The comparison excludes `0`, so the record shape is the thing left to examine."
+          },
+          {
+            "id": "loose-matches-zero",
+            "textMarkdown": "Consistent: `==` converts `null` to `0`, so a discount of `0` matches.",
+            "correct": false,
+            "explanationMarkdown": "`null` is never converted to a number by `==`. It compares equal only to `undefined`."
+          },
+          {
+            "id": "use-strict",
+            "textMarkdown": "Consistent, and the fix is to change `==` to `===`.",
+            "correct": false,
+            "explanationMarkdown": "That change would also stop matching `undefined`, which is likely the very case being reported, and it does not explain the symptom."
+          },
+          {
+            "id": "filter-bug",
+            "textMarkdown": "Consistent: `filter` returns elements the predicate rejects when the predicate returns a falsy non-boolean.",
+            "correct": false,
+            "explanationMarkdown": "`filter` keeps elements whose predicate result is truthy. There is no inversion."
+          }
+        ]
+      },
+      "primaryConceptId": "js.equality",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e013",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Assign a postage band at its exact edges",
+      "conceptIds": [
+        "js.branching",
+        "js.boundaries"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Turn a prose specification into a chain whose edges are all pinned.",
+      "lessonId": "v1-l05",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Implement `postageBand(grams)` for the Larkspur Bakery mail-order desk.\n\n- A negative weight is `\"invalid\"`.\n- `0` up to and including `99` grams is `\"letter\"`.\n- `100` up to and including `999` grams is `\"parcel\"`.\n- `1000` grams and above is `\"freight\"`.\n\nA weight of exactly `0` is a valid letter, not an error.",
+      "hints": [
+        "Write down the six inputs that sit on an edge before you write any code; they are what the cases check.",
+        "In an ordered chain each condition only has to state its upper edge, because every earlier condition already failed by the time it runs.",
+        "Reject negatives first, then `grams < 100` for letter, then `grams < 1000` for parcel, and let everything remaining fall through to freight."
+      ],
+      "solution": {
+        "code": "function postageBand(grams) {\n  if (grams < 0) {\n    return 'invalid';\n  }\n  if (grams < 100) {\n    return 'letter';\n  }\n  if (grams < 1000) {\n    return 'parcel';\n  }\n  return 'freight';\n}",
+        "explanationMarkdown": "An ordered chain lets each branch describe only its own upper edge, because reaching a branch already proves every earlier condition was false. That is why the parcel branch needs no `grams >= 100`: adding one would be harmless but redundant, and redundant conditions are where contradictions creep in during later edits. The invalid check has to come first, since a negative number is also below 100 and would otherwise be posted as a letter."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "postageBand",
+        "starterCode": "function postageBand(grams) {\n  // Everything is a parcel until you write the real chain.\n  return 'parcel';\n}",
+        "assertInputUnchanged": false,
+        "cases": [
+          {
+            "id": "zero-is-a-letter",
+            "args": [
+              0
+            ],
+            "expected": "letter",
+            "hidden": false
+          },
+          {
+            "id": "last-letter-weight",
+            "args": [
+              99
+            ],
+            "expected": "letter",
+            "hidden": false
+          },
+          {
+            "id": "first-parcel-weight",
+            "args": [
+              100
+            ],
+            "expected": "parcel",
+            "hidden": false
+          },
+          {
+            "id": "last-parcel-weight",
+            "args": [
+              999
+            ],
+            "expected": "parcel",
+            "hidden": false
+          },
+          {
+            "id": "negative-is-invalid",
+            "args": [
+              -1
+            ],
+            "expected": "invalid",
+            "hidden": false
+          },
+          {
+            "id": "first-freight-weight",
+            "args": [
+              1000
+            ],
+            "expected": "freight",
+            "hidden": true
+          },
+          {
+            "id": "well-above-freight-edge",
+            "args": [
+              8400
+            ],
+            "expected": "freight",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.branching",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e014",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Clamp a requested page number",
+      "conceptIds": [
+        "js.off-by-one",
+        "js.boundaries"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Pagination is one-based for humans and zero-based for arrays, which is where the mistakes come from.",
+      "lessonId": "v1-l05",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "The order list is paginated. The page number in the URL is one-based and comes from whatever the customer typed, so it can be anything.\n\nImplement `clampPage(requested, totalPages)` returning a page number that is safe to use:\n\n- If `totalPages` is `0` (there is nothing to show), return `1`.\n- If `requested` is below `1`, return `1`.\n- If `requested` is above `totalPages`, return `totalPages`.\n- Otherwise return `requested` unchanged.",
+      "hints": [
+        "Three of the four rules produce an edge value; write down what each one returns for its exact boundary input.",
+        "The empty case has to be handled before the upper clamp, or an empty list would clamp the page number to 0 and produce a page nobody can display.",
+        "Check `totalPages <= 0` first and return 1, then `requested < 1` and return 1, then `requested > totalPages` and return `totalPages`, and finally return `requested`."
+      ],
+      "solution": {
+        "code": "function clampPage(requested, totalPages) {\n  if (totalPages <= 0) {\n    return 1;\n  }\n  if (requested < 1) {\n    return 1;\n  }\n  if (requested > totalPages) {\n    return totalPages;\n  }\n  return requested;\n}",
+        "explanationMarkdown": "The interesting part is the ordering, not the arithmetic. If the empty case were checked last, an empty result set would clamp a requested page down to `totalPages`, which is `0` — a page index that is valid for neither humans nor arrays, and which then produces a confusing empty screen with no explanation. Handling the degenerate case first means every later rule can assume there is at least one page to talk about."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "clampPage",
+        "starterCode": "function clampPage(requested, totalPages) {\n  // Trusts the URL completely.\n  return requested;\n}",
+        "assertInputUnchanged": false,
+        "cases": [
+          {
+            "id": "zero-clamps-up-to-one",
+            "args": [
+              0,
+              5
+            ],
+            "expected": 1,
+            "hidden": false
+          },
+          {
+            "id": "first-page-is-unchanged",
+            "args": [
+              1,
+              5
+            ],
+            "expected": 1,
+            "hidden": false
+          },
+          {
+            "id": "middle-page-is-unchanged",
+            "args": [
+              2,
+              5
+            ],
+            "expected": 2,
+            "hidden": false
+          },
+          {
+            "id": "last-page-is-unchanged",
+            "args": [
+              5,
+              5
+            ],
+            "expected": 5,
+            "hidden": false
+          },
+          {
+            "id": "one-past-the-end-clamps-down",
+            "args": [
+              6,
+              5
+            ],
+            "expected": 5,
+            "hidden": false
+          },
+          {
+            "id": "negative-clamps-up-to-one",
+            "args": [
+              -4,
+              5
+            ],
+            "expected": 1,
+            "hidden": true
+          },
+          {
+            "id": "empty-result-set-still-returns-page-one",
+            "args": [
+              3,
+              0
+            ],
+            "expected": 1,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.off-by-one",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e015",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a loop that reads one row too many",
+      "conceptIds": [
+        "js.off-by-one",
+        "js.branching"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Trace the last two iterations by hand and say what each one reads.",
+      "lessonId": "v1-l05",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "foundation",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "This helper prints a delivery run sheet. With three stops it prints three lines and then throws.\n\n```js\nfunction runSheet(stops) {\n  const lines = [];\n  for (let i = 0; i <= stops.length; i += 1) {\n    lines.push(`${i + 1}. ${stops[i].address}`);\n  }\n  return lines;\n}\n```\n\nWhat exactly goes wrong, and what is the minimal fix?",
+      "hints": [
+        "Write out the values `i` takes for a three-element array under this condition.",
+        "Valid indices run from `0` to `length - 1`, so `i <= stops.length` performs one extra iteration at `i === stops.length`.",
+        "On that extra iteration `stops[3]` is `undefined`, and reading `.address` on `undefined` throws. Change `<=` to `<`."
+      ],
+      "solution": {
+        "modelAnswer": "The condition should be `i < stops.length`. As written, the loop runs a fourth time with `i === 3`, `stops[3]` is `undefined`, and reading `.address` on it throws a TypeError.",
+        "explanationMarkdown": "The `i + 1` inside the template is a red herring: it is the human-facing stop number and is correct. The defect is entirely in the loop condition. Note the shape of the failure — three correct lines followed by a throw — which is characteristic of an off-by-one at the end of a collection, and which is why the empty and single-element cases are worth testing too: with an empty array this version throws immediately on `stops[0]`."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "condition-off-by-one",
+            "textMarkdown": "The loop runs one iteration too many; `stops[stops.length]` is `undefined` and reading `.address` throws. Use `i < stops.length`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The last valid index is `length - 1`."
+          },
+          {
+            "id": "numbering",
+            "textMarkdown": "The `i + 1` in the template is wrong and should be `i`, which is what causes the extra row.",
+            "correct": false,
+            "explanationMarkdown": "That would renumber the sheet from 0 and would not stop the extra iteration or the throw."
+          },
+          {
+            "id": "guard-address",
+            "textMarkdown": "Add `stops[i]?.address` so the extra row renders empty instead of throwing.",
+            "correct": false,
+            "explanationMarkdown": "The run sheet would then always end with a blank numbered stop. The extra iteration should not happen at all."
+          },
+          {
+            "id": "push-order",
+            "textMarkdown": "`push` appends in the wrong order, so the final entry corresponds to no stop.",
+            "correct": false,
+            "explanationMarkdown": "`push` appends to the end, which is exactly the intended order here."
+          }
+        ]
+      },
+      "primaryConceptId": "js.off-by-one",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e016",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Apply a discount without touching the original order",
+      "conceptIds": [
+        "js.functions",
+        "js.purity"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Everything the answer depends on arrives as an argument, and nothing the caller owns changes.",
+      "lessonId": "v1-l06",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "Orders are stored with an integer `totalCents` so that money never goes through a floating-point rounding surprise.\n\nImplement `applyDiscount(order, percent)`. It returns a **new** order object with the same properties, except that `totalCents` is reduced by `percent` per cent and rounded to the nearest whole cent. The order passed in must be exactly as it was when the function returns.",
+      "hints": [
+        "Two separate requirements are hiding here: compute the right number, and leave the argument alone.",
+        "Copying every property of the original and then overriding one of them gives you both at once.",
+        "Compute `Math.round(order.totalCents * (100 - percent) / 100)` and return `{ ...order, totalCents: <that> }`."
+      ],
+      "solution": {
+        "code": "function applyDiscount(order, percent) {\n  const discounted = Math.round((order.totalCents * (100 - percent)) / 100);\n  return { ...order, totalCents: discounted };\n}",
+        "explanationMarkdown": "A pure function of this shape is the safest thing to have in a pricing path: it can be called from a preview, from a save handler and from a test without any of them interfering with each other. Working in whole cents and rounding once at the end keeps money exact, and returning a new object means the caller's copy of the order can still be compared against the discounted one — which is exactly what an audit trail or an undo needs."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "applyDiscount",
+        "starterCode": "function applyDiscount(order, percent) {\n  // Ignores the percentage entirely.\n  return order;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "ten-per-cent",
+            "args": [
+              {
+                "id": "o-1",
+                "totalCents": 1000
+              },
+              10
+            ],
+            "expected": {
+              "id": "o-1",
+              "totalCents": 900
+            },
+            "hidden": false
+          },
+          {
+            "id": "zero-per-cent-changes-nothing",
+            "args": [
+              {
+                "id": "o-2",
+                "totalCents": 1250
+              },
+              0
+            ],
+            "expected": {
+              "id": "o-2",
+              "totalCents": 1250
+            },
+            "hidden": false
+          },
+          {
+            "id": "full-discount",
+            "args": [
+              {
+                "id": "o-3",
+                "totalCents": 1000
+              },
+              100
+            ],
+            "expected": {
+              "id": "o-3",
+              "totalCents": 0
+            },
+            "hidden": false
+          },
+          {
+            "id": "rounds-to-nearest-cent",
+            "args": [
+              {
+                "id": "o-4",
+                "totalCents": 999
+              },
+              33
+            ],
+            "expected": {
+              "id": "o-4",
+              "totalCents": 669
+            },
+            "hidden": false
+          },
+          {
+            "id": "other-properties-survive",
+            "args": [
+              {
+                "id": "o-5",
+                "customerName": "R. Vance",
+                "totalCents": 2000
+              },
+              25
+            ],
+            "expected": {
+              "id": "o-5",
+              "customerName": "R. Vance",
+              "totalCents": 1500
+            },
+            "hidden": true
+          },
+          {
+            "id": "zero-total-stays-zero",
+            "args": [
+              {
+                "id": "o-6",
+                "totalCents": 0
+              },
+              50
+            ],
+            "expected": {
+              "id": "o-6",
+              "totalCents": 0
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.functions",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e017",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Predict what the two loops capture",
+      "conceptIds": [
+        "js.scope"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Count the bindings, not the iterations.",
+      "lessonId": "v1-l06",
+      "sortOrder": 1,
+      "type": "predict-output",
+      "difficulty": "stretch",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "What does this program print? Give one result per line, in order.\n\n```js\nconst withVar = [];\nfor (var i = 0; i < 3; i += 1) {\n  withVar.push(() => i);\n}\nconsole.log(withVar.map((f) => f()).join(','));\n\nconst withLet = [];\nfor (let j = 0; j < 3; j += 1) {\n  withLet.push(() => j);\n}\nconsole.log(withLet.map((f) => f()).join(','));\n```",
+      "hints": [
+        "Both loops create three functions. Ask how many separate variables those functions are looking at.",
+        "`var` is function-scoped, so the whole loop shares one `i`; `let` is block-scoped and the loop creates a fresh `j` for each iteration.",
+        "By the time any function is called, the single shared `i` has already reached 3, while each `j` still holds the value from its own iteration."
+      ],
+      "solution": {
+        "modelAnswer": "3,3,3\n0,1,2",
+        "explanationMarkdown": "A closure captures the binding, not a snapshot of the value. With `var` there is exactly one binding for the entire loop, and the functions are all called after the loop finished, so all three read the final `3`. With `let` the language creates a new binding per iteration and copies the current value into it, so each function reads its own. This is why the difference shows up only when the functions are called later — running them inside the loop would print `0,1,2` in both cases."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": {
+          "trim": true,
+          "collapseWhitespace": true,
+          "caseSensitive": true
+        },
+        "expected": "3,3,3\n0,1,2",
+        "acceptedAlternatives": [
+          "3,3,3 0,1,2"
+        ]
+      },
+      "primaryConceptId": "js.scope",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e018",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain what the shared rate costs you",
+      "conceptIds": [
+        "js.purity",
+        "js.scope"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Name the concrete consequences, not the label.",
+      "lessonId": "v1-l06",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "```js\nlet serviceFeeRate = 0.05;\n\nexport function setServiceFeeRate(rate) {\n  serviceFeeRate = rate;\n}\n\nexport function totalWithFee(subtotalCents) {\n  return Math.round(subtotalCents * (1 + serviceFeeRate));\n}\n```\n\nA teammate says this is fine because \"the rate only changes once, at start-up\". Explain the concrete problems this design creates and what you would change. Give at least one problem that is not about testing.",
+      "hints": [
+        "Ask what a caller of `totalWithFee` would have to know in order to predict its result.",
+        "The answer depends on a value that is not in the argument list and that any other module can change at any time.",
+        "Take the rate as a parameter, so the caller supplies it explicitly, and let whatever loads configuration pass it in at the edge of the system."
+      ],
+      "solution": {
+        "modelAnswer": "Two calls with the same argument can return different numbers, so nobody can predict or reproduce a result without knowing the whole program's history. Tests have to set and reset the module state and break each other when they forget. A support question of the form 'why was this order charged that fee' cannot be answered from the order alone. And because `setServiceFeeRate` is exported, any module can change pricing for every caller at any moment, which makes the failure hard to attribute. I would make the rate a parameter of `totalWithFee` and have the caller — one place that reads configuration — pass it in.",
+        "explanationMarkdown": "The claim 'it only changes at start-up' is a convention, not a constraint, and conventions are not enforced by anything. The deeper cost is that the function stops being a function of its arguments: its result is a function of the arguments *and* of the current state of the module, which means reasoning about it requires reasoning about the whole program. Passing the rate in restores locality — you can read one call and know exactly what it will return — and it moves configuration to the edge where it is loaded once and visibly threaded through."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that the result depends on state outside the argument list, so identical calls can return different values.",
+          "Gives at least one concrete non-testing consequence, such as being unable to reproduce or explain a charged fee, or any module being able to change pricing globally.",
+          "Names the testing cost specifically: arranging and resetting module state, and order-dependent test failures.",
+          "Proposes passing the rate as an argument and reading configuration once at the edge, rather than adding a getter or a reset helper."
+        ],
+        "modelAnswerMarkdown": "`totalWithFee` is not a function of its argument. Its answer depends on `serviceFeeRate`, which lives outside the call and which any module holding `setServiceFeeRate` can change at any time.\n\nThe non-testing cost comes first. If a customer asks why an order was charged a particular fee, the order and the function together are not enough to answer — you also need to know what the rate happened to be at that moment, and nothing records it. Any module can also change pricing for every caller in the process, so a mistake in an unrelated feature shows up as wrong money here.\n\nThe testing cost follows: every test must set the rate, must reset it afterwards, and will fail intermittently depending on the order tests run in.\n\nI would change the signature to `totalWithFee(subtotalCents, feeRate)` and delete the setter. The place that loads configuration reads the rate once and passes it down, so the value is visible at every call site and can be recorded alongside the order."
+      },
+      "primaryConceptId": "js.purity",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c007",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The falsy values",
+      "conceptIds": [
+        "js.truthiness"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the complete falsy list; anything absent from it is truthy.",
+      "lessonId": "v1-l04",
+      "type": "recall",
+      "promptMarkdown": "List every falsy value in JavaScript, and state whether `'0'`, `[]` and `{}` are truthy or falsy.",
+      "answerMarkdown": "Falsy: `false`, `0`, `-0`, `0n`, `''`, `null`, `undefined`, `NaN`.\n\n`'0'`, `[]` and `{}` are all **truthy** — a non-empty string, and any object at all, is truthy regardless of what it contains.",
+      "explanationMarkdown": "The list is short and closed, which is what makes it worth memorising: anything not on it is truthy. The recurring bug is a check meaning 'was this supplied' that also rejects `0` and `''`.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.truthiness"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c008",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Reading a mixed-type comparison",
+      "conceptIds": [
+        "js.equality",
+        "js.coercion"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Evaluate a comparison the way the language does.",
+      "lessonId": "v1-l04",
+      "type": "code-reading",
+      "promptMarkdown": "An id from the URL is the string `'12'`; the id on the record is the number `12`. What do `urlId == recordId` and `urlId === recordId` evaluate to, and which one should the code use?",
+      "answerMarkdown": "`==` is `true` (the string is converted to a number first); `===` is `false` (different types are never strictly equal). Neither belongs in the comparison itself: convert once where the value enters the program — `Number(urlId)` — and compare with `===` afterwards.",
+      "explanationMarkdown": "Relying on `==` leaves the value a string for every later operation, so the next `+` concatenates. Converting at the boundary means the rest of the code deals in one type only.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "convert-at-boundary",
+            "textMarkdown": "`==` is true, `===` is false, and the right fix is to convert the URL id to a number once and then use `===`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The comparison is a symptom; the value's type at the boundary is the cause."
+          },
+          {
+            "id": "just-use-loose",
+            "textMarkdown": "`==` is true, `===` is false, so use `==` and move on.",
+            "correct": false,
+            "explanationMarkdown": "The value stays a string, so the next arithmetic operation on it concatenates instead of adding."
+          },
+          {
+            "id": "both-false",
+            "textMarkdown": "Both are false, because a string and a number can never be compared.",
+            "correct": false,
+            "explanationMarkdown": "`==` converts before comparing, and `'12' == 12` is true."
+          }
+        ]
+      },
+      "primaryConceptId": "js.equality"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c009",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which inputs actually test a range",
+      "conceptIds": [
+        "js.boundaries",
+        "js.off-by-one"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the standard set of inputs that pins a condition.",
+      "lessonId": "v1-l05",
+      "type": "recall",
+      "promptMarkdown": "You have a branch that accepts weights from 0 to 99 inclusive. Which inputs do you test, and why is a value like 50 nearly worthless here?",
+      "answerMarkdown": "Test `0` (first accepted), `99` (last accepted), `100` (first rejected) and `-1` (below the range), plus the empty or degenerate case if the surrounding code has one. `50` passes whether the condition is `< 100`, `<= 100` or `< 99`, so it distinguishes nothing.",
+      "explanationMarkdown": "A test only earns its place if some plausible wrong implementation fails it. Middle-of-range values fail almost nothing.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.boundaries"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c010",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "A gap in an if/else chain",
+      "conceptIds": [
+        "js.branching",
+        "js.boundaries"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Find the input that matches no branch.",
+      "lessonId": "v1-l05",
+      "type": "debugging",
+      "promptMarkdown": "```js\nif (score < 40) return 'fail';\nelse if (score > 40 && score < 70) return 'pass';\nelse if (score >= 70) return 'merit';\nreturn 'unknown';\n```\n\nWhich input reaches `'unknown'`, and what does that tell you about the specification?",
+      "answerMarkdown": "Exactly `40`. It is not below 40, not strictly above 40, and not at least 70, so it falls through every branch. The specification never said which side of the boundary 40 belongs to, and the code quietly invented a fourth outcome instead of forcing that question.",
+      "explanationMarkdown": "Adjacent conditions should share their boundary — `< 40` then `< 70` — so no value can land between them. A catch-all return is a useful safety net but a terrible place to discover a missing rule.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "exactly-forty",
+            "textMarkdown": "A score of exactly 40, because `< 40` and `> 40` leave it out and it is below 70.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The gap is one value wide, which is why nobody notices it in testing."
+          },
+          {
+            "id": "seventy",
+            "textMarkdown": "A score of exactly 70, because `< 70` excludes it.",
+            "correct": false,
+            "explanationMarkdown": "The third branch accepts `>= 70`, so 70 returns 'merit'."
+          },
+          {
+            "id": "negative",
+            "textMarkdown": "Any negative score, because none of the branches mention negatives.",
+            "correct": false,
+            "explanationMarkdown": "A negative score is below 40, so the first branch already claims it."
+          }
+        ]
+      },
+      "primaryConceptId": "js.branching"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c011",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What makes a function pure",
+      "conceptIds": [
+        "js.purity",
+        "js.functions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the two conditions and why they are worth having.",
+      "lessonId": "v1-l06",
+      "type": "recall",
+      "promptMarkdown": "State the two conditions a pure function satisfies, and name two practical benefits that follow.",
+      "answerMarkdown": "Its result depends only on its arguments, and calling it changes nothing observable outside itself.\n\nBenefits: it can be tested with a single call and no arrangement, and it can be called twice — or cached, or moved — without changing behaviour.",
+      "explanationMarkdown": "Purity is not a moral position. It is a way of shrinking how much of the program you must hold in your head to predict one call.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.purity"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c012",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Applying purity to an unfamiliar helper",
+      "conceptIds": [
+        "js.purity",
+        "js.scope"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the rule to code you have not seen before.",
+      "lessonId": "v1-l06",
+      "type": "transfer",
+      "promptMarkdown": "`function nextInvoiceNumber() { lastInvoice += 1; return 'INV-' + lastInvoice; }` sits in a module beside `let lastInvoice = 0`. Is it pure? Should it be? What would you do with it?",
+      "answerMarkdown": "It is impure twice over: it reads outside state and it changes it. It also cannot be pure, because generating a never-repeating number is inherently stateful. The right move is not to purify it but to isolate it: keep this one small impure function at the edge, and keep everything that formats, validates or prices an invoice pure and taking the number as an argument.",
+      "explanationMarkdown": "The goal is never zero side effects — it is few side effects, in named places, surrounded by code that is easy to reason about.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.purity"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v1-a02",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Values and control flow placement check",
+      "conceptIds": [
+        "js.coercion",
+        "js.truthiness",
+        "js.equality",
+        "js.boundaries",
+        "js.off-by-one",
+        "js.scope",
+        "js.purity"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering chapter 2, using scenarios that do not appear in the lesson exercises.",
+      "chapterId": "v1-ch02",
+      "items": [
+        {
+          "id": "v1-a02-i1",
+          "objectiveIds": [
+            "js.truthiness",
+            "js.coercion"
+          ],
+          "critical": true,
+          "promptMarkdown": "A stock check reads `if (!item.remaining) { markSoldOut(item); }`. Which stock values cause an item to be marked sold out?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "zero-and-absent",
+                "textMarkdown": "`0`, and also `null`, `undefined`, `''` or `NaN` — that is, a genuinely unknown stock level is treated exactly like a known zero.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The check conflates 'we know there are none' with 'we do not know', which are different situations for a shop."
+              },
+              {
+                "id": "only-zero",
+                "textMarkdown": "Only `0`, because that is the only falsy number.",
+                "correct": false,
+                "explanationMarkdown": "`NaN` is also a falsy number, and non-numeric values such as `null` and `undefined` are falsy too."
+              },
+              {
+                "id": "negative-too",
+                "textMarkdown": "`0` and any negative number, since neither represents available stock.",
+                "correct": false,
+                "explanationMarkdown": "Negative numbers are truthy. A stock level of `-3` would pass this check as available, which is its own bug."
+              },
+              {
+                "id": "never",
+                "textMarkdown": "None; `!` on a number is a type error.",
+                "correct": false,
+                "explanationMarkdown": "`!` converts any value to a boolean and negates it. It never throws."
+              }
+            ]
+          },
+          "explanationMarkdown": "Truthiness collapses several distinct situations into one branch. `item.remaining === 0` says what this code means, and leaves the missing-data case to be handled deliberately."
+        },
+        {
+          "id": "v1-a02-i2",
+          "objectiveIds": [
+            "js.boundaries",
+            "js.off-by-one"
+          ],
+          "critical": true,
+          "promptMarkdown": "A page size of 20 is used as `rows.slice(page * 20, page * 20 + 20)` with a zero-based `page`. For `page = 2`, which rows are returned?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "indices-40-to-59",
+                "textMarkdown": "Indices 40 through 59 inclusive — twenty rows, because `slice` excludes its end index.",
+                "correct": true,
+                "explanationMarkdown": "Correct. `slice(40, 60)` starts at 40 and stops before 60."
+              },
+              {
+                "id": "indices-40-to-60",
+                "textMarkdown": "Indices 40 through 60 inclusive — twenty-one rows.",
+                "correct": false,
+                "explanationMarkdown": "That would be true if `slice` included its end index, which it does not; this is the classic one-too-many error."
+              },
+              {
+                "id": "indices-41-to-60",
+                "textMarkdown": "Indices 41 through 60, because the start index is exclusive.",
+                "correct": false,
+                "explanationMarkdown": "`slice` includes its start index and excludes its end index, not the other way round."
+              },
+              {
+                "id": "throws",
+                "textMarkdown": "It throws if the array has fewer than 60 rows.",
+                "correct": false,
+                "explanationMarkdown": "`slice` clamps to the array length and returns fewer rows, or an empty array. It does not throw."
+              }
+            ]
+          },
+          "explanationMarkdown": "Half-open ranges — start included, end excluded — are the convention throughout JavaScript, and they compose without overlap: page 2 ends exactly where page 3 begins."
+        },
+        {
+          "id": "v1-a02-i3",
+          "objectiveIds": [
+            "js.equality",
+            "js.coercion"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which single comparison is true?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "null-loose-undefined",
+                "textMarkdown": "`null == undefined`",
+                "correct": true,
+                "explanationMarkdown": "Correct. Loose equality treats `null` and `undefined` as equal to each other and to nothing else."
+              },
+              {
+                "id": "null-strict-undefined",
+                "textMarkdown": "`null === undefined`",
+                "correct": false,
+                "explanationMarkdown": "They are two distinct values of two distinct types, so strict equality is false."
+              },
+              {
+                "id": "nan-self",
+                "textMarkdown": "`NaN === NaN`",
+                "correct": false,
+                "explanationMarkdown": "`NaN` is the one value not equal to itself; use `Number.isNaN(value)` to detect it."
+              },
+              {
+                "id": "null-zero",
+                "textMarkdown": "`null == 0`",
+                "correct": false,
+                "explanationMarkdown": "`null` is not converted to a number by `==`; this comparison is false, which surprises many people."
+              }
+            ]
+          },
+          "explanationMarkdown": "`== null` is the one loose comparison worth keeping, because its rule is exactly 'null or undefined' and nothing else."
+        },
+        {
+          "id": "v1-a02-i4",
+          "objectiveIds": [
+            "js.scope"
+          ],
+          "critical": false,
+          "promptMarkdown": "```js\nfunction makeLabels(names) {\n  const out = [];\n  for (let k = 0; k < names.length; k += 1) {\n    out.push(function () { return names[k]; });\n  }\n  return out;\n}\n```\n\nWhat does `makeLabels(['a','b'])[0]()` return, and what would it return if `let k` were `var k`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a-then-undefined",
+                "textMarkdown": "`'a'` with `let`; `undefined` with `var`, because the single shared `k` has reached 2 by the time the function runs.",
+                "correct": true,
+                "explanationMarkdown": "Correct. `names[2]` on a two-element array is `undefined`."
+              },
+              {
+                "id": "a-both",
+                "textMarkdown": "`'a'` in both cases; the declaration keyword does not affect what a closure sees.",
+                "correct": false,
+                "explanationMarkdown": "It affects how many bindings exist, which is precisely what the closure sees."
+              },
+              {
+                "id": "throws-var",
+                "textMarkdown": "`'a'` with `let`; with `var` it throws, because `k` is out of scope after the loop.",
+                "correct": false,
+                "explanationMarkdown": "`var` is function-scoped, so `k` is still in scope after the loop — that is the whole problem."
+              },
+              {
+                "id": "b-both",
+                "textMarkdown": "`'b'` in both cases, because closures capture the last value assigned.",
+                "correct": false,
+                "explanationMarkdown": "Closures capture the binding, not 'the last value'. With `let` there is a separate binding per iteration."
+              }
+            ]
+          },
+          "explanationMarkdown": "The functions are identical in both versions. Only the number of `k` bindings differs, and that is enough to change the answer."
+        },
+        {
+          "id": "v1-a02-i5",
+          "objectiveIds": [
+            "js.purity",
+            "js.functions"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which of these functions is pure?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "sum-of-args",
+                "textMarkdown": "`function sum(a, b) { const t = a + b; return t; }`",
+                "correct": true,
+                "explanationMarkdown": "Correct. It reads only its arguments, and its local variable is invisible to everyone else."
+              },
+              {
+                "id": "reads-clock",
+                "textMarkdown": "`function isExpired(order) { return order.dueAt < Date.now(); }`",
+                "correct": false,
+                "explanationMarkdown": "The clock is outside state, so the same order can give different answers at different times. Pass the current time in as an argument."
+              },
+              {
+                "id": "pushes-to-arg",
+                "textMarkdown": "`function tag(list, label) { list.push(label); return list; }`",
+                "correct": false,
+                "explanationMarkdown": "It changes the array the caller owns, which is an observable effect outside the function."
+              },
+              {
+                "id": "logs",
+                "textMarkdown": "`function area(w, h) { console.log('area', w, h); return w * h; }`",
+                "correct": false,
+                "explanationMarkdown": "The return value is determined by the arguments, but writing to the console is still an effect on the world outside the call."
+              }
+            ]
+          },
+          "explanationMarkdown": "The two tests are: does anything other than the arguments affect the result, and does anything outside the function change as a result of calling it."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

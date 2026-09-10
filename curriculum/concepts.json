@@ -1,0 +1,695 @@
+{
+  "schemaVersion": 1,
+  "concepts": [
+    {
+      "id": "web.request-response",
+      "title": "Request and response cycle",
+      "description": "How a browser request travels to a server and what comes back in the response.",
+      "release": "v1"
+    },
+    {
+      "id": "web.client-vs-server",
+      "title": "Client and server responsibility",
+      "description": "Deciding which work belongs in the browser and which belongs on the server.",
+      "release": "v1"
+    },
+    {
+      "id": "git.working-tree",
+      "title": "Reading the working tree",
+      "description": "Identifying which files changed before deciding what to commit.",
+      "release": "v1"
+    },
+    {
+      "id": "git.commit-sequence",
+      "title": "Safe commit sequencing",
+      "description": "Choosing an order of commits that keeps each step reviewable and revertible.",
+      "release": "v1"
+    },
+    {
+      "id": "npm.scripts",
+      "title": "Project scripts",
+      "description": "Running and diagnosing package scripts that build, test and start a project.",
+      "release": "v1"
+    },
+    {
+      "id": "debug.stack-trace",
+      "title": "Reading a stack trace",
+      "description": "Extracting the failing call, file and line from a runtime error.",
+      "release": "v1"
+    },
+    {
+      "id": "debug.next-step",
+      "title": "Choosing the next diagnostic",
+      "description": "Picking the observation that best narrows down where a defect lives.",
+      "release": "v1"
+    },
+    {
+      "id": "debug.minimal-reproduction",
+      "title": "Minimal reproduction",
+      "description": "Reducing a failure to the smallest input and code path that still shows it.",
+      "release": "v1"
+    },
+    {
+      "id": "js.coercion",
+      "title": "Type coercion",
+      "description": "How JavaScript converts values between types during comparison and arithmetic.",
+      "release": "v1"
+    },
+    {
+      "id": "js.equality",
+      "title": "Equality comparison",
+      "description": "The difference between loose and strict equality and when each surprises you.",
+      "release": "v1"
+    },
+    {
+      "id": "js.truthiness",
+      "title": "Truthiness",
+      "description": "Which values are falsy and why a truthiness check can hide a real value like 0.",
+      "release": "v1"
+    },
+    {
+      "id": "js.branching",
+      "title": "Branching",
+      "description": "Selecting a code path from a condition and predicting which branch runs.",
+      "release": "v1"
+    },
+    {
+      "id": "js.boundaries",
+      "title": "Boundary conditions",
+      "description": "Reasoning about the first and last values a condition accepts.",
+      "release": "v1"
+    },
+    {
+      "id": "js.off-by-one",
+      "title": "Off-by-one errors",
+      "description": "Recognising conditions that include or exclude one value too many.",
+      "release": "v1"
+    },
+    {
+      "id": "js.functions",
+      "title": "Functions and return values",
+      "description": "Defining functions that take inputs and return results rather than relying on side effects.",
+      "release": "v1"
+    },
+    {
+      "id": "js.scope",
+      "title": "Scope and closures",
+      "description": "Which bindings a piece of code can see and how long they live.",
+      "release": "v1"
+    },
+    {
+      "id": "js.purity",
+      "title": "Pure functions",
+      "description": "Functions whose result depends only on their inputs and which change nothing else.",
+      "release": "v1"
+    },
+    {
+      "id": "js.mutation",
+      "title": "Accidental mutation",
+      "description": "Changing a caller's data by accident and the defects that follow.",
+      "release": "v1"
+    },
+    {
+      "id": "js.object-access",
+      "title": "Reading nested records",
+      "description": "Navigating nested object and array structures safely.",
+      "release": "v1"
+    },
+    {
+      "id": "js.immutable-update",
+      "title": "Immutable updates",
+      "description": "Producing a changed copy of a record instead of editing the original.",
+      "release": "v1"
+    },
+    {
+      "id": "js.shallow-copy",
+      "title": "Shallow copying",
+      "description": "Why a spread copies one level only and what that means for nested data.",
+      "release": "v1"
+    },
+    {
+      "id": "js.array-filter",
+      "title": "Selecting with filter",
+      "description": "Producing a new array of matching records without changing the input.",
+      "release": "v1"
+    },
+    {
+      "id": "js.array-map",
+      "title": "Transforming with map",
+      "description": "Producing a new array by transforming every element.",
+      "release": "v1"
+    },
+    {
+      "id": "js.array-reduce",
+      "title": "Aggregating with reduce",
+      "description": "Folding a collection into a single accumulated result.",
+      "release": "v1"
+    },
+    {
+      "id": "js.collection-choice",
+      "title": "Choosing a collection",
+      "description": "Deciding between an array, an object map and a Set for a lookup.",
+      "release": "v1"
+    },
+    {
+      "id": "js.grouping",
+      "title": "Grouping and counting",
+      "description": "Building keyed summaries from a flat list of records.",
+      "release": "v1"
+    },
+    {
+      "id": "js.missing-record",
+      "title": "Missing record assumptions",
+      "description": "Handling the case where a lookup finds nothing.",
+      "release": "v1"
+    },
+    {
+      "id": "js.promises",
+      "title": "Promises",
+      "description": "Representing a value that is not available yet and reacting when it settles.",
+      "release": "v1"
+    },
+    {
+      "id": "js.async-await",
+      "title": "async and await",
+      "description": "Writing sequential-looking asynchronous code and knowing what await suspends.",
+      "release": "v1"
+    },
+    {
+      "id": "js.missing-await",
+      "title": "Missing await",
+      "description": "Spotting a forgotten await and the silent wrong result it produces.",
+      "release": "v1"
+    },
+    {
+      "id": "js.error-propagation",
+      "title": "Asynchronous error propagation",
+      "description": "How a rejection travels through async functions and where to catch it.",
+      "release": "v1"
+    },
+    {
+      "id": "js.race-condition",
+      "title": "Race conditions",
+      "description": "Two operations whose interleaving changes the result.",
+      "release": "v1"
+    },
+    {
+      "id": "js.cancellation",
+      "title": "Cancellation",
+      "description": "Abandoning work that is no longer needed and ignoring its result.",
+      "release": "v1"
+    },
+    {
+      "id": "http.methods",
+      "title": "HTTP methods",
+      "description": "Matching GET, POST, PATCH, PUT and DELETE to the operation being performed.",
+      "release": "v1"
+    },
+    {
+      "id": "http.status-codes",
+      "title": "Status codes",
+      "description": "Choosing a response status that accurately describes the outcome.",
+      "release": "v1"
+    },
+    {
+      "id": "http.validation-response",
+      "title": "Validation responses",
+      "description": "Reporting invalid input in a way a client can act on.",
+      "release": "v1"
+    },
+    {
+      "id": "http.retryable-failure",
+      "title": "Retryable failures",
+      "description": "Distinguishing failures worth retrying from failures that will always fail.",
+      "release": "v1"
+    },
+    {
+      "id": "http.error-mapping",
+      "title": "Mapping errors to responses",
+      "description": "Turning an internal failure into a safe, useful HTTP response.",
+      "release": "v1"
+    },
+    {
+      "id": "ui.stale-response",
+      "title": "Stale responses",
+      "description": "Discarding a slow response that a newer request has superseded.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.types",
+      "title": "Type annotations",
+      "description": "Describing the shape of values so the compiler can check your work.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.nullability",
+      "title": "Nullability",
+      "description": "Modelling values that may be absent and handling them before use.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.optional-access",
+      "title": "Optional access",
+      "description": "Reading possibly-missing properties without hiding a real defect.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.unions",
+      "title": "Union types",
+      "description": "Modelling a value that is one of several alternatives.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.narrowing",
+      "title": "Narrowing",
+      "description": "Using checks that let the compiler know which alternative you have.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.exhaustiveness",
+      "title": "Exhaustive handling",
+      "description": "Proving every case of a union is handled, so new cases fail the build.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.unsafe-cast",
+      "title": "Unsafe casts",
+      "description": "How an assertion silences the compiler without making the code correct.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.interfaces",
+      "title": "Interfaces and shapes",
+      "description": "Describing reusable object contracts.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.structural-typing",
+      "title": "Structural typing",
+      "description": "Why compatibility depends on shape rather than on a declared name.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.generics-constraint",
+      "title": "Constrained generics",
+      "description": "Writing one helper that works across types while keeping its guarantees.",
+      "release": "v1"
+    },
+    {
+      "id": "ts.compile-vs-runtime",
+      "title": "Compile time versus runtime",
+      "description": "Why type checking cannot validate data that arrives at runtime.",
+      "release": "v1"
+    },
+    {
+      "id": "html.semantics",
+      "title": "Semantic HTML",
+      "description": "Choosing elements for their meaning so browsers and assistive tech behave well.",
+      "release": "v1"
+    },
+    {
+      "id": "html.forms",
+      "title": "Native form behaviour",
+      "description": "What the browser does for free with forms, submission and validation.",
+      "release": "v1"
+    },
+    {
+      "id": "html.labels",
+      "title": "Labels and controls",
+      "description": "Associating a visible label with the control it names.",
+      "release": "v1"
+    },
+    {
+      "id": "css.layout",
+      "title": "Layout",
+      "description": "Arranging content with flow, flexbox and grid.",
+      "release": "v1"
+    },
+    {
+      "id": "css.responsive",
+      "title": "Responsive layout",
+      "description": "Adapting a layout across viewport widths without breaking it.",
+      "release": "v1"
+    },
+    {
+      "id": "css.overflow",
+      "title": "Overflow and scrolling",
+      "description": "Containing wide content so the page itself never scrolls sideways.",
+      "release": "v1"
+    },
+    {
+      "id": "a11y.keyboard-navigation",
+      "title": "Keyboard navigation",
+      "description": "Reaching and operating every control without a pointer.",
+      "release": "v1"
+    },
+    {
+      "id": "a11y.color-only",
+      "title": "Colour-only signals",
+      "description": "Why meaning carried only by colour is invisible to some users.",
+      "release": "v1"
+    },
+    {
+      "id": "a11y.accessible-name",
+      "title": "Accessible names",
+      "description": "Giving a control a name assistive technology can announce usefully.",
+      "release": "v1"
+    },
+    {
+      "id": "a11y.focus",
+      "title": "Focus management",
+      "description": "Moving and showing focus so a keyboard user is never lost.",
+      "release": "v1"
+    },
+    {
+      "id": "react.components",
+      "title": "Components",
+      "description": "Splitting an interface into components with clear responsibilities.",
+      "release": "v1"
+    },
+    {
+      "id": "react.props",
+      "title": "Props",
+      "description": "Passing data down and keeping components reusable.",
+      "release": "v1"
+    },
+    {
+      "id": "react.keys",
+      "title": "List keys",
+      "description": "Giving list items stable identity so React updates them correctly.",
+      "release": "v1"
+    },
+    {
+      "id": "react.responsibility",
+      "title": "Component responsibility",
+      "description": "Deciding what one component should and should not own.",
+      "release": "v1"
+    },
+    {
+      "id": "react.state-updates",
+      "title": "State updates",
+      "description": "How a state update is queued and when the new value is visible.",
+      "release": "v1"
+    },
+    {
+      "id": "react.stale-closure",
+      "title": "Stale values in updates",
+      "description": "Reading an outdated value inside an update and how to avoid it.",
+      "release": "v1"
+    },
+    {
+      "id": "react.mutation",
+      "title": "State mutation",
+      "description": "Why editing state in place fails to re-render.",
+      "release": "v1"
+    },
+    {
+      "id": "react.effects",
+      "title": "Effects",
+      "description": "When code genuinely needs to run outside rendering.",
+      "release": "v1"
+    },
+    {
+      "id": "react.derived-state",
+      "title": "Derived state",
+      "description": "Computing a value during render instead of storing it.",
+      "release": "v1"
+    },
+    {
+      "id": "react.dependencies",
+      "title": "Effect dependencies",
+      "description": "Declaring what an effect depends on and the defects of getting it wrong.",
+      "release": "v1"
+    },
+    {
+      "id": "react.controlled-forms",
+      "title": "Controlled inputs",
+      "description": "Driving an input from state and keeping the two in step.",
+      "release": "v1"
+    },
+    {
+      "id": "react.validation",
+      "title": "Form validation",
+      "description": "Checking input and reporting problems next to the field.",
+      "release": "v1"
+    },
+    {
+      "id": "react.submission-state",
+      "title": "Submission state",
+      "description": "Preventing duplicate submits and showing progress honestly.",
+      "release": "v1"
+    },
+    {
+      "id": "react.loading-states",
+      "title": "Loading states",
+      "description": "Showing that data is on its way without flashing empty content.",
+      "release": "v1"
+    },
+    {
+      "id": "react.empty-states",
+      "title": "Empty states",
+      "description": "Distinguishing no data from not loaded yet and from failed.",
+      "release": "v1"
+    },
+    {
+      "id": "react.response-mapping",
+      "title": "Mapping server data",
+      "description": "Turning an API response into the shape the interface needs.",
+      "release": "v1"
+    },
+    {
+      "id": "react.stale-data",
+      "title": "Stale data",
+      "description": "Recognising when displayed data no longer matches the server.",
+      "release": "v1"
+    },
+    {
+      "id": "react.feature-composition",
+      "title": "Composing a feature",
+      "description": "Assembling a complete feature from its states and components.",
+      "release": "v1"
+    },
+    {
+      "id": "node.route-boundaries",
+      "title": "Route boundaries",
+      "description": "Where a request stops being HTTP and becomes business logic.",
+      "release": "v1"
+    },
+    {
+      "id": "node.handler-stages",
+      "title": "Handler stages",
+      "description": "The ordered work a request handler performs.",
+      "release": "v1"
+    },
+    {
+      "id": "node.parameter-parsing",
+      "title": "Parsing parameters",
+      "description": "Turning raw path and query strings into checked values.",
+      "release": "v1"
+    },
+    {
+      "id": "node.separation-of-concerns",
+      "title": "Separating route and logic",
+      "description": "Keeping business rules out of transport code.",
+      "release": "v1"
+    },
+    {
+      "id": "node.runtime-validation",
+      "title": "Runtime validation",
+      "description": "Checking untrusted input before it reaches your logic.",
+      "release": "v1"
+    },
+    {
+      "id": "node.invalid-input",
+      "title": "Classifying invalid input",
+      "description": "Deciding which inputs are malformed, unauthorised or simply not found.",
+      "release": "v1"
+    },
+    {
+      "id": "node.error-contracts",
+      "title": "Error contracts",
+      "description": "Returning errors in a documented, predictable shape.",
+      "release": "v1"
+    },
+    {
+      "id": "node.stack-trace-disclosure",
+      "title": "Stack trace disclosure",
+      "description": "Why internal failure detail must not reach the client.",
+      "release": "v1"
+    },
+    {
+      "id": "sql.keys",
+      "title": "Primary and foreign keys",
+      "description": "Identifying rows and linking them between tables.",
+      "release": "v1"
+    },
+    {
+      "id": "sql.relationships",
+      "title": "Relationships",
+      "description": "Modelling one-to-many and many-to-many links.",
+      "release": "v1"
+    },
+    {
+      "id": "sql.uniqueness",
+      "title": "Uniqueness constraints",
+      "description": "Letting the database enforce a rule the application cannot.",
+      "release": "v1"
+    },
+    {
+      "id": "sql.select",
+      "title": "Reading with SELECT",
+      "description": "Predicting which rows and columns a query returns.",
+      "release": "v1"
+    },
+    {
+      "id": "sql.ordering",
+      "title": "Deterministic ordering",
+      "description": "Why a query without a total order can return rows in any sequence.",
+      "release": "v1"
+    },
+    {
+      "id": "sql.pagination",
+      "title": "Pagination",
+      "description": "Returning bounded pages without dropping or repeating rows.",
+      "release": "v1"
+    },
+    {
+      "id": "sql.duplicates",
+      "title": "Duplicates and empties",
+      "description": "Checking a query against the empty and repeated-row cases.",
+      "release": "v1"
+    },
+    {
+      "id": "sql.migrations",
+      "title": "Migrations",
+      "description": "Changing a schema in ordered, repeatable steps.",
+      "release": "v1"
+    },
+    {
+      "id": "sql.transactions",
+      "title": "Transactions",
+      "description": "Grouping writes so they all take effect or none do.",
+      "release": "v1"
+    },
+    {
+      "id": "sql.partial-writes",
+      "title": "Partial write failure",
+      "description": "What breaks when a multi-step change stops halfway.",
+      "release": "v1"
+    },
+    {
+      "id": "auth.identity-vs-access",
+      "title": "Authentication versus authorisation",
+      "description": "Who you are compared with what you are allowed to do.",
+      "release": "v1"
+    },
+    {
+      "id": "auth.session-handling",
+      "title": "Sessions",
+      "description": "Keeping a signed-in user identified across requests.",
+      "release": "v1"
+    },
+    {
+      "id": "auth.resource-ownership",
+      "title": "Resource ownership",
+      "description": "Tying every record to the account allowed to see it.",
+      "release": "v1"
+    },
+    {
+      "id": "auth.ownership-check",
+      "title": "Ownership checks",
+      "description": "Where the check must live so it cannot be bypassed.",
+      "release": "v1"
+    },
+    {
+      "id": "auth.cross-user-access",
+      "title": "Cross-user access defects",
+      "description": "How a missing scope lets one account read another's data.",
+      "release": "v1"
+    },
+    {
+      "id": "auth.regression-cases",
+      "title": "Security regression tests",
+      "description": "Tests that would have caught the defect and stop it returning.",
+      "release": "v1"
+    },
+    {
+      "id": "auth.csrf",
+      "title": "Cross-site request forgery",
+      "description": "How a third-party page can make an authenticated request and how to stop it.",
+      "release": "v1"
+    },
+    {
+      "id": "auth.sensitive-logging",
+      "title": "Sensitive data in logs",
+      "description": "Keeping credentials and personal data out of diagnostics.",
+      "release": "v1"
+    },
+    {
+      "id": "auth.failed-login",
+      "title": "Failed sign-in handling",
+      "description": "Responding to bad credentials without leaking which part was wrong.",
+      "release": "v1"
+    },
+    {
+      "id": "test.boundary-cases",
+      "title": "Choosing boundary cases",
+      "description": "Picking the inputs most likely to expose a defect.",
+      "release": "v1"
+    },
+    {
+      "id": "test.testable-functions",
+      "title": "Writing testable code",
+      "description": "Shaping logic so it can be checked without heavy setup.",
+      "release": "v1"
+    },
+    {
+      "id": "test.mirroring-implementation",
+      "title": "Tests that mirror the code",
+      "description": "Why a test that repeats the implementation proves nothing.",
+      "release": "v1"
+    },
+    {
+      "id": "test.component-integration",
+      "title": "Component integration tests",
+      "description": "Checking a feature through the behaviour a user experiences.",
+      "release": "v1"
+    },
+    {
+      "id": "ops.request-id",
+      "title": "Request correlation",
+      "description": "Following one request through logs using a shared identifier.",
+      "release": "v1"
+    },
+    {
+      "id": "ops.configuration",
+      "title": "Configuration",
+      "description": "Supplying environment-specific values without hard-coding them.",
+      "release": "v1"
+    },
+    {
+      "id": "ops.log-hygiene",
+      "title": "Useful logs",
+      "description": "Logging what helps diagnosis and nothing that must stay secret.",
+      "release": "v1"
+    },
+    {
+      "id": "ops.deployment-order",
+      "title": "Deployment ordering",
+      "description": "Sequencing checks, migrations and release so a deploy is safe.",
+      "release": "v1"
+    },
+    {
+      "id": "ops.failed-deployment",
+      "title": "Failed deployments",
+      "description": "Diagnosing a release that did not come up healthy.",
+      "release": "v1"
+    },
+    {
+      "id": "ops.rollback",
+      "title": "Rollback and recovery",
+      "description": "Restoring service and understanding what a rollback does to data.",
+      "release": "v1"
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.stat {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.statValue {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.statLabel {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.muted { color: var(--text-muted); }
+
+.chips { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+
+.filters {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+/* Wide table scrolls inside its own container, not the page. */
+.tableWrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.tableWrap table { min-width: 640px; }
+
+.conceptCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.conceptTitle { color: var(--text); }
+
+.conceptId {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}

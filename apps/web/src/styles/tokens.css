@@ -1,0 +1,102 @@
+/*
+ * Design tokens — a quiet developer workspace (spec 4.1).
+ *
+ * One restrained accent. Every text pair below was measured against WCAG AA
+ * (>=4.5:1 for text, >=3:1 for control boundaries) rather than assumed; the
+ * measured ratios are noted beside each value.
+ *
+ * Light is defined on bare :root so a page always has a complete palette.
+ * Dark is redefined twice: under prefers-color-scheme (guarded so an explicit
+ * light choice wins) and under [data-theme="dark"] (so the toggle wins both
+ * ways). No colour has its only definition inside a media query.
+ */
+
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --surface-2: #f0f0ed;
+  --text: #1b1b19;          /* 16.08:1 on bg, 17.25:1 on surface */
+  --text-muted: #5c5b57;    /*  6.34:1 on bg,  6.80:1 on surface */
+  --accent: #1f5aa6;        /*  6.84:1 on surface */
+  --accent-contrast: #ffffff;
+  --accent-soft: #e8eff9;
+  --danger: #a3241c;        /*  7.43:1 on surface */
+  --danger-soft: #fbeceb;
+  --success: #1f6b3f;       /*  6.50:1 on surface */
+  --success-soft: #e8f4ec;
+  --warning: #7a5300;       /*  6.85:1 on surface */
+  --warning-soft: #fbf1dc;
+
+  /* Decorative separators. Not the sole indicator of any control. */
+  --border: #c9c8c3;
+  /* Control boundaries (inputs, buttons): 5.42:1 on surface. */
+  --border-strong: #6b6a65;
+  --focus: #1f5aa6;
+
+  --radius: 6px;
+  --radius-sm: 4px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.10);
+
+  /* Minimum touch target for primary actions (spec 4.5). */
+  --tap: 44px;
+  --sidebar-w: 236px;
+  --bottomnav-h: 60px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15161a;
+    --surface: #1d1f24;
+    --surface-2: #24272d;
+    --text: #e9e9e6;        /* 14.86:1 on bg, 13.55:1 on surface */
+    --text-muted: #a6a7ac;  /*  7.53:1 on bg,  6.87:1 on surface */
+    --accent: #8ab4f8;      /*  7.82:1 on surface */
+    --accent-contrast: #0d1117;
+    --accent-soft: #1b2a3f;
+    --danger: #f2938c;      /*  7.32:1 on surface */
+    --danger-soft: #3a1f1d;
+    --success: #79d095;     /*  8.85:1 on surface */
+    --success-soft: #16301f;
+    --warning: #e0b34d;     /*  8.42:1 on surface */
+    --warning-soft: #332a13;
+    --border: #3a3d44;
+    --border-strong: #787c85; /* 3.94:1 on surface */
+    --focus: #8ab4f8;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #15161a;
+  --surface: #1d1f24;
+  --surface-2: #24272d;
+  --text: #e9e9e6;
+  --text-muted: #a6a7ac;
+  --accent: #8ab4f8;
+  --accent-contrast: #0d1117;
+  --accent-soft: #1b2a3f;
+  --danger: #f2938c;
+  --danger-soft: #3a1f1d;
+  --success: #79d095;
+  --success-soft: #16301f;
+  --warning: #e0b34d;
+  --warning-soft: #332a13;
+  --border: #3a3d44;
+  --border-strong: #787c85;
+  --focus: #8ab4f8;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.6);
+}

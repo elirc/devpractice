@@ -1,0 +1,130 @@
+.filters {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+
+.filter {
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.filterActive {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.track { margin-bottom: var(--space-6); }
+
+.trackDescription {
+  color: var(--text-muted);
+  max-width: 70ch;
+}
+
+.chapterList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chapterCard { margin-bottom: var(--space-3); }
+
+.chapterHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.chapterTitle { margin: 0 0 var(--space-2); }
+
+.chapterTitle a { color: var(--text); text-decoration: none; }
+.chapterTitle a:hover { text-decoration: underline; }
+
+.chips { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+
+.progressText {
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.bar {
+  height: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.barFill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* ------------------------------ chapter page ----------------------------- */
+
+.breadcrumb {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  margin-bottom: var(--space-3);
+}
+
+.breadcrumb a { color: var(--text-muted); }
+
+.objectives { padding-left: var(--space-5); }
+
+.lessonList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.lessonRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-2);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+
+.lessonLink {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+}
+
+.lessonLink:hover { text-decoration: underline; }
+
+.lessonMeta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.prereqNote {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+}

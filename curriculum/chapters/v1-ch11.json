@@ -1,0 +1,1449 @@
+{
+  "note": "Chapter 11 — Authentication and permissions (L31 identity vs access, L32 resource ownership, L33 safe request handling). Auth cannot be exercised end to end in the browser sandbox, so handlers are assessed by reading and the genuinely pure decision logic is assessed with function cases. missionIds is empty: m03-ownership-defect is authored elsewhere and may not be in the package. prerequisiteIds carry CONCEPT ids, which is what the validator resolves them against.",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch11",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Authentication and permissions",
+      "conceptIds": [
+        "auth.identity-vs-access",
+        "auth.session-handling",
+        "auth.resource-ownership",
+        "auth.ownership-check",
+        "auth.cross-user-access",
+        "auth.regression-cases",
+        "auth.csrf",
+        "auth.sensitive-logging",
+        "auth.failed-login"
+      ],
+      "prerequisiteIds": [
+        "node.handler-stages",
+        "sql.keys"
+      ],
+      "bodyMarkdown": "Larkfield Timesheets lets contractors submit hours and lets agency staff approve them. Two questions have to be answered on every request, and they are not the same question.\n\n**Who is making this request?** That is authentication. A session cookie, a signed token, a sign-in form — all of it exists to turn an anonymous connection into a known account.\n\n**Is this account allowed to do this, to this record?** That is authorisation. It depends on the record, not just on the account, and it is the question that is most often skipped, because a signed-in user feels like an authorised one.\n\nAlmost every serious access bug lives in that gap. A handler reads `timesheetId` from the path, loads it, and returns it — correct for the owner, and a data breach for everyone else. The defect is invisible in normal use, because the interface only ever links a contractor to their own rows; it becomes visible the moment somebody edits the number in the address bar. Broken access control has been the top entry in the OWASP Top Ten since 2021 for exactly this reason.\n\nThe chapter builds three habits. Scope every query by owner rather than filtering afterwards, so the database never returns a row the caller may not see. Put the check where it cannot be skipped, and never derive the owner from anything the client sent. And handle the awkward edges deliberately: what a failed sign-in may say, what a log line may contain, and why a cookie-authenticated write needs more than a cookie.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v1-l31",
+        "v1-l32",
+        "v1-l33"
+      ],
+      "assessmentId": "v1-a11",
+      "objectiveIds": [
+        "auth.identity-vs-access",
+        "auth.session-handling",
+        "auth.resource-ownership",
+        "auth.ownership-check",
+        "auth.cross-user-access",
+        "auth.regression-cases",
+        "auth.csrf",
+        "auth.sensitive-logging",
+        "auth.failed-login"
+      ],
+      "missionIds": [
+        "m03-ownership-defect"
+      ],
+      "sortOrder": 10
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l31",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Identity is not access",
+      "conceptIds": [
+        "auth.identity-vs-access",
+        "auth.session-handling"
+      ],
+      "prerequisiteIds": [
+        "node.handler-stages"
+      ],
+      "bodyMarkdown": "**Authentication** establishes who the caller is. **Authorisation** decides what that caller may do. Collapsing them is the most expensive one-word mistake in web engineering, and it usually sounds like: *the user is logged in, so we know they can see this.*\n\nThe HTTP vocabulary keeps the two apart. `401 Unauthorized` means *I do not know who you are* — the credential is missing, expired or invalid, and presenting a good one may change the answer. `403 Forbidden` means *I know exactly who you are and the answer is still no.* Sending 401 to a signed-in contractor who tried to approve their own timesheet is a small lie that sends the browser to a sign-in page for a session that was never the problem.\n\nA **session** is the mechanism that carries identity between requests. The server stores something — a session record, or a signed token — and the browser returns a cookie on each request. What matters for this lesson is what the session may be trusted for. A session says *this is account 41*. It does not say *account 41 may edit timesheet 900*. That second fact depends on the timesheet, and it therefore cannot be cached in the cookie.\n\nThree properties make a session cookie safe to rely on for the first fact: `HttpOnly`, so page scripts cannot read it and a cross-site scripting bug cannot steal it; `Secure`, so it never travels over plain HTTP; and `SameSite`, which limits when the browser attaches it to requests from other sites. Note what none of them do: they protect the *credential*, not the *decision*. Every one of them can be perfectly configured on a server that still hands timesheet 900 to the wrong contractor.\n\nA useful discipline is to write the access decision as a function with no side effects: `canView(user, record)`. Making it a function forces you to name every input the decision depends on — the account, its role, its status, and the record's owner — and it makes the decision testable without a browser, a session or a database.\n\nOne subtlety worth settling early: **suspension outranks role**. If a suspended administrator still passes an `isAdmin` shortcut placed above the suspension check, then disabling an account does not disable it. Order the conditions so the denials come first.",
+      "chapterId": "v1-ch11",
+      "sortOrder": 0,
+      "objectives": [
+        "Distinguish authentication from authorisation and choose 401 or 403 correctly.",
+        "State what a session may be trusted to prove and what it may not.",
+        "Express an access decision as a pure, testable function of the user and the record."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "The two questions, separated, in one Larkfield handler:\n\n```js\napp.get('/timesheets/:id', async (request, reply) => {\n  // 1. Authentication: who is calling?\n  const user = request.session?.user;\n  if (!user) {\n    return reply.code(401).send({ error: 'authentication_required' });\n  }\n\n  // 2. Load the record BEFORE deciding, because the decision depends on it.\n  const timesheet = await timesheets.findById(request.params.id);\n  if (!timesheet) {\n    return reply.code(404).send({ error: 'not_found' });\n  }\n\n  // 3. Authorisation: may THIS user see THIS record?\n  if (!canView(user, timesheet)) {\n    return reply.code(403).send({ error: 'forbidden' });\n  }\n\n  return reply.send(timesheet);\n});\n```\n\nAnd the decision itself, with nothing in it that needs a server:\n\n```js\nfunction canView(user, record) {\n  if (!user || !record) return false;\n  if (user.status === 'suspended') return false;   // denials first\n  if (user.role === 'admin') return true;\n  return record.ownerId === user.id;\n}\n```\n\nWhy this shape:\n\n- The 401 branch is about the *credential*; the 403 branch is about the *record*. Two questions, two answers, two status codes.\n- `canView` takes both the user and the record. A permission function that takes only the user cannot express ownership, and ownership is where the real rules live.\n- The suspension check sits above the admin shortcut, so suspending an administrator actually suspends them.\n- Because `canView` is pure, its test file is a table of user-and-record pairs — including the awkward ones, like a suspended admin — and it runs in milliseconds with no session and no database.\n\nA note on 403 versus 404: replying 403 confirms that timesheet 900 exists. When the identifiers are guessable and their existence is itself sensitive, answering 404 for both *missing* and *not yours* leaks less. It is a deliberate trade against debuggability, and the point is to choose it on purpose rather than by accident.",
+      "commonMistakes": [
+        "Treating a valid session as permission, so any signed-in account can read any record by changing the id in the URL.",
+        "Returning 401 to a signed-in user who lacks permission, which bounces them to a sign-in page that cannot help.",
+        "Putting the role shortcut above the suspension check, so suspending a privileged account does not actually stop it.",
+        "Writing the permission function as canView(user) with no record argument, which makes ownership impossible to express.",
+        "Believing HttpOnly, Secure and SameSite cookie flags are an authorisation control rather than protection for the credential itself.",
+        "Deciding access from a role name copied into the session at sign-in, so a revoked role stays effective until the session expires."
+      ],
+      "summaryMarkdown": "Authentication answers who; authorisation answers whether — and only the second one depends on the record. 401 means the credential is missing or invalid, 403 means the answer is no for a known caller. A session proves identity and nothing else. Write access decisions as pure functions of the user and the record, order denials before shortcuts, and treat cookie flags as protection for the credential rather than as a permission model.",
+      "exerciseIds": [
+        "v1-e091",
+        "v1-e092",
+        "v1-e093"
+      ],
+      "reviewCardIds": [
+        "v1-c061",
+        "v1-c062"
+      ],
+      "references": [
+        {
+          "label": "OWASP: Authorization Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
+        },
+        {
+          "label": "OWASP Top Ten: A01:2021 Broken Access Control",
+          "url": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+        },
+        {
+          "label": "MDN: HTTP 403 Forbidden",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e091",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the status code sent to a signed-in caller",
+      "conceptIds": [
+        "auth.identity-vs-access",
+        "auth.session-handling"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Pick the response that describes the outcome accurately, and notice what the wrong ones tell the client to do.",
+      "lessonId": "v1-l31",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "A Larkfield contractor is signed in with a valid, unexpired session. They send `POST /timesheets/900/approve`. Timesheet 900 exists and belongs to them, but only agency staff may approve a timesheet.\n\nWhich response is correct, and why?",
+      "hints": [
+        "Ask what the client could usefully do differently after each candidate response.",
+        "The session is valid, so nothing about the caller's identity is in question. Only the action is refused.",
+        "`401` invites the client to authenticate again, which cannot help here. `403` says the server knows who you are and the answer is still no."
+      ],
+      "solution": {
+        "modelAnswer": "403 Forbidden: the caller is authenticated, so the refusal is about the action, not the credential.",
+        "explanationMarkdown": "401 and 403 are advice as much as they are labels. A 401 tells the client that presenting a (better) credential may change the answer, and browsers and client libraries act on that by redirecting to sign-in or refreshing a token. Sending it to a contractor with a perfectly good session starts a loop that can never succeed and hides the real reason.\n\n403 says the identity is established and the action is still refused. 404 is a defensible alternative when the existence of the record is itself sensitive, but it is not the case here: the contractor owns timesheet 900 and can already see it. 200 with an error message inside is the worst option, because every layer that inspects status codes — monitoring, retries, caches — is told the request succeeded."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "403",
+            "textMarkdown": "`403 Forbidden` — the caller is known and the action is refused.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Authentication succeeded; authorisation failed. The client should stop, not re-authenticate."
+          },
+          {
+            "id": "401",
+            "textMarkdown": "`401 Unauthorized` — the user is not authorised for this action.",
+            "correct": false,
+            "explanationMarkdown": "The name is misleading: 401 means *unauthenticated*. Sending it here tells the client its session is bad, so it discards a working session and asks the contractor to sign in again for nothing."
+          },
+          {
+            "id": "404",
+            "textMarkdown": "`404 Not Found` — never confirm that a record exists.",
+            "correct": false,
+            "explanationMarkdown": "Hiding existence is a real technique, but it is for records the caller cannot see at all. This contractor owns timesheet 900 and views it daily, so a 404 is simply a confusing lie."
+          },
+          {
+            "id": "200",
+            "textMarkdown": "`200 OK` with `{ approved: false, reason: 'not permitted' }` so the interface can show a friendly message.",
+            "correct": false,
+            "explanationMarkdown": "The status line is the machine-readable outcome. Reporting success means monitoring counts a refusal as a healthy request, and any caching or retry layer treats the body as a real result."
+          }
+        ]
+      },
+      "primaryConceptId": "auth.identity-vs-access",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e092",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Write the access decision as a pure function",
+      "conceptIds": [
+        "auth.identity-vs-access",
+        "auth.session-handling"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The rules an access decision applies are ordinary logic. Extracting them makes them testable, and makes the order of the conditions something you can see.",
+      "lessonId": "v1-l31",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Implement `canView(user, record)` for Larkfield Timesheets. Return `true` only when the request should be allowed.\n\nThe rules, in the order the business states them:\n\n1. If `user` is `null` (nobody is signed in) or `record` is `null`, the answer is `false`.\n2. A user whose `status` is `'suspended'` may view nothing at all — **this outranks every other rule, including the administrator role**.\n3. A user whose `role` is `'admin'` may view any record.\n4. Otherwise a user may view a record only when `record.ownerId` equals their own `id`.\n\nCompare ids strictly: the string `'41'` is not the number `41`. Do not modify either argument.",
+      "hints": [
+        "Write the rules as a sequence of early returns rather than one large boolean expression; the order then becomes visible in the code.",
+        "The order is the point. A suspended administrator must be refused, so the suspension test has to run before the role test — putting them the other way round is the classic version of this bug.",
+        "Guard the missing arguments first, then `if (user.status === 'suspended') return false;`, then `if (user.role === 'admin') return true;`, and finally return whether `record.ownerId === user.id`."
+      ],
+      "solution": {
+        "code": "function canView(user, record) {\n  if (!user || !record) return false;\n  if (user.status === 'suspended') return false;\n  if (user.role === 'admin') return true;\n  return record.ownerId === user.id;\n}",
+        "explanationMarkdown": "Each rule is one line, and the sequence of lines *is* the policy. Reading downwards you can say out loud what the system permits, which is not true of a single boolean expression joined by `&&` and `||`.\n\nTwo details do the real work. Placing the suspension check above the role check means suspending an account actually suspends it; with the two swapped, a suspended administrator keeps full read access and the account-disable feature silently does nothing. And returning `record.ownerId === user.id` — a strict comparison — avoids the coercion trap where an id that arrived as the string `'41'` compares equal to the number `41` under `==`.\n\nBecause the function touches nothing outside itself, its tests are a table of pairs. The suspended-admin row is the one worth writing first: it is the case a natural implementation gets wrong, and the case no manual click-through will ever exercise."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "canView",
+        "starterCode": "function canView(user, record) {\n  // Apply the four rules in the order the business states them.\n  return false;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "owner-sees-own-record",
+            "args": [
+              {
+                "id": 41,
+                "role": "contractor",
+                "status": "active"
+              },
+              {
+                "id": 900,
+                "ownerId": 41
+              }
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "other-contractor-refused",
+            "args": [
+              {
+                "id": 42,
+                "role": "contractor",
+                "status": "active"
+              },
+              {
+                "id": 900,
+                "ownerId": 41
+              }
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "admin-sees-any-record",
+            "args": [
+              {
+                "id": 7,
+                "role": "admin",
+                "status": "active"
+              },
+              {
+                "id": 900,
+                "ownerId": 41
+              }
+            ],
+            "expected": true,
+            "hidden": false
+          },
+          {
+            "id": "suspended-admin-refused",
+            "args": [
+              {
+                "id": 7,
+                "role": "admin",
+                "status": "suspended"
+              },
+              {
+                "id": 900,
+                "ownerId": 41
+              }
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "suspended-owner-refused",
+            "args": [
+              {
+                "id": 41,
+                "role": "contractor",
+                "status": "suspended"
+              },
+              {
+                "id": 900,
+                "ownerId": 41
+              }
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "nobody-signed-in",
+            "args": [
+              null,
+              {
+                "id": 900,
+                "ownerId": 41
+              }
+            ],
+            "expected": false,
+            "hidden": false
+          },
+          {
+            "id": "record-missing",
+            "args": [
+              {
+                "id": 41,
+                "role": "contractor",
+                "status": "active"
+              },
+              null
+            ],
+            "expected": false,
+            "hidden": true
+          },
+          {
+            "id": "string-id-is-not-number-id",
+            "args": [
+              {
+                "id": "41",
+                "role": "contractor",
+                "status": "active"
+              },
+              {
+                "id": 900,
+                "ownerId": 41
+              }
+            ],
+            "expected": false,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "auth.identity-vs-access",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e093",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain what a session proves",
+      "conceptIds": [
+        "auth.session-handling",
+        "auth.identity-vs-access"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Write the argument out in prose. The criteria appear after you answer.",
+      "lessonId": "v1-l31",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "A teammate proposes speeding up Larkfield by storing the list of timesheet ids a contractor may view inside the session cookie at sign-in, so that each request can check membership without touching the database.\n\nExplain what a session can and cannot be trusted to prove, name at least two concrete ways this cached list goes wrong, and say where the access decision should live instead.",
+      "hints": [
+        "Separate the two facts: 'this request comes from account 41' and 'account 41 may view timesheet 900'. Ask how long each fact stays true.",
+        "Identity is stable for the life of the session; permissions are not. Think about a timesheet created after sign-in, and about access that is revoked while a session is still open.",
+        "Conclude that the session should carry identity only, and that the authorisation decision belongs on each request — ideally as a query already scoped by owner, so a record the caller may not see is never loaded at all."
+      ],
+      "solution": {
+        "modelAnswer": "A session proves identity: this request comes from account 41, and the server can trust that because the cookie is signed or looked up server-side. It cannot prove permission, because permission is a fact about a record and a moment, not about the account alone. The cached list breaks in both directions. It goes stale forwards: a timesheet created or shared after sign-in is missing from the list, so a legitimate request is refused until the contractor signs out and back in. It goes stale backwards, which is worse: when access is revoked or an account is suspended, the cookie still lists the ids, so a revoked contractor keeps reading records for the life of the session. It also puts a growing list of identifiers into a cookie, which leaks how many records exist and is limited in size. The decision belongs on the request: scope the query by owner (WHERE owner_id = $sessionUserId) so the database never returns a record the caller may not see, and keep the session carrying identity alone.",
+        "explanationMarkdown": "The idea being tested is the lifetime of a fact. Identity is fixed when the session is created and stays true until it ends, which is exactly why it is safe to cache in a cookie. A permission is a claim about a relationship that other people can change at any moment — a record can be created, reassigned, unshared, or an account suspended — so caching it means caching a decision that has an expiry nobody is tracking.\n\nA strong answer notices that the stale-backwards direction is the security problem and the stale-forwards direction is merely the bug users report. That asymmetry is worth having a name for: the failure that generates support tickets is not the failure that generates incidents.\n\nThe recommended shape — scoping the query by owner rather than filtering after loading — matters because it makes the safe path the default. If the query cannot return other people's rows, forgetting a check in one handler cannot leak them."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that a session establishes identity and explains why identity is stable enough to carry in a cookie.",
+          "States that authorisation depends on the record and the current moment, so it is not a property of the account alone.",
+          "Names the stale-forwards failure: records created or shared after sign-in are wrongly refused.",
+          "Names the stale-backwards failure and identifies it as the security problem: revoked or suspended access keeps working until the session ends.",
+          "Proposes deciding on each request, ideally by scoping the query to the owner so unauthorised rows are never loaded."
+        ],
+        "modelAnswerMarkdown": "A session is a statement about identity: *this request comes from account 41*. That is safe to carry in a cookie because it is established once, at sign-in, and does not change while the session lives.\n\nPermission is a different kind of fact. *Account 41 may view timesheet 900* depends on the timesheet, and on what other people have done since sign-in. Freezing it into the cookie fails in two directions.\n\nForwards, it goes stale by omission: a timesheet submitted this morning is not in a list built last night, so the contractor is refused access to their own record and the only remedy anyone will find is signing out and in again.\n\nBackwards, it goes stale by inclusion, and this is the security failure. When an agency revokes access or suspends the account, the cookie still lists the ids. The server is trusting a snapshot of a decision that has since been reversed, so the revocation does nothing until the session expires. There is also a practical problem: the list grows with the account, and cookies are small and are sent on every single request.\n\nThe decision belongs on the request. Keep identity in the session, and write the query as `SELECT ... FROM timesheets WHERE id = $1 AND owner_id = $2` with the owner taken from the session. A record the caller may not see is then never loaded, so a forgotten check in some future handler cannot turn into a leak."
+      },
+      "primaryConceptId": "auth.session-handling",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c061",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "401 or 403?",
+      "conceptIds": [
+        "auth.identity-vs-access"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the distinction the two status codes draw.",
+      "lessonId": "v1-l31",
+      "type": "recall",
+      "promptMarkdown": "What does `401` claim about a request, what does `403` claim, and what should a client do differently on receiving each?",
+      "answerMarkdown": "`401` claims the server does not know who is calling — the credential is missing, expired or invalid — so presenting a valid one may change the answer, and the client should authenticate. `403` claims the caller is known and the action is still refused, so re-authenticating is pointless and the client should stop and report the refusal.",
+      "explanationMarkdown": "The names are historically confusing: 401 is labelled *Unauthorized* but means *unauthenticated*. Getting them the wrong way round sends signed-in users into a sign-in loop that can never resolve the actual problem.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "auth.identity-vs-access"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c062",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Find the ordering bug in a permission function",
+      "conceptIds": [
+        "auth.identity-vs-access",
+        "auth.session-handling"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the denials-first rule to a small function.",
+      "lessonId": "v1-l31",
+      "type": "debugging",
+      "promptMarkdown": "A permission helper reads:\n\n```js\nfunction canView(user, record) {\n  if (user.role === 'admin') return true;\n  if (user.status === 'suspended') return false;\n  return record.ownerId === user.id;\n}\n```\n\nWhich account does this wrongly allow, and what feature does that silently break?",
+      "answerMarkdown": "A **suspended administrator** still passes the first line and gets full access. Suspending a privileged account therefore does nothing, so the account-disable feature only appears to work. The suspension check must run before the role shortcut.",
+      "explanationMarkdown": "Shortcuts that return `true` must sit below every unconditional denial. It is the same reasoning as putting the most restrictive guard first: once a branch returns, nothing after it is consulted.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "suspended-admin",
+            "textMarkdown": "A suspended administrator, because the role shortcut returns before the suspension check runs.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Denials must precede shortcuts, otherwise disabling a privileged account has no effect."
+          },
+          {
+            "id": "suspended-contractor",
+            "textMarkdown": "A suspended contractor, because the final line ignores status.",
+            "correct": false,
+            "explanationMarkdown": "A suspended contractor is caught by the second line and refused. The final line is only reached by active non-admin users."
+          },
+          {
+            "id": "anonymous",
+            "textMarkdown": "An anonymous caller, because there is no null check.",
+            "correct": false,
+            "explanationMarkdown": "A missing guard is a real weakness — the function throws on `null` — but throwing denies the request rather than allowing it. The question asks what is wrongly allowed."
+          },
+          {
+            "id": "none",
+            "textMarkdown": "Nobody; the three rules are the same set whatever order they appear in.",
+            "correct": false,
+            "explanationMarkdown": "Order changes meaning whenever a branch returns early. Here the first line wins for every administrator, so the second line never sees one."
+          }
+        ]
+      },
+      "primaryConceptId": "auth.identity-vs-access"
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l32",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Resource ownership and the checks that hold",
+      "conceptIds": [
+        "auth.resource-ownership",
+        "auth.ownership-check",
+        "auth.cross-user-access",
+        "auth.regression-cases"
+      ],
+      "prerequisiteIds": [
+        "auth.identity-vs-access",
+        "sql.select"
+      ],
+      "bodyMarkdown": "Ownership is a column. Every record a user can be said to *own* needs a foreign key naming the account it belongs to, and that column is the only trustworthy basis for an access decision — because it lives in the database, where the client cannot reach it.\n\nThe defect this lesson exists to prevent has a name: **insecure direct object reference**, usually shortened to IDOR. A handler takes an identifier from the request, loads the record, and returns it, never asking whose it is. It is not exotic; it is what a handler looks like before anyone thinks about the second user.\n\nThere are two shapes of fix and they are not equally good.\n\n**Filter after loading** reads the record, then compares `record.ownerId` with the session's user id and returns 403 if they differ. It works, and every handler must remember to do it.\n\n**Scope the query** never asks for another user's row: `SELECT * FROM timesheets WHERE id = $1 AND owner_id = $2`. A missing row and someone else's row become the same outcome — nothing to return — so the failure mode of forgetting is an empty result rather than a leak. Prefer this. Push it further and the ownership predicate lives in one repository function that every handler is forced through, so a new endpoint inherits the check instead of re-implementing it.\n\nWherever the check lives, one rule is absolute: **the owner id comes from the session, never from the request.** A body field named `ownerId`, a query parameter named `accountId`, a header the front end sets helpfully — all of these are values the caller chose. A check that compares a client-supplied id against a client-supplied id always passes.\n\nThe same rule applies to list endpoints, and this is where the mistake hides longest. `GET /timesheets` that returns everything and lets the interface show only the caller's rows is a complete data leak in a response body that looks correct on screen. Filtering is a rendering concern; scoping is a security one.\n\nFinally, a fixed access bug needs a **regression test**, and it has a specific shape: sign in as user A, request a record owned by user B, and assert the response is a refusal *and* that the body contains none of B's data. A test that only asserts the status code will pass against a handler that returns 403 with the record attached. This is the test that stops the defect returning the next time somebody refactors the handler.",
+      "chapterId": "v1-ch11",
+      "sortOrder": 1,
+      "objectives": [
+        "Tie every record to an owner column and scope reads by it.",
+        "Place the ownership check where a forgotten handler cannot bypass it, using only session-derived identity.",
+        "Write a regression test that would fail against the vulnerable version."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "**The vulnerable handler**, which is what most endpoints look like before the second user exists:\n\n```js\napp.get('/timesheets/:id', async (request, reply) => {\n  const timesheet = await db.oneOrNone('SELECT * FROM timesheets WHERE id = $1', [request.params.id]);\n  if (!timesheet) return reply.code(404).send({ error: 'not_found' });\n  return reply.send(timesheet);\n});\n```\n\nAny signed-in contractor reads any timesheet by changing the number in the URL.\n\n**A fix that works but must be repeated everywhere:**\n\n```js\n  const timesheet = await db.oneOrNone('SELECT * FROM timesheets WHERE id = $1', [request.params.id]);\n  if (!timesheet) return reply.code(404).send({ error: 'not_found' });\n  if (timesheet.ownerId !== request.session.user.id) {\n    return reply.code(403).send({ error: 'forbidden' });\n  }\n```\n\n**The fix that scopes the question**, so the row is never loaded at all:\n\n```js\n// repository — the ONLY way handlers read a timesheet\nasync function findOwnedTimesheet(id, ownerId) {\n  return db.oneOrNone(\n    'SELECT * FROM timesheets WHERE id = $1 AND owner_id = $2',\n    [id, ownerId],\n  );\n}\n\napp.get('/timesheets/:id', async (request, reply) => {\n  const timesheet = await findOwnedTimesheet(request.params.id, request.session.user.id);\n  if (!timesheet) return reply.code(404).send({ error: 'not_found' });\n  return reply.send(timesheet);\n});\n```\n\nThe owner id is read from `request.session.user.id` and from nowhere else. Note what happens if a future contributor forgets a check in some new handler that uses `findOwnedTimesheet`: nothing, because the scope is inside the query.\n\n**The regression test that would have failed before the fix:**\n\n```js\ntest('a contractor cannot read another contractor timesheet', async () => {\n  const alice = await signIn('alice@larkfield.test');\n  const bobSheet = await seedTimesheet({ ownerEmail: 'bob@larkfield.test', hours: 37 });\n\n  const response = await alice.get(`/timesheets/${bobSheet.id}`);\n\n  expect(response.status).toBe(404);\n  expect(JSON.stringify(response.body)).not.toContain('37');   // no leaked field\n});\n```\n\nThe second assertion is the one that earns its place. A handler that replies with a refusal status *and* the record in the body would pass a status-only test while still leaking every field.",
+      "commonMistakes": [
+        "Reading the owner id from the request body or a query parameter, so the check compares a client-supplied value with itself and always passes.",
+        "Checking ownership in the interface — hiding the link — while the endpoint still answers anyone who calls it directly.",
+        "Scoping the detail endpoint but leaving the list endpoint returning every row for the interface to filter.",
+        "Adding the check to the handler that was reported and leaving the export, print and webhook paths untouched.",
+        "Asserting only the status code in the regression test, so a refusal that still includes the record body passes.",
+        "Returning 403 for records whose very existence is sensitive, letting a caller enumerate valid identifiers by the difference between 403 and 404."
+      ],
+      "summaryMarkdown": "Ownership is a column, and the owner id always comes from the session. Prefer scoping the query — `WHERE id = $1 AND owner_id = $2` — over loading first and comparing after, because then forgetting produces an empty result rather than a leak, and put that query in one place every handler must use. List endpoints need the same scope as detail endpoints. Every fixed access bug gets a regression test that signs in as one user, requests another's record, and asserts both the refusal and the absence of the data.",
+      "exerciseIds": [
+        "v1-e094",
+        "v1-e095",
+        "v1-e096"
+      ],
+      "reviewCardIds": [
+        "v1-c063",
+        "v1-c064"
+      ],
+      "references": [
+        {
+          "label": "OWASP: Insecure Direct Object Reference Prevention Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html"
+        },
+        {
+          "label": "OWASP Top Ten: A01:2021 Broken Access Control",
+          "url": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e094",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Debug the ownership check that always passes",
+      "conceptIds": [
+        "auth.ownership-check",
+        "auth.cross-user-access"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read a handler that visibly performs an ownership check and work out why it protects nothing.",
+      "lessonId": "v1-l32",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "This Larkfield handler was written in response to a security review, and it does contain an ownership check. A penetration tester still reads other contractors' timesheets through it.\n\n```js\napp.patch('/timesheets/:id', async (request, reply) => {\n  const user = request.session?.user;\n  if (!user) return reply.code(401).send({ error: 'authentication_required' });\n\n  const { ownerId, hours } = request.body;\n\n  const timesheet = await db.oneOrNone(\n    'SELECT * FROM timesheets WHERE id = $1',\n    [request.params.id],\n  );\n  if (!timesheet) return reply.code(404).send({ error: 'not_found' });\n\n  if (timesheet.ownerId !== ownerId) {\n    return reply.code(403).send({ error: 'forbidden' });\n  }\n\n  await db.none('UPDATE timesheets SET hours = $1 WHERE id = $2', [hours, timesheet.id]);\n  return reply.send({ ...timesheet, hours });\n});\n```\n\nWhy does the check fail to stop the tester?",
+      "hints": [
+        "Follow where each value in the comparison came from before it reached that line.",
+        "`ownerId` was destructured from `request.body`. The caller chose it, and the caller can choose any value at all.",
+        "The tester reads the target timesheet's owner id — or simply tries values — and sends that as `ownerId`, so the comparison succeeds. The trusted identity is `user.id` from the session; compare against that, or better, scope the query with `AND owner_id = $2`."
+      ],
+      "solution": {
+        "modelAnswer": "The check compares the record's owner against a value from the request body, which the attacker controls. It must compare against request.session.user.id, and preferably the query itself should be scoped by owner.",
+        "explanationMarkdown": "The comparison looks like an authorisation check and is really a self-consistency check. The attacker supplies both a path parameter naming somebody else's timesheet and a body field naming that timesheet's owner; the two agree, so the handler proceeds.\n\nThe rule this violates is simple to state and easy to forget under time pressure: **one side of an ownership comparison must come from the session and never from the request.** Anything the client sent is an input to be validated, not a fact to be trusted.\n\nThe minimal fix is `if (timesheet.ownerId !== user.id)`. The better fix removes the possibility of forgetting:\n\n```js\nconst timesheet = await db.oneOrNone(\n  'SELECT * FROM timesheets WHERE id = $1 AND owner_id = $2',\n  [request.params.id, user.id],\n);\nif (!timesheet) return reply.code(404).send({ error: 'not_found' });\n```\n\nNow another contractor's timesheet is indistinguishable from one that does not exist, and the `ownerId` field in the body can be dropped entirely — a field a client can send is a field somebody will eventually try to abuse."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "client-supplied",
+            "textMarkdown": "`ownerId` comes from the request body, so the attacker supplies both sides of the comparison and can always make it match.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The trusted identity is `user.id` from the session; better still, scope the SELECT by owner so the row is never loaded."
+          },
+          {
+            "id": "strict-equality",
+            "textMarkdown": "`!==` compares a number with a string, so the check never matches and everything is allowed.",
+            "correct": false,
+            "explanationMarkdown": "A type mismatch here would make the check *reject* everything, not accept it. The comparison is doing what it is told; the problem is which values it is told to compare."
+          },
+          {
+            "id": "patch-method",
+            "textMarkdown": "PATCH requests skip session middleware, so `request.session` is empty.",
+            "correct": false,
+            "explanationMarkdown": "The session is read and enforced at the top of the handler, and the request would have been refused with 401 if it were absent. The method has no bearing on it."
+          },
+          {
+            "id": "404-first",
+            "textMarkdown": "The 404 check runs before the ownership check, which leaks the record.",
+            "correct": false,
+            "explanationMarkdown": "Ordering those two does affect whether a caller can tell that a record exists, which is worth thinking about — but it is not what lets the tester read the contents."
+          }
+        ]
+      },
+      "primaryConceptId": "auth.ownership-check",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e095",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Write the ownership filter for a bulk request",
+      "conceptIds": [
+        "auth.resource-ownership",
+        "auth.ownership-check"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A bulk endpoint receives a list of ids from the client. Deciding which of them the caller may actually touch is pure logic, and it is the heart of the endpoint.",
+      "lessonId": "v1-l32",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 15,
+      "promptMarkdown": "Larkfield has an endpoint that exports several timesheets at once. The client posts a list of ids; the server must reduce that list to the ids the caller actually owns.\n\nImplement `scopedIds(entries, viewerId, requestedIds)`.\n\n- `entries` is every timesheet the server knows about, each `{ id, ownerId }`.\n- `viewerId` is the signed-in account's id, taken from the session.\n- `requestedIds` is the raw list from the request body — untrusted, possibly containing ids owned by other people, ids that do not exist, and repeats.\n\nReturn the ids the viewer owns, **in the order they were requested**, with repeats collapsed to a single entry. Ids the viewer does not own, and ids that match no entry, are simply left out — do not throw. Compare ids strictly, and do not modify either array.",
+      "hints": [
+        "You need two things from `entries`: which ids exist, and who owns them. One pass can answer both.",
+        "Build a set of the ids this viewer owns first. Then walk `requestedIds` — walking the requested list is what preserves the caller's order.",
+        "Keep a second set of ids you have already emitted so a repeated request produces one entry, and push onto a new array rather than removing items from `requestedIds`."
+      ],
+      "solution": {
+        "code": "function scopedIds(entries, viewerId, requestedIds) {\n  const owned = new Set();\n  for (const entry of entries) {\n    if (entry.ownerId === viewerId) owned.add(entry.id);\n  }\n  const seen = new Set();\n  const result = [];\n  for (const id of requestedIds) {\n    if (owned.has(id) && !seen.has(id)) {\n      seen.add(id);\n      result.push(id);\n    }\n  }\n  return result;\n}",
+        "explanationMarkdown": "The shape of this function is the whole lesson in miniature: the request supplies *what was asked for*, and the server supplies *what is allowed*, and the answer is the intersection — computed on the server, from server data.\n\nIterating over `requestedIds` rather than over `entries` is deliberate. It preserves the order the caller asked for, and it means an id that matches nothing simply never enters the result, which is why no error handling is needed for unknown ids. The `seen` set collapses repeats so a caller cannot make the export do the same work five times by repeating an id, and building a fresh array leaves the caller's list untouched for whatever runs next.\n\nOne thing this function deliberately does not do is tell the caller which ids were rejected. Reporting *ids 12 and 19 are not yours* would confirm those records exist and belong to someone — the same enumeration leak as answering 403 instead of 404 for a record the caller may not see."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "scopedIds",
+        "starterCode": "function scopedIds(entries, viewerId, requestedIds) {\n  // Work out which ids this viewer owns, then keep the requested ones.\n  return requestedIds;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "nothing-requested",
+            "args": [
+              [
+                {
+                  "id": "e1",
+                  "ownerId": "u1"
+                }
+              ],
+              "u1",
+              []
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "all-owned",
+            "args": [
+              [
+                {
+                  "id": "e1",
+                  "ownerId": "u1"
+                },
+                {
+                  "id": "e2",
+                  "ownerId": "u1"
+                }
+              ],
+              "u1",
+              [
+                "e1",
+                "e2"
+              ]
+            ],
+            "expected": [
+              "e1",
+              "e2"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "drops-another-users-id",
+            "args": [
+              [
+                {
+                  "id": "e1",
+                  "ownerId": "u1"
+                },
+                {
+                  "id": "e9",
+                  "ownerId": "u2"
+                }
+              ],
+              "u1",
+              [
+                "e1",
+                "e9"
+              ]
+            ],
+            "expected": [
+              "e1"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "unknown-id-is-ignored",
+            "args": [
+              [
+                {
+                  "id": "e1",
+                  "ownerId": "u1"
+                }
+              ],
+              "u1",
+              [
+                "e404"
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "repeats-collapse",
+            "args": [
+              [
+                {
+                  "id": "e1",
+                  "ownerId": "u1"
+                }
+              ],
+              "u1",
+              [
+                "e1",
+                "e1",
+                "e1"
+              ]
+            ],
+            "expected": [
+              "e1"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "request-order-is-kept",
+            "args": [
+              [
+                {
+                  "id": "e1",
+                  "ownerId": "u1"
+                },
+                {
+                  "id": "e2",
+                  "ownerId": "u1"
+                }
+              ],
+              "u1",
+              [
+                "e2",
+                "e1"
+              ]
+            ],
+            "expected": [
+              "e2",
+              "e1"
+            ],
+            "hidden": true
+          },
+          {
+            "id": "owns-nothing",
+            "args": [
+              [
+                {
+                  "id": "e1",
+                  "ownerId": "u1"
+                },
+                {
+                  "id": "e2",
+                  "ownerId": "u2"
+                }
+              ],
+              "u3",
+              [
+                "e1",
+                "e2"
+              ]
+            ],
+            "expected": [],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "auth.resource-ownership",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e096",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the regression test for a cross-user leak",
+      "conceptIds": [
+        "auth.cross-user-access",
+        "auth.regression-cases"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read a proposed regression test and decide whether it would actually have failed against the vulnerable code.",
+      "lessonId": "v1-l32",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "An access bug is fixed: `GET /timesheets/:id` used to return any record, and now scopes the query by owner. The pull request adds this test.\n\n```js\ntest('rejects a timesheet the caller does not own', async () => {\n  const alice = await signIn('alice@larkfield.test');\n  const response = await alice.get('/timesheets/999999');\n\n  expect(response.status).toBe(404);\n});\n```\n\nId `999999` does not exist in the test database. Would this test have failed against the vulnerable version of the handler, and what would you change?",
+      "hints": [
+        "A regression test earns its name only if it fails against the code that had the bug. Mentally run it against the old handler.",
+        "The old handler looked up id `999999`, found nothing, and returned 404 — exactly what the test asserts. It passes against both versions, so it detects nothing.",
+        "The test needs a record that genuinely exists and genuinely belongs to somebody else. Seed a timesheet owned by Bob, request it as Alice, and assert both the refusal status and that none of Bob's field values appear in the response body."
+      ],
+      "solution": {
+        "modelAnswer": "No. Id 999999 does not exist, so the vulnerable handler also returned 404 and the test passes against the bug it is supposed to catch. Seed a real timesheet owned by another user, request it as Alice, and assert both the status and the absence of that record's data in the body.",
+        "explanationMarkdown": "The test exercises the *missing record* path, not the *someone else's record* path. Those are the same response by design after the fix, which is precisely why the test cannot tell the two versions apart. A regression test that passes against the vulnerable code is worse than no test, because it converts an open question into a false reassurance in the review.\n\nThe corrected version needs two things:\n\n```js\ntest('a contractor cannot read another contractor timesheet', async () => {\n  const bobSheet = await seedTimesheet({ ownerEmail: 'bob@larkfield.test', hours: 37, note: 'site survey' });\n  const alice = await signIn('alice@larkfield.test');\n\n  const response = await alice.get(`/timesheets/${bobSheet.id}`);\n\n  expect(response.status).toBe(404);\n  expect(JSON.stringify(response.body)).not.toContain('site survey');\n});\n```\n\nFirst, a record that really exists and really belongs to Bob — that is the only input that distinguishes the two versions of the handler. Second, an assertion about the *body*. A status-only assertion would still pass against a handler that returns a refusal with the record attached, which is a real and common way for a fix to be incomplete.\n\nKeeping the original id-`999999` case is fine as a separate test of the not-found path; it just should not be labelled as the security regression."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "passes-against-bug",
+            "textMarkdown": "No — the old handler also returned 404 for a non-existent id, so the test passes against the vulnerable version. It must use a record that exists and is owned by someone else, and assert that the body contains none of that record's data.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A regression test has to fail against the bug, and asserting on the body catches a refusal status that still leaks the record."
+          },
+          {
+            "id": "good-enough",
+            "textMarkdown": "Yes — it asserts a 404, which is exactly what the fixed handler returns for another user's record.",
+            "correct": false,
+            "explanationMarkdown": "It matches the fixed behaviour, but it matches the broken behaviour just as well. Agreeing with the fix is not the same as detecting the bug."
+          },
+          {
+            "id": "should-be-403",
+            "textMarkdown": "No — the only problem is the expected status, which should be 403 rather than 404.",
+            "correct": false,
+            "explanationMarkdown": "Which code to return is a deliberate choice, and 404 was chosen here so callers cannot tell existing records from forbidden ones. Changing the number does nothing about the test using an id that never existed."
+          },
+          {
+            "id": "needs-unit-test",
+            "textMarkdown": "No — access control should be tested by unit-testing `canView` instead of through the endpoint.",
+            "correct": false,
+            "explanationMarkdown": "Unit tests of the decision function are valuable and cheap, but this bug lived in the handler's query, not in the decision function. Only a test that goes through the endpoint could have caught it."
+          }
+        ]
+      },
+      "primaryConceptId": "auth.cross-user-access",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c063",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Where does the owner id come from?",
+      "conceptIds": [
+        "auth.ownership-check"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the rule about which side of an ownership comparison may be trusted.",
+      "lessonId": "v1-l32",
+      "type": "recall",
+      "promptMarkdown": "When a handler compares a record's owner against the caller's identity, where must the caller's identity come from, and why does the alternative fail?",
+      "answerMarkdown": "From the session established by authentication — never from the request body, query string, path or a header. Anything the client sent is a value the client chose, so a check comparing a client-supplied id against a client-supplied id always succeeds and protects nothing.",
+      "explanationMarkdown": "This is the rule that separates a genuine ownership check from one that only looks like one in review. The check can be perfectly written and still be worthless if both operands originated with the attacker.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "auth.ownership-check"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c064",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Carry the scope rule to a list endpoint",
+      "conceptIds": [
+        "auth.cross-user-access",
+        "auth.resource-ownership"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the scoping idea from a detail endpoint to a collection endpoint.",
+      "lessonId": "v1-l32",
+      "type": "transfer",
+      "promptMarkdown": "`GET /timesheets/:id` is now correctly scoped by owner. `GET /timesheets` still runs `SELECT * FROM timesheets ORDER BY submitted_at DESC LIMIT 50`, and the interface renders only the rows whose `ownerId` matches the signed-in contractor. Is anything wrong, and what would a reviewer see?",
+      "answerMarkdown": "Yes — the response body contains up to 50 other contractors' timesheets. Hiding them in the interface changes nothing, because anyone can read the raw response in the network tab or call the endpoint directly. The list needs the same scope as the detail route: `WHERE owner_id = $1`.",
+      "explanationMarkdown": "Filtering in the client is presentation; scoping in the query is security. List endpoints are where this distinction is most often lost, because the screen looks completely correct.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "auth.cross-user-access"
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l33",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Safe request handling",
+      "conceptIds": [
+        "auth.csrf",
+        "auth.sensitive-logging",
+        "auth.failed-login"
+      ],
+      "prerequisiteIds": [
+        "auth.session-handling",
+        "node.stack-trace-disclosure"
+      ],
+      "bodyMarkdown": "Three edges of an authenticated system leak more than people expect: the sign-in failure, the log line, and the request that arrives from somebody else's page.\n\n**Failed sign-in.** `No account with that email address` and `Incorrect password` are two different answers, and the difference is a free account-enumeration tool: an attacker learns which addresses are registered and moves on to those. Return one message — *those details do not match an account* — for both cases. The same reasoning applies to timing: if a missing email returns in 4 ms because no password hash was computed, while a wrong password takes 80 ms, the timing answers the question the message refused to. Verify a dummy hash for the missing-account path so the two take comparable time. Then throttle: after a handful of failures for the same account or the same source, slow down or lock temporarily, so that guessing costs real time.\n\n**Logs.** A log line is written by an engineer under pressure and read by everyone with access to the logging system, indefinitely. `logger.info('sign-in attempt', request.body)` puts plaintext passwords in that store forever, and the same reflex — logging the whole object because you do not yet know which field matters — is how session tokens, API keys, card numbers and full personal records get there. Redact by allowlist where you can: name the fields worth logging rather than trying to name every field that is dangerous, because the next feature will add a sensitive field nobody updates the deny-list for. Log identifiers, not contents: an account id and a request id let you find the record; the record itself does not need to be in the line.\n\nRelated, and covered in the Node chapter: an internal error message or stack trace returned to the client tells an attacker your framework versions, file layout and sometimes your query text. Log the detail with a request id, return the id and a generic message.\n\n**Cross-site request forgery.** Browsers attach cookies to requests based on the destination, not on who initiated them. So a form on `evil.test` that posts to `larkfield.test/timesheets/900/approve` arrives *with the victim's session cookie attached*, and the server sees a perfectly authenticated request. Nothing about the session was stolen; the browser volunteered it.\n\nTwo defences, best used together. `SameSite=Lax` on the session cookie tells the browser not to attach it to cross-site POSTs — good, and dependent on the browser. A **synchroniser token** — a per-session value the server issues, the page includes in the form, and the server compares on submission — is the defence that does not depend on the browser being helpful, because the attacking page cannot read the victim's page to learn the value. Note the whole attack rests on **ambient** credentials: an API using an `Authorization` header that JavaScript must set deliberately is not vulnerable in the same way, because nothing is attached automatically.",
+      "chapterId": "v1-ch11",
+      "sortOrder": 2,
+      "objectives": [
+        "Respond to a failed sign-in without revealing which part was wrong.",
+        "Keep credentials and personal data out of logs while keeping the logs useful.",
+        "Explain how a cross-site request carries a session cookie and which defences stop it."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "**A sign-in path that gives nothing away:**\n\n```js\nconst GENERIC = 'Those details do not match an account.';\n// A real hash of a value nobody knows, so the missing-account path does comparable work.\nconst DUMMY_HASH = '$2b$12$0000000000000000000000000000000000000000000000000000';\n\nasync function signIn(email, password, clock) {\n  const decision = throttleDecision(recentFailures(email), clock.now());\n  if (decision === 'locked') {\n    return { ok: false, message: GENERIC, retryAfterSeconds: 900 };\n  }\n\n  const account = await accounts.findByEmail(email);\n  const hash = account ? account.passwordHash : DUMMY_HASH;\n  const matches = await verifyHash(password, hash);\n\n  if (!account || !matches) {\n    recordFailure(email, clock.now());\n    logger.info('sign-in failed', { emailHash: hashForLogs(email), requestId });\n    return { ok: false, message: GENERIC };\n  }\n\n  clearFailures(email);\n  return { ok: true, accountId: account.id };\n}\n```\n\nRead the deliberate choices. One message and one shape of response for *both* failure kinds. The dummy hash so a missing account costs roughly the same time as a wrong password. The failure log records a one-way hash of the email and the request id — enough to correlate an attack, nothing an attacker gains by reading the logs. And no branch anywhere puts `password` into a log line or a response.\n\n**A log line built by allowlist:**\n\n```js\nconst LOGGABLE = ['requestId', 'accountId', 'timesheetId', 'route', 'durationMs'];\n\nfunction logFields(payload) {\n  const out = {};\n  for (const key of LOGGABLE) {\n    if (payload[key] !== undefined) out[key] = payload[key];\n  }\n  return out;\n}\n\nlogger.info('timesheet updated', logFields(context));   // never logger.info('...', context)\n```\n\nAn allowlist fails safe. When a future release adds a `nationalInsuranceNumber` field to the context object, an allowlist ignores it and a deny-list logs it until somebody notices.\n\n**A form protected by a synchroniser token:**\n\n```html\n<form method=\"post\" action=\"/timesheets/900/approve\">\n  <input type=\"hidden\" name=\"csrfToken\" value=\"{{ sessionCsrfToken }}\">\n  <button type=\"submit\">Approve</button>\n</form>\n```\n\n```js\nif (request.body.csrfToken !== request.session.csrfToken) {\n  return reply.code(403).send({ error: 'csrf_token_mismatch' });\n}\n```\n\nA page on another origin can cause the browser to *send* a request, but the same-origin policy stops it *reading* the victim's page, so it cannot learn the token to include. That is the whole mechanism.",
+      "commonMistakes": [
+        "Telling the user that the email address was not found, which turns the sign-in form into a way to test which addresses have accounts.",
+        "Returning the same message for both failures but answering much faster when the account does not exist, so the timing leaks what the message hid.",
+        "Logging the whole request body on a sign-in route, putting plaintext passwords into the logging system permanently.",
+        "Maintaining a deny-list of sensitive field names, which silently fails the first time a new sensitive field is added.",
+        "Returning the internal error message or stack trace to the client so support can read it, and telling an attacker the framework versions and file layout too.",
+        "Believing an authenticated session makes a POST safe, when the browser attaches that session to a cross-site form submission automatically.",
+        "Adding a CSRF token and then accepting the request when the token is missing entirely, so omitting the field bypasses the check."
+      ],
+      "summaryMarkdown": "Give one answer for every kind of failed sign-in, make the paths cost similar time, and throttle repeated failures. Log identifiers rather than contents, and choose the fields to log by allowlist so new sensitive fields are excluded by default; never let an internal error message reach the client. Cross-site request forgery works because browsers attach cookies to requests they did not initiate, so defend with `SameSite` plus a synchroniser token the attacking page cannot read — and reject a request whose token is absent as firmly as one whose token is wrong.",
+      "exerciseIds": [
+        "v1-e097",
+        "v1-e098",
+        "v1-e099"
+      ],
+      "reviewCardIds": [
+        "v1-c065",
+        "v1-c066"
+      ],
+      "references": [
+        {
+          "label": "OWASP: Cross-Site Request Forgery Prevention Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html"
+        },
+        {
+          "label": "OWASP: Authentication Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html"
+        },
+        {
+          "label": "OWASP: Logging Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html"
+        },
+        {
+          "label": "MDN: Set-Cookie SameSite attribute",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e097",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Redact a log payload without losing the diagnosis",
+      "conceptIds": [
+        "auth.sensitive-logging"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Redaction is pure data transformation, which makes it exactly the kind of rule that should be one tested function rather than a habit each engineer remembers separately.",
+      "lessonId": "v1-l33",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "Implement `redactPayload(payload)`, which Larkfield calls on every object before it reaches the logger.\n\nReturn a **new** structure of the same shape in which the value of every sensitive key is replaced by the string `'[redacted]'`. A key is sensitive when its lower-cased name is exactly one of `password`, `token`, `authorization` or `secret`.\n\nRules:\n\n- Key matching is case-insensitive but **exact**: `Authorization` is sensitive, `passwordResetRequested` is not.\n- Redact the value whatever it is, including an empty string, `0` and `null`.\n- Recurse into nested plain objects and into arrays, so a secret two levels down is still redacted.\n- Leave non-object values (strings, numbers, `null`) as they are.\n- Do not modify `payload`. The caller logs the copy and keeps using the original.",
+      "hints": [
+        "Handle the three kinds of value separately: an array, a plain object, and everything else.",
+        "For an object, build a fresh result and decide key by key. Deciding on the *key* is what lets you redact a value that happens to be an empty string, which a truthiness test would skip.",
+        "Compare `key.toLowerCase()` against the sensitive list with an exact equality check — using `includes` on the key text instead would wrongly redact `passwordResetRequested`. For a non-sensitive key, call the function again on its value so nested structures are covered."
+      ],
+      "solution": {
+        "code": "const SENSITIVE_KEYS = ['password', 'token', 'authorization', 'secret'];\n\nfunction redactPayload(payload) {\n  if (Array.isArray(payload)) {\n    const copy = [];\n    for (const value of payload) copy.push(redactPayload(value));\n    return copy;\n  }\n  if (payload === null || typeof payload !== 'object') {\n    return payload;\n  }\n  const copy = {};\n  for (const key of Object.keys(payload)) {\n    if (SENSITIVE_KEYS.includes(key.toLowerCase())) {\n      copy[key] = '[redacted]';\n    } else {\n      copy[key] = redactPayload(payload[key]);\n    }\n  }\n  return copy;\n}",
+        "explanationMarkdown": "Three decisions are worth defending.\n\n**The decision is made on the key, not the value.** A tempting shortcut is `if (payload[key]) copy[key] = '[redacted]'`, which quietly lets an empty-string token through — and an empty token in a log is still a signal about a real request, while `0` and `false` are ordinary values that must survive untouched elsewhere.\n\n**Matching is exact after lower-casing.** `key.toLowerCase().includes('password')` looks more thorough and is worse: it redacts `passwordResetRequested`, `passwordChangedAt` and `passwordPolicyVersion`, destroying exactly the diagnostic fields you wanted, while still missing anything named differently.\n\n**The original is never touched.** Redaction happens on the way to the logger; the caller keeps using the real payload afterwards. A version that overwrote fields in place would redact the live request object and the handler would then try to verify the password `'[redacted]'`.\n\nIn production this belongs behind an allowlist as well: name the fields worth logging, so a sensitive field added next quarter is excluded by default rather than by an update nobody remembers to make."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "redactPayload",
+        "starterCode": "function redactPayload(payload) {\n  // Copy the structure, replacing sensitive values on the way.\n  return {};\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-object",
+            "args": [
+              {}
+            ],
+            "expected": {},
+            "hidden": false
+          },
+          {
+            "id": "nothing-sensitive",
+            "args": [
+              {
+                "email": "sam@larkfield.test",
+                "timesheetId": 900
+              }
+            ],
+            "expected": {
+              "email": "sam@larkfield.test",
+              "timesheetId": 900
+            },
+            "hidden": false
+          },
+          {
+            "id": "password-redacted",
+            "args": [
+              {
+                "email": "sam@larkfield.test",
+                "password": "correct-horse"
+              }
+            ],
+            "expected": {
+              "email": "sam@larkfield.test",
+              "password": "[redacted]"
+            },
+            "hidden": false
+          },
+          {
+            "id": "key-match-is-case-insensitive",
+            "args": [
+              {
+                "Authorization": "Bearer abc123"
+              }
+            ],
+            "expected": {
+              "Authorization": "[redacted]"
+            },
+            "hidden": false
+          },
+          {
+            "id": "empty-value-still-redacted",
+            "args": [
+              {
+                "token": ""
+              }
+            ],
+            "expected": {
+              "token": "[redacted]"
+            },
+            "hidden": false
+          },
+          {
+            "id": "similar-key-is-kept",
+            "args": [
+              {
+                "passwordResetRequested": true,
+                "secretly": "fine"
+              }
+            ],
+            "expected": {
+              "passwordResetRequested": true,
+              "secretly": "fine"
+            },
+            "hidden": false
+          },
+          {
+            "id": "nested-object",
+            "args": [
+              {
+                "user": {
+                  "email": "sam@larkfield.test",
+                  "password": "hunter"
+                },
+                "route": "/sign-in"
+              }
+            ],
+            "expected": {
+              "user": {
+                "email": "sam@larkfield.test",
+                "password": "[redacted]"
+              },
+              "route": "/sign-in"
+            },
+            "hidden": true
+          },
+          {
+            "id": "inside-an-array",
+            "args": [
+              {
+                "attempts": [
+                  {
+                    "secret": "s1"
+                  },
+                  {
+                    "ok": true
+                  }
+                ]
+              }
+            ],
+            "expected": {
+              "attempts": [
+                {
+                  "secret": "[redacted]"
+                },
+                {
+                  "ok": true
+                }
+              ]
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "auth.sensitive-logging",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e098",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose what the sign-in handler gives away",
+      "conceptIds": [
+        "auth.failed-login",
+        "auth.sensitive-logging"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read a sign-in handler and identify the disclosure that matters most, without being distracted by the ones that matter less.",
+      "lessonId": "v1-l33",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "```js\napp.post('/sign-in', async (request, reply) => {\n  const { email, password } = request.body;\n  logger.info('sign-in attempt', request.body);\n\n  const account = await accounts.findByEmail(email);\n  if (!account) {\n    return reply.code(404).send({ error: 'No account exists for that email address.' });\n  }\n\n  const matches = await verifyHash(password, account.passwordHash);\n  if (!matches) {\n    return reply.code(401).send({ error: 'Incorrect password.' });\n  }\n\n  request.session.user = { id: account.id, role: account.role };\n  return reply.send({ ok: true });\n});\n```\n\nThis handler has several problems. Which one puts a permanent, irreversible secret into a system that many people can read, and how would you fix it?",
+      "hints": [
+        "Separate the problems by how long the damage lasts. A response is read once; a stored line is read for as long as the logs are kept.",
+        "The second line logs `request.body` — and on this route, `request.body` contains the password the user just typed, in plain text.",
+        "Never log the raw body on a credential route. Log only chosen fields — a request id and a one-way hash of the email, say — and route every payload through a redaction helper so the mistake cannot be made again by hand."
+      ],
+      "solution": {
+        "modelAnswer": "`logger.info('sign-in attempt', request.body)` writes the plaintext password into the logs, where it persists in backups and in any downstream log store. Log an allowlisted set of fields instead — request id, a hashed email — and pass every payload through a redaction helper. Separately, the two different error messages and status codes let anyone enumerate registered addresses; both failures should return one generic message.",
+        "explanationMarkdown": "Rank the defects by how permanent they are.\n\nThe logged password is the worst, and it is irreversible. It has already been written to disk, shipped to whatever aggregation service the team uses, replicated into backups, and made readable by everyone with logging access — including people who would never be granted database access. Fixing the code stops future lines and does nothing about the ones already stored; the real remedy involves purging log data and forcing password resets.\n\nThe enumeration problem is second: `404 No account exists for that email address` versus `401 Incorrect password` turns the form into a directory lookup. Both status code and message differ, so even a client that ignores the text can tell the cases apart. Return the same status and the same generic message for both, verify a dummy hash on the missing-account path so the timing matches, and record the failure for throttling.\n\nThe fix for the logging is structural rather than a promise to be careful:\n\n```js\nlogger.info('sign-in attempt', { requestId: request.id, emailHash: hashForLogs(email) });\n```\n\nAn engineer under deadline pressure will reach for the whole object again; a redaction helper applied by the logger itself is what makes that reflex harmless."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "logged-password",
+            "textMarkdown": "`logger.info('sign-in attempt', request.body)` writes the plaintext password to the logs; log an allowlisted set of fields and redact the rest.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Log data is long-lived, widely readable and replicated into backups, so a credential written there cannot be recalled."
+          },
+          {
+            "id": "enumeration",
+            "textMarkdown": "The two distinct failure messages let an attacker discover which email addresses have accounts.",
+            "correct": false,
+            "explanationMarkdown": "A genuine defect and worth fixing in the same change — but it discloses which addresses are registered, not a secret, and it stops the moment the messages are unified."
+          },
+          {
+            "id": "session-role",
+            "textMarkdown": "Copying `account.role` into the session means a revoked role stays effective until the session ends.",
+            "correct": false,
+            "explanationMarkdown": "Real, and worth a follow-up. It is a staleness problem confined to one session's lifetime, not a permanently disclosed secret."
+          },
+          {
+            "id": "status-codes",
+            "textMarkdown": "Returning 404 for a missing account is the wrong status code for a sign-in attempt.",
+            "correct": false,
+            "explanationMarkdown": "It is the wrong code, and it is part of how the enumeration works, but on its own it is a correctness nit rather than a disclosure of anything secret."
+          }
+        ]
+      },
+      "primaryConceptId": "auth.failed-login",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e099",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain why a valid session does not make a POST safe",
+      "conceptIds": [
+        "auth.csrf",
+        "auth.session-handling"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Explain the mechanism, not just the mitigation. The criteria appear after you answer.",
+      "lessonId": "v1-l33",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "A Larkfield engineer argues that cross-site request forgery cannot affect them: *the approve endpoint requires a signed-in session, and an attacker cannot steal our session cookie because it is `HttpOnly` and `Secure`.*\n\nExplain why the endpoint can still be triggered from a page the attacker controls, what the attacker does and does not learn, and which defences actually stop it. Say what makes a synchroniser token work where the cookie flags do not.",
+      "hints": [
+        "The attacker never needs to read or copy the cookie. Ask what the victim's browser does on its own when a page submits a form to another site.",
+        "Cookies are attached according to the destination of the request, not according to which page initiated it. The forged request therefore arrives already authenticated.",
+        "Distinguish sending from reading: the same-origin policy stops the attacking page reading Larkfield's pages or the response, which is exactly why a per-session token embedded in the real page cannot be guessed — and why `SameSite=Lax` plus that token is the pair to recommend."
+      ],
+      "solution": {
+        "modelAnswer": "HttpOnly and Secure protect the cookie from being read or sent in the clear; neither stops the browser from attaching it. When the victim visits evil.test and that page auto-submits a form to larkfield.test/timesheets/900/approve, the browser attaches the Larkfield session cookie because cookies are selected by destination, not by initiator. The server sees a fully authenticated request from a real user and performs the approval. The attacker learns nothing: the same-origin policy prevents evil.test from reading the response or the victim's Larkfield pages. So the attack is write-only, and that is enough for an approval, a password change or a transfer. Defences: set SameSite=Lax (or Strict) on the session cookie so the browser withholds it from cross-site POSTs, and add a synchroniser token — a per-session value the server puts into the real page and compares on submission. The token works precisely because the attacking page cannot read the victim's page to learn it, and the request must be rejected when the token is missing as well as when it is wrong. An API authenticated by an Authorization header rather than a cookie is not vulnerable in this way, because nothing is attached automatically.",
+        "explanationMarkdown": "The misconception being corrected is that authentication implies intent. The server can be completely correct that the request came from account 41 and completely wrong that account 41 meant to send it.\n\nThe cookie flags address a different threat model. `HttpOnly` stops script reading the cookie — that is a cross-site scripting defence. `Secure` stops it travelling over plain HTTP — that is a network defence. Neither has anything to say about which pages may cause the browser to send a request, and the attack never touches the cookie's contents.\n\nThe send-versus-read distinction is the load-bearing idea. The same-origin policy is the reason a token defence is possible at all: the attacker can make the browser send anything, but cannot see anything that comes back or anything on the victim's other tabs. So a secret that only appears inside a genuine Larkfield page is a secret the forged request cannot include.\n\nRecommending both defences is the mature answer. `SameSite` is browser-dependent and has exceptions; the token is under the application's own control. And rejecting a *missing* token matters as much as rejecting a wrong one — accepting the request when the field is absent is a common way for a token defence to do nothing at all."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Explains that the browser attaches cookies according to the destination of the request rather than the page that initiated it, so the forged request arrives authenticated.",
+          "States that HttpOnly and Secure protect the credential from being read or intercepted, and address a different threat than a forged request.",
+          "Notes that the attacker cannot read the response or the victim's pages, so the attack is write-only — and that this is still enough to cause a state change.",
+          "Names both defences: SameSite on the session cookie and a per-session synchroniser token compared on submission.",
+          "Explains that the token works because the same-origin policy stops the attacking page reading the value, and that a missing token must be rejected as firmly as a wrong one."
+        ],
+        "modelAnswerMarkdown": "`HttpOnly` and `Secure` stop the cookie being *read* by script and being *sent* over plain HTTP. Cross-site request forgery needs neither. The attacker never sees the cookie; the victim's browser sends it voluntarily.\n\nThe mechanism: the victim, signed in to Larkfield in another tab, loads a page on `evil.test`. That page contains a form targeting `https://larkfield.test/timesheets/900/approve` and submits it on load. Browsers decide which cookies to attach from the *destination* of the request, so the Larkfield session cookie goes along. The server receives a well-formed, fully authenticated request from a genuine user and approves the timesheet.\n\nWhat the attacker gains is a state change, not information. The same-origin policy stops `evil.test` reading the response or anything in the Larkfield tab, so the attack is write-only. For an approval, a password change or a payment, write-only is plenty.\n\nTwo defences, used together:\n\n1. `SameSite=Lax` on the session cookie, so the browser will not attach it to a cross-site POST at all. Cheap, effective, and dependent on the browser behaving.\n2. A synchroniser token: the server generates a per-session value, renders it into the real Larkfield page as a hidden field, and compares it on submission. The attacking page cannot read Larkfield's page, so it cannot learn the value — that is exactly the same-origin property the attack could not defeat. The comparison must reject a missing token as well as a wrong one, otherwise omitting the field bypasses the whole defence.\n\nNote that an API authenticated with an `Authorization` header is not vulnerable this way, because nothing attaches that header automatically. The vulnerability comes from ambient credentials, not from cookies as such."
+      },
+      "primaryConceptId": "auth.csrf",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c065",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What may a failed sign-in reveal?",
+      "conceptIds": [
+        "auth.failed-login"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the rule and the second channel that can break it.",
+      "lessonId": "v1-l33",
+      "type": "recall",
+      "promptMarkdown": "Why should a sign-in failure return the same message whether the email is unknown or the password is wrong, and what else must match besides the message?",
+      "answerMarkdown": "Different messages let anyone enumerate which email addresses have accounts, which turns the sign-in form into a directory. The status code must match too, and so must the response *time*: verify a dummy hash on the missing-account path, otherwise a fast rejection reveals exactly what the message concealed.",
+      "explanationMarkdown": "Any observable difference between the two paths is the leak — text, status, headers or timing. Repeated failures should also be throttled so guessing costs real time.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "auth.failed-login"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c066",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Read the log statement",
+      "conceptIds": [
+        "auth.sensitive-logging"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read a logging call in context and judge what ends up stored.",
+      "lessonId": "v1-l33",
+      "type": "code-reading",
+      "promptMarkdown": "A handler for `POST /accounts/password` contains `logger.debug('password change', { ...request.body, accountId });`. The team argues it is safe because the level is `debug` and debug logging is disabled in production. What is your assessment?",
+      "answerMarkdown": "It is not safe. The spread copies every body field — including the new password — into the log call, so the moment debug logging is enabled to investigate an incident, plaintext passwords start being written. A log level is an operational switch, not an access control. Log an allowlisted set of fields, or pass the payload through a redaction helper, so the outcome does not depend on a runtime setting.",
+      "explanationMarkdown": "Debug logging is turned on precisely when something is going wrong and people are under pressure. Any safety argument that depends on a level never being raised is an argument that fails at the worst moment.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "not-safe",
+            "textMarkdown": "Unsafe: the spread includes the new password, and debug logging gets enabled during exactly the incidents where the logs are then read and retained.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Redact by allowlist so the safety of the line does not depend on a runtime level."
+          },
+          {
+            "id": "safe-level",
+            "textMarkdown": "Safe, because the statement never executes while the production level is `info`.",
+            "correct": false,
+            "explanationMarkdown": "It does not execute *today*. The level is a configuration value someone will raise to investigate a problem, at which point the credential is written."
+          },
+          {
+            "id": "safe-hashed",
+            "textMarkdown": "Safe, because passwords are hashed before they reach the handler.",
+            "correct": false,
+            "explanationMarkdown": "Hashing happens in the handler, on the value the client sent. `request.body` at this point holds exactly what the user typed."
+          },
+          {
+            "id": "only-accountid",
+            "textMarkdown": "Unsafe, but only because `accountId` is personal data and should not be logged.",
+            "correct": false,
+            "explanationMarkdown": "An account id is the kind of identifier logs exist to carry — it is how you correlate a request without recording its contents. The password is the problem."
+          }
+        ]
+      },
+      "primaryConceptId": "auth.sensitive-logging"
+    },
+    {
+      "kind": "assessment",
+      "id": "v1-a11",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Authentication and permissions placement check",
+      "conceptIds": [
+        "auth.identity-vs-access",
+        "auth.ownership-check",
+        "auth.cross-user-access",
+        "auth.csrf",
+        "auth.sensitive-logging",
+        "auth.failed-login"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering chapter 11. Each one describes a situation you have not seen in the lessons; reason it through before answering.",
+      "chapterId": "v1-ch11",
+      "items": [
+        {
+          "id": "v1-a11-i1",
+          "objectiveIds": [
+            "auth.ownership-check",
+            "auth.cross-user-access"
+          ],
+          "critical": true,
+          "promptMarkdown": "An endpoint downloads an invoice: `GET /invoices/:id/pdf`. The handler checks `request.session.user` is present, then streams the file named `invoices/${request.params.id}.pdf` from storage. What is the defect?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "no-ownership",
+                "textMarkdown": "Any signed-in account can download any invoice by changing the id, because nothing ties the invoice to the caller.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Authentication is checked; authorisation is not. The handler needs to load the invoice scoped by owner before deciding to stream anything."
+              },
+              {
+                "id": "path-traversal-only",
+                "textMarkdown": "The only risk is path traversal through `..` in the id parameter.",
+                "correct": false,
+                "explanationMarkdown": "Traversal is a genuine second bug worth fixing, but even a perfectly numeric id still lets one customer read another customer's invoice."
+              },
+              {
+                "id": "no-defect",
+                "textMarkdown": "There is no defect: file storage sits behind the application, so the files are not publicly reachable.",
+                "correct": false,
+                "explanationMarkdown": "The application is the thing serving them. Being private to the internet does not make an invoice private to the right customer."
+              },
+              {
+                "id": "content-type",
+                "textMarkdown": "The defect is the missing `Content-Type` header on the streamed response.",
+                "correct": false,
+                "explanationMarkdown": "That affects how the browser displays the file. It is a presentation issue, not an access one."
+              }
+            ]
+          },
+          "explanationMarkdown": "A file route is an endpoint like any other. Serving from storage by an id taken from the path skips the ownership question entirely, and the interface never linking to other customers' invoices is not a control."
+        },
+        {
+          "id": "v1-a11-i2",
+          "objectiveIds": [
+            "auth.csrf",
+            "auth.session-handling"
+          ],
+          "critical": true,
+          "promptMarkdown": "A single-page application authenticates by sending `Authorization: Bearer <token>` from JavaScript, with the token held in memory and never stored in a cookie. A reviewer asks the team to add CSRF tokens to every write endpoint. What is the accurate response?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "not-ambient",
+                "textMarkdown": "Classic CSRF does not apply, because the credential is not attached automatically — an attacking page cannot make the browser add that header. The team should confirm no cookie-based session also grants access.",
+                "correct": true,
+                "explanationMarkdown": "Correct. CSRF depends on ambient credentials. A header the client must deliberately set is not ambient, but a leftover cookie session on the same API would be."
+              },
+              {
+                "id": "always-needed",
+                "textMarkdown": "Every write endpoint needs a CSRF token regardless of how the caller authenticates.",
+                "correct": false,
+                "explanationMarkdown": "A reasonable rule of thumb applied without the mechanism. The defence targets credentials the browser attaches on its own; a bearer header is not one."
+              },
+              {
+                "id": "cors-covers",
+                "textMarkdown": "No token is needed because the browser's CORS preflight blocks all cross-origin requests.",
+                "correct": false,
+                "explanationMarkdown": "CORS governs whether the *response* may be read, and simple form posts are not preflighted at all. It is not a request-forgery defence."
+              },
+              {
+                "id": "https-covers",
+                "textMarkdown": "No token is needed because the site is served over HTTPS.",
+                "correct": false,
+                "explanationMarkdown": "HTTPS protects the request in transit. A forged request is genuinely sent by the victim's browser, so encrypting it changes nothing."
+              }
+            ]
+          },
+          "explanationMarkdown": "The question is always whether the browser supplies the credential without being asked. Cookies are ambient; a header set by application code is not — which is why the same API becomes vulnerable again the moment a cookie session is added alongside."
+        },
+        {
+          "id": "v1-a11-i3",
+          "objectiveIds": [
+            "auth.sensitive-logging"
+          ],
+          "critical": false,
+          "promptMarkdown": "A team adds a redaction helper that removes any field whose name appears in a deny-list of `['password', 'token', 'ssn']`. Six months later an audit finds bank account numbers in the logs. What does this reveal about the approach?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "denylist-fails-open",
+                "textMarkdown": "A deny-list fails open: any field nobody thought to add is logged, so every new feature is a chance to leak. An allowlist of loggable fields fails closed instead.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Name what may be logged rather than what may not, so the default for anything new is exclusion."
+              },
+              {
+                "id": "add-field",
+                "textMarkdown": "The list simply needed `bankAccountNumber` added; the approach is sound.",
+                "correct": false,
+                "explanationMarkdown": "That fixes this instance and guarantees the next one. The audit found the field precisely because nobody predicted it, and the next field will be unpredicted too."
+              },
+              {
+                "id": "encrypt-logs",
+                "textMarkdown": "The logs should have been encrypted at rest, which would have made the finding a non-issue.",
+                "correct": false,
+                "explanationMarkdown": "Encryption at rest is worth having and protects against stolen disks. It does nothing about the engineers, support staff and tools that read the logs normally."
+              },
+              {
+                "id": "log-level",
+                "textMarkdown": "The helper should only run at `info` level and above, since debug logs are ephemeral.",
+                "correct": false,
+                "explanationMarkdown": "Redaction that depends on a runtime level stops working exactly when levels are raised to investigate an incident."
+              }
+            ]
+          },
+          "explanationMarkdown": "Choosing between an allowlist and a deny-list is choosing the failure mode for the case nobody anticipated. For anything involving secrets, the default must be to exclude."
+        },
+        {
+          "id": "v1-a11-i4",
+          "objectiveIds": [
+            "auth.identity-vs-access"
+          ],
+          "critical": false,
+          "promptMarkdown": "An administrator's role is revoked in the database at 10:00. At 10:05 they successfully load an admin-only page. The session cookie was issued at 09:00 and stores `{ userId, role: 'admin' }`, and the handler authorises from `session.role`. What is the cause?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "stale-claim",
+                "textMarkdown": "The permission was frozen into the session at sign-in, so the revocation cannot take effect until the session ends. The role should be read from the account on each request.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Identity is safe to cache in a session; authority is a live fact that other people change."
+              },
+              {
+                "id": "cache",
+                "textMarkdown": "A page cache served a copy of the admin page rendered before 10:00.",
+                "correct": false,
+                "explanationMarkdown": "Possible in principle, but the handler is described as authorising from `session.role`, which allows the request outright — a cache would not be needed to explain it."
+              },
+              {
+                "id": "cookie-expiry",
+                "textMarkdown": "The session cookie's expiry is too long and should be shortened to five minutes.",
+                "correct": false,
+                "explanationMarkdown": "Shorter sessions narrow the window without closing it, at a real cost to users. The defect is caching the decision, not the duration of the identity."
+              },
+              {
+                "id": "db-replication",
+                "textMarkdown": "A read replica had not yet caught up with the role change.",
+                "correct": false,
+                "explanationMarkdown": "Replication lag is a genuine cause of stale reads, but here the handler never consults the database for the role at all."
+              }
+            ]
+          },
+          "explanationMarkdown": "The lifetime of a fact decides whether it can be cached. Identity is fixed at sign-in; authority can be withdrawn by someone else at any moment, so it has to be read when it is used."
+        },
+        {
+          "id": "v1-a11-i5",
+          "objectiveIds": [
+            "auth.failed-login"
+          ],
+          "critical": false,
+          "promptMarkdown": "A sign-in form returns the identical message for every failure. An attacker still reliably determines which email addresses have accounts. Which explanation is most likely?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "timing",
+                "textMarkdown": "The two paths take measurably different times: a missing account returns immediately, while a wrong password spends time verifying a hash.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Verifying a dummy hash on the missing-account path makes the durations comparable so the timing carries no information."
+              },
+              {
+                "id": "message-hidden",
+                "textMarkdown": "The real message is still in the response body and only hidden by the interface.",
+                "correct": false,
+                "explanationMarkdown": "Possible, and worth checking, but the question states the response message is identical. The classic remaining channel is how long the answer takes."
+              },
+              {
+                "id": "brute-force",
+                "textMarkdown": "The attacker is guessing passwords until one works.",
+                "correct": false,
+                "explanationMarkdown": "That discovers a password, not which addresses are registered, and it is far slower than the observation being described."
+              },
+              {
+                "id": "https",
+                "textMarkdown": "The responses are being read off the network because the form is not served over HTTPS.",
+                "correct": false,
+                "explanationMarkdown": "Reading identical responses off the wire still shows identical responses. Transport security is not what distinguishes the two cases."
+              }
+            ]
+          },
+          "explanationMarkdown": "Any observable difference between the two paths is a channel: text, status, headers, and duration. Unifying the message is only the first of those."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

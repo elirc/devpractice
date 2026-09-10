@@ -1,0 +1,1116 @@
+{
+  "note": "V1 chapter 6 — Web interface fundamentals (lessons L16-L18, exercises e046-e054, cards c031-c036, assessment a06). No runnable function tasks: the V1 runner has no DOM, so markup and CSS are taught through code reading, discriminating choices and written explanation rather than through contrived pure functions.",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Web interface fundamentals",
+      "conceptIds": [
+        "html.semantics",
+        "html.forms",
+        "html.labels",
+        "css.layout",
+        "css.responsive",
+        "css.overflow",
+        "a11y.keyboard-navigation",
+        "a11y.color-only",
+        "a11y.accessible-name",
+        "a11y.focus"
+      ],
+      "prerequisiteIds": [
+        "web.request-response"
+      ],
+      "bodyMarkdown": "Before any framework, the browser already implements most of an interface. A `<button>` is focusable, reachable by keyboard, activated by both Enter and Space, and announced as a button. A `<form>` submits when you press Enter in a text field. A `<label>` tied to its control makes the label itself a click target and gives the control a name that assistive technology can read out.\n\nEvery one of those behaviours has to be rebuilt, badly, the moment you reach for a `<div>` instead.\n\nThis chapter is about using what the platform gives you, then layering CSS on top in a way that survives contact with a narrow screen, and finally making sure that the states your interface shows — invalid, busy, selected, expanded — are perceivable by someone who is not looking at your colour palette or using a mouse. These are not extras added at the end. They are the difference between an interface that works for everyone and one that works for people who happen to be using it the way you did.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v1-l16",
+        "v1-l17",
+        "v1-l18"
+      ],
+      "assessmentId": "v1-a06",
+      "objectiveIds": [
+        "html.semantics",
+        "html.forms",
+        "html.labels",
+        "css.layout",
+        "css.responsive",
+        "css.overflow",
+        "a11y.keyboard-navigation",
+        "a11y.color-only",
+        "a11y.accessible-name",
+        "a11y.focus"
+      ],
+      "missionIds": [],
+      "sortOrder": 5
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l16",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Semantic HTML and forms",
+      "conceptIds": [
+        "html.semantics",
+        "html.forms",
+        "html.labels"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Choosing an element is choosing a set of behaviours. `<div>` and `<span>` have none: no role, no focus, no keyboard handling, no meaning. Everything else is a shortcut to work you would otherwise write yourself.\n\nA `<button>` is focusable in the tab order, fires its handler on Enter and on Space, is announced as \"button\", and can be disabled. A `<a href>` navigates, is announced as a link, and supports open-in-new-tab. Using the wrong one is not pedantry: a link that acts like a button breaks middle-click, and a `<div onclick>` is invisible to a keyboard entirely.\n\nA `<form>` is where the browser gives you the most for free. Wrap your controls in one, give it a `<button type=\"submit\">`, and you get submission on Enter from any text field, a `submit` event you can intercept once in a single place, and the browser's own constraint validation from attributes like `required`, `type=\"email\"`, `min` and `pattern`. That validation is a first line only — the server must still check everything — but it is instant, free and works before your JavaScript loads.\n\nAnd a control needs a **name**. The reliable way is a `<label>` whose `for` attribute matches the control's `id`:\n\n```html\n<label for=\"pickup-date\">Pickup date</label>\n<input id=\"pickup-date\" name=\"pickupDate\" type=\"date\" required>\n```\n\nThat association does three separate jobs: screen readers announce \"Pickup date, date\" when focus lands on the input, clicking the words moves focus into the field, and the tap target grows to include the text — which matters most on a phone. Wrapping the input inside the `<label>` works too. Grey hint text inside the field does not: it disappears the moment the user types, and it is not a name.",
+      "chapterId": "v1-ch06",
+      "sortOrder": 0,
+      "objectives": [
+        "Choose an element for the behaviour it already has rather than for how it looks.",
+        "Use a real form so the browser handles submission and first-pass validation.",
+        "Associate every control with a label that names it."
+      ],
+      "estimatedMinutes": 14,
+      "workedExampleMarkdown": "A pickup booking panel for Ferndale Bike Hire, rebuilt from divs into what the browser already understands.\n\n```html\n<!-- Before: looks identical, behaves badly -->\n<div class=\"field\">\n  <div class=\"label\">Pickup date</div>\n  <input class=\"input\" id=\"d1\">\n</div>\n<div class=\"btn\" onclick=\"book()\">Book</div>\n```\n\nNo keyboard access to Book, no Enter-to-submit, no name on the input, no validation, and nothing announced as a control.\n\n```html\n<!-- After: same appearance, real behaviour -->\n<form id=\"booking\">\n  <label for=\"pickup-date\">Pickup date</label>\n  <input id=\"pickup-date\" name=\"pickupDate\" type=\"date\" required>\n\n  <label for=\"bike-size\">Frame size</label>\n  <select id=\"bike-size\" name=\"bikeSize\" required>\n    <option value=\"\">Choose a size</option>\n    <option value=\"s\">Small</option>\n    <option value=\"m\">Medium</option>\n  </select>\n\n  <button type=\"submit\">Book</button>\n</form>\n\n<script>\n  document.getElementById('booking').addEventListener('submit', (event) => {\n    event.preventDefault();\n    book(new FormData(event.target));\n  });\n</script>\n```\n\nThe visual result is the same after styling. What changed is that Enter now submits from either field, both controls have names, `required` blocks an empty submission before any script runs, one `submit` listener replaces a handler per control, and the Book button is reachable by Tab and activated by Space.",
+      "commonMistakes": [
+        "Using a `placeholder` attribute as the only label, so the name vanishes as soon as the user types and screen readers may announce nothing at all.",
+        "Building a button from a `<div>` with an `onclick`, which no keyboard user can reach or activate.",
+        "Attaching a click handler to the submit button instead of listening for the form's `submit` event, so pressing Enter in a text field bypasses the handler entirely.",
+        "Writing `<label>Pickup date</label>` near an input without `for` and `id`, which associates nothing.",
+        "Treating the browser's built-in validation as sufficient, when anyone can send a request that never touched the form."
+      ],
+      "summaryMarkdown": "Pick the element whose built-in behaviour you want. A real `<form>` gives you Enter-to-submit, one `submit` event and free first-pass validation; a `<label for>` tied to an `id` gives every control a name, a bigger tap target and a click target.",
+      "exerciseIds": [
+        "v1-e046",
+        "v1-e047",
+        "v1-e048"
+      ],
+      "reviewCardIds": [
+        "v1-c031",
+        "v1-c032"
+      ],
+      "references": [
+        {
+          "label": "MDN: The button element",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/button"
+        },
+        {
+          "label": "MDN: Client-side form validation",
+          "url": "https://developer.mozilla.org/en-US/docs/Learn/Forms/Form_validation"
+        },
+        {
+          "label": "MDN: The label element",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/label"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e046",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a search panel that ignores the Enter key",
+      "conceptIds": [
+        "html.forms",
+        "html.semantics"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A support ticket that reads like a browser bug and is really a markup decision.",
+      "lessonId": "v1-l16",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "foundation",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "Ferndale Bike Hire staff report that typing a bike number and pressing Enter does nothing; they have to reach for the mouse every time.\n\n```html\n<div class=\"search\">\n  <label for=\"bike-no\">Bike number</label>\n  <input id=\"bike-no\" type=\"text\">\n  <button onclick=\"runSearch()\">Search</button>\n</div>\n```\n\nWhat is missing, and what does adding it give you?",
+      "hints": [
+        "Enter-in-a-text-field is a behaviour of a particular element, not of inputs in general.",
+        "There is no `<form>` here, so the browser has nothing to submit and no reason to treat Enter as \"go\".",
+        "Wrap the controls in a `<form>`, make the button `type=\"submit\"`, and listen for the form's `submit` event — that single change restores Enter, gives you one handler for both routes, and makes constraint attributes like `required` take effect."
+      ],
+      "solution": {
+        "modelAnswer": "There is no `<form>`. Enter-to-submit is form behaviour, so with only a bare `<div>` the browser has nothing to submit. Wrapping the controls in `<form>`, using `<button type=\"submit\">`, and handling the form's `submit` event (calling `preventDefault` if you are searching without navigating) restores Enter, unifies the click and keyboard paths into one handler, and enables constraint validation attributes.",
+        "explanationMarkdown": "This is the general shape of the semantic-element argument: the behaviour people expect is already implemented, and it is attached to a specific element rather than floating free. It is also why listening for `submit` rather than for the button's `click` matters — `submit` fires for both the button press and the Enter key, so one handler covers both, whereas a `click` handler silently covers only one of them."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "no-form",
+            "textMarkdown": "There is no `<form>`, so no submit behaviour exists; wrapping the controls in one with a `type=\"submit\"` button and a `submit` listener restores Enter and unifies both activation paths.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Enter-to-submit belongs to forms, and listening for `submit` covers the click and the key press with a single handler."
+          },
+          {
+            "id": "keydown-listener",
+            "textMarkdown": "The input needs a `keydown` listener that checks for `event.key === 'Enter'` and calls `runSearch()`.",
+            "correct": false,
+            "explanationMarkdown": "This works, and it is what people usually reach for, but it re-implements behaviour the platform already has — and it has to be repeated on every field the user might be in when they press Enter."
+          },
+          {
+            "id": "button-type",
+            "textMarkdown": "The button is missing `type=\"submit\"`, which defaults it to `type=\"button\"` and blocks submission.",
+            "correct": false,
+            "explanationMarkdown": "The default inside a form is in fact `submit`. Outside a form the type is irrelevant, because there is nothing to submit either way."
+          },
+          {
+            "id": "autofocus",
+            "textMarkdown": "The input is missing `autofocus`, so keystrokes are not being delivered to it.",
+            "correct": false,
+            "explanationMarkdown": "The staff are typing into the field successfully; focus is not the problem. `autofocus` would change where focus starts, not what Enter does."
+          }
+        ]
+      },
+      "primaryConceptId": "html.forms",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e047",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which markup actually names the field?",
+      "conceptIds": [
+        "html.labels",
+        "a11y.accessible-name"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Four ways to put words next to an input, only some of which the browser treats as a name.",
+      "lessonId": "v1-l16",
+      "sortOrder": 1,
+      "type": "choice",
+      "difficulty": "core",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "Pinegate Library needs a \"Member number\" field where clicking the words moves focus into the box and a screen reader announces the field's name.\n\nWhich of these achieves both?",
+      "hints": [
+        "Two separate questions: does the browser link the text to the control, and does the text survive the user typing into the field?",
+        "Only an actual `<label>` gives you the click-to-focus behaviour and the enlarged tap target; other techniques may supply a name without supplying that.",
+        "The link is made either by `for` matching the control's `id`, or by nesting the input inside the label. Text merely positioned nearby is associated with nothing at all."
+      ],
+      "solution": {
+        "modelAnswer": "`<label for=\"member-no\">Member number</label>` with `<input id=\"member-no\">`. The `for`/`id` pair is what creates the association, which is what makes the words a click target and gives the input a name that is announced on focus.",
+        "explanationMarkdown": "There is a hierarchy here worth remembering. A real, associated `<label>` is best: it names the control, enlarges the tap target and works for everyone. An `aria-label` supplies a name for assistive technology but is invisible, so nobody using a pointer benefits and nobody can proofread it visually. Text that is merely adjacent supplies nothing at all — proximity is a visual relationship, and the browser has no way to guess it."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "label-for",
+            "textMarkdown": "`<label for=\"member-no\">Member number</label>` followed by `<input id=\"member-no\" type=\"text\">`",
+            "correct": true,
+            "explanationMarkdown": "Correct. The `for`/`id` association names the control and makes the label text a click target that moves focus into the field."
+          },
+          {
+            "id": "aria-label-only",
+            "textMarkdown": "`<span>Member number</span>` followed by `<input aria-label=\"Member number\" type=\"text\">`",
+            "correct": false,
+            "explanationMarkdown": "Close, and it does give the input a name for assistive technology — but the visible words are not associated with the control, so clicking them does nothing and the tap target stays small."
+          },
+          {
+            "id": "placeholder-only",
+            "textMarkdown": "`<input type=\"text\" placeholder=\"Member number\">` with no other text",
+            "correct": false,
+            "explanationMarkdown": "The `placeholder` attribute is hint text, not a name. It disappears as soon as the user types, so anyone checking their entry loses the only clue about what the field was for."
+          },
+          {
+            "id": "label-no-for",
+            "textMarkdown": "`<label>Member number</label>` immediately before `<input id=\"member-no\" type=\"text\">`",
+            "correct": false,
+            "explanationMarkdown": "A `<label>` with neither a `for` attribute nor the input nested inside it is associated with nothing. It looks right and behaves like a plain `<span>`."
+          }
+        ]
+      },
+      "primaryConceptId": "html.labels",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e048",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain what a component library costs when it replaces native elements",
+      "conceptIds": [
+        "html.semantics",
+        "html.forms"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Make the case against rebuilding a control from scratch, in terms a product manager would accept.",
+      "lessonId": "v1-l16",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "A teammate proposes replacing every `<select>` in the Ferndale Bike Hire booking flow with a custom dropdown built from `<div>` elements, because the native one cannot be styled to match the design.\n\nList the behaviours that would have to be rebuilt, explain why \"we will add keyboard support later\" tends not to happen, and describe an approach that gets most of the design without giving up the platform behaviour.",
+      "hints": [
+        "Work through one interaction at a time: how does someone open it, move through the options, choose one, close it without choosing, and how does the phone behave?",
+        "The rebuild list is long — focus, Tab order, Up/Down/Home/End, type-ahead, Escape to dismiss, the announced role and the current selection, the native picker on a phone, and behaviour with the page zoomed.",
+        "Suggest styling what is styleable first (the closed control, the surrounding field, the focus ring) and, if a custom control is genuinely required, budgeting it as a real component built on the listbox pattern with keyboard support included from the start — not as a styling task."
+      ],
+      "solution": {
+        "modelAnswer": "A native `<select>` already provides: keyboard focus and a place in the Tab order, opening with Enter, Space or Alt+Down, moving through options with Up and Down, jumping with Home and End, type-ahead to the first matching option, Escape to close without changing the value, an announced role and current value, and — most importantly on a phone — the operating system's own picker, which is far easier to use than anything in the page. Rebuilding all of that from divs is a component-sized project, not a styling change. \"Keyboard support later\" rarely happens because the control appears finished as soon as it works with a mouse, so the remaining work has no visible symptom and never wins a place in the plan; the missing behaviour surfaces only when someone who relies on it tries to book. I would first style what can be styled — the closed control, the field frame, the focus ring — and accept that the open list looks native. If the design genuinely requires a custom list, I would budget it as a real component following the listbox pattern, with keyboard interaction, focus management and announced state built in from the first commit, and test it with the keyboard alone before it ships.",
+        "explanationMarkdown": "The argument that works is an estimate, not a principle. Native controls bundle a large amount of interaction design that is invisible until it is missing, and the cost of reproducing it is easy to under-estimate precisely because the visual part is the small part. The second point is about incentives rather than intent: work that has no visible symptom loses to work that does, every time, so \"later\" is a decision to ship it broken. The third is a genuine compromise — most design objections concern the closed state, which is styleable, so the expensive rebuild often buys very little."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Lists at least four concrete behaviours a native select provides — focus and Tab order, arrow-key navigation, type-ahead, Escape to dismiss, announced role and value, the mobile picker.",
+          "Explains that the rebuild is a component-sized project rather than a styling change.",
+          "Gives a reason \"later\" does not happen that is about visibility or incentives, not about laziness.",
+          "Proposes a concrete middle path: style the closed control, or build a real listbox-pattern component with keyboard support included from the start."
+        ],
+        "modelAnswerMarkdown": "Rebuilding a select means rebuilding focus behaviour and Tab order, Enter or Alt+Down to open, Up and Down to move, Home and End to jump, type-ahead by first letter, Escape to close without changing anything, the announced role and current selection, and the native picker phones show instead of an in-page list. That is a component, not a stylesheet. \"Keyboard support later\" fails because the control looks finished the moment it works with a mouse — there is no visible symptom to keep the remaining work on the board, so it loses to features that show up in a demo, and the gap is discovered by a customer rather than by us. My proposal is to style the closed control, the field and the focus ring, and leave the open list native. If the design truly needs a custom list, we should scope it as a listbox-pattern component with keyboard handling and focus management in the first commit, and require a keyboard-only walkthrough before it ships."
+      },
+      "primaryConceptId": "html.semantics",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c031",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What a form gives you for free",
+      "conceptIds": [
+        "html.forms"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the behaviours that arrive with a real form element and no script.",
+      "lessonId": "v1-l16",
+      "type": "recall",
+      "promptMarkdown": "Name four things a real `<form>` gives you that a `<div>` full of inputs does not.",
+      "answerMarkdown": "Submission on Enter from any text field; a single `submit` event covering both the button and the key press; constraint validation from attributes such as `required`, `type=\"email\"` and `pattern`, applied before any script runs; and a serialisable set of named controls via `FormData` — plus the ability to work at all with JavaScript unavailable.",
+      "explanationMarkdown": "The `submit` event is the one people miss most often. A `click` handler on the button covers only the pointer path, so keyboard users hit a dead end that nobody notices in testing because the mouse still works.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "html.forms"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c032",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Read a label that is not attached to anything",
+      "conceptIds": [
+        "html.labels",
+        "a11y.accessible-name"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Judge a fragment of markup where the label looks correct and associates nothing.",
+      "lessonId": "v1-l16",
+      "type": "code-reading",
+      "promptMarkdown": "```html\n<label>Return date</label>\n<input id=\"return-date\" type=\"date\">\n```\n\nWhat behaviour is missing here, and what are the two ways to fix it?",
+      "answerMarkdown": "The label is not associated with the input, so the control has no accessible name and clicking the words does nothing. Fix it either by adding `for=\"return-date\"` to the label, or by nesting the input inside the `<label>` element.",
+      "explanationMarkdown": "Visual proximity is not an association. The browser links a label to a control only through `for`/`id` or through nesting, and everything else — the name announced on focus, the click target, the larger tap area — follows from that link.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "no-association",
+            "textMarkdown": "The label is associated with nothing, so the input has no accessible name and the words are not a click target; add `for=\"return-date\"` or nest the input inside the label.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Association comes from `for`/`id` or from nesting, never from being next to each other."
+          },
+          {
+            "id": "needs-name-attr",
+            "textMarkdown": "The input is missing a `name` attribute, which is what a label attaches to.",
+            "correct": false,
+            "explanationMarkdown": "`name` is used when submitting form data. Labels attach via `for` and `id`."
+          },
+          {
+            "id": "works-by-proximity",
+            "textMarkdown": "Nothing is missing — a label immediately before an input is associated with it automatically.",
+            "correct": false,
+            "explanationMarkdown": "There is no proximity rule. This markup behaves the same as a `<span>` followed by an unnamed input."
+          },
+          {
+            "id": "aria-labelledby-required",
+            "textMarkdown": "The only correct fix is `aria-labelledby` pointing at an id on the label.",
+            "correct": false,
+            "explanationMarkdown": "That would work, but it is the most elaborate option. Use the native `for` attribute, which also gives you the click target."
+          }
+        ]
+      },
+      "primaryConceptId": "html.labels"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l17",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "CSS layout and responsiveness",
+      "conceptIds": [
+        "css.layout",
+        "css.responsive",
+        "css.overflow"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A block-level element is already responsive. It fills the width available and its content wraps. Almost every layout problem you will meet comes from taking that away — a fixed pixel width, a value that cannot shrink, or content that refuses to wrap — and then trying to win it back with media queries.\n\n**Flexbox** arranges items along one axis and is the right tool for a row of controls, a navigation bar, or a card's internal stack. **Grid** arranges items on two axes at once and is the right tool for a page skeleton or a gallery. The useful modern habit is to let them adapt without breakpoints: `flex-wrap: wrap` with a `min-width` on the items, or `grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr))`, which fits as many columns as there is room for and reflows on its own at any width.\n\nWhen you do need a breakpoint, write it mobile-first with `min-width`: style the narrow case as the default and add complexity as space appears. The alternative — designing wide and subtracting — means every narrow screen runs the most complicated version of your CSS with overrides fighting it.\n\n**Overflow** is the failure mode to recognise on sight. A page that scrolls sideways is almost never caused by the page: it is one child that cannot fit. The usual culprits are a fixed `width` in pixels, a long unbroken string such as a URL or an identifier, a wide `<table>`, a `<pre>` block, or an image without `max-width: 100%`. The fix is to contain the wide thing rather than to hide the symptom on `body`. Give the offending element its own `overflow-x: auto` so it scrolls inside its box, add `min-width: 0` to the flex or grid child that is refusing to shrink (items default to `min-width: auto`, which is the single most common cause of an unshrinkable column), and let long strings break with `overflow-wrap: anywhere`.\n\nReaching for `overflow-x: hidden` on `body` is the trap. It stops the scrollbar and leaves the content genuinely unreachable, which is worse than the scrollbar was.",
+      "chapterId": "v1-ch06",
+      "sortOrder": 1,
+      "objectives": [
+        "Choose between flow, flexbox and grid for a given arrangement.",
+        "Build a layout that adapts across widths with as few breakpoints as possible.",
+        "Find and contain the one child that is making the page scroll sideways."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "A results table in the Thistle Dispatch console that broke the page on a phone.\n\n```css\n/* Before: the table is wider than the screen, so the whole page scrolls sideways. */\n.results table { width: 900px; }\n```\n\nThe symptom is a page that slides left and right, with the header and the navigation moving along with it.\n\n```css\n/* After: the wide thing scrolls inside its own box; the page does not. */\n.results {\n  overflow-x: auto;          /* the table scrolls here, not the document */\n  -webkit-overflow-scrolling: touch;\n}\n.results table {\n  min-width: 45rem;          /* still readable; no longer pinned to the viewport */\n  width: 100%;\n}\n.results td.reference {\n  overflow-wrap: anywhere;   /* long tracking codes wrap instead of stretching a column */\n}\n```\n\nAnd the layout around it, adapting with no breakpoint at all:\n\n```css\n.cards {\n  display: grid;\n  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));\n  gap: 1rem;\n}\n.card {\n  min-width: 0;   /* without this, a long unbroken word can force the column wider */\n}\n```\n\nOne column at 360px, four on a laptop, and no media query was written. The `min-width: 0` is the line people omit and then spend an afternoon on: grid and flex children default to `min-width: auto`, which means \"never shrink below your content\", and one long identifier is enough to push the whole grid past the viewport.",
+      "commonMistakes": [
+        "Putting `overflow-x: hidden` on `body` to stop sideways scrolling, which hides content instead of containing it.",
+        "Setting widths in pixels on containers, so the layout works only at the width it was designed at.",
+        "Forgetting `min-width: 0` on a flex or grid child, then blaming the parent when one long string stretches the whole row.",
+        "Writing breakpoints with `max-width` so the narrow case inherits every desktop rule and then overrides it.",
+        "Testing only by narrowing the desktop browser, which never reproduces the phone's text scaling or a soft keyboard covering half the viewport."
+      ],
+      "summaryMarkdown": "Content is responsive until you constrain it. Prefer intrinsically flexible layouts — wrapping flex items, `auto-fill` grid tracks — over breakpoints, write the breakpoints you do need mobile-first, and when the page scrolls sideways find the one child at fault and give it its own scroll container rather than hiding the overflow.",
+      "exerciseIds": [
+        "v1-e049",
+        "v1-e050",
+        "v1-e051"
+      ],
+      "reviewCardIds": [
+        "v1-c033",
+        "v1-c034"
+      ],
+      "references": [
+        {
+          "label": "MDN: Basic concepts of flexbox",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_flexible_box_layout/Basic_concepts_of_flexbox"
+        },
+        {
+          "label": "MDN: CSS grid layout",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_grid_layout"
+        },
+        {
+          "label": "MDN: overflow",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/overflow"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e049",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a page that scrolls sideways on a phone",
+      "conceptIds": [
+        "css.overflow",
+        "css.responsive"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The whole document slides left and right and every candidate fix hides the symptom instead of removing it.",
+      "lessonId": "v1-l17",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "On a 360px phone, the Thistle Dispatch delivery list slides sideways: the header and navigation move with it. Everything is fine on a laptop.\n\n```html\n<main class=\"list\">\n  <article class=\"row\">\n    <span class=\"ref\">TD-2026-0000-000000-AB99KKD7</span>\n    <span class=\"suburb\">Ferndale</span>\n  </article>\n</main>\n```\n\n```css\n.row { display: flex; gap: 1rem; }\n.ref { font-family: monospace; }\n```\n\nWhat is causing it, and which change fixes it properly?",
+      "hints": [
+        "The document only scrolls sideways because some descendant is wider than the viewport. Find the widest thing on the row.",
+        "The tracking reference is one unbroken string. A flex child defaults to `min-width: auto`, which means it will not shrink below the width of its own content.",
+        "Fix it at the offending element: `min-width: 0` on `.ref` lets it shrink, and `overflow-wrap: anywhere` lets the string break across lines. Putting `overflow-x: hidden` on `body` would only make the reference unreadable and unreachable."
+      ],
+      "solution": {
+        "modelAnswer": "The tracking reference is a single unbroken string, and as a flex child it defaults to `min-width: auto`, so it refuses to shrink below its own content width. That forces the row wider than 360px and the whole document scrolls. The proper fix is on `.ref`: `min-width: 0` so it may shrink, plus `overflow-wrap: anywhere` so the string wraps. Hiding the overflow on `body` would stop the scrollbar and leave part of the reference permanently unreachable.",
+        "explanationMarkdown": "Sideways scrolling is always a specific child, never the page, so the diagnostic habit is to find the widest descendant rather than to constrain the ancestor. The `min-width: auto` default on flex and grid children is the piece that surprises people: `width: 100%` and `max-width: 100%` both appear to be obeyed and the item still will not shrink, because the minimum, not the maximum, is what is binding. And hiding overflow is not containment — content that cannot be scrolled to is content nobody can read, which is a worse outcome than the scrollbar."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "min-width-auto",
+            "textMarkdown": "The unbroken reference cannot shrink because a flex child defaults to `min-width: auto`; set `min-width: 0` and `overflow-wrap: anywhere` on `.ref`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The minimum size is what is binding, and letting the string break removes the cause rather than masking it."
+          },
+          {
+            "id": "body-hidden",
+            "textMarkdown": "Add `overflow-x: hidden` to `body` so the document can no longer scroll horizontally.",
+            "correct": false,
+            "explanationMarkdown": "This removes the scrollbar and leaves the end of the reference permanently unreachable. The row is still too wide; you have only taken away the means of seeing it."
+          },
+          {
+            "id": "max-width-ref",
+            "textMarkdown": "Add `max-width: 100%` to `.ref`, which constrains it to the width of the row.",
+            "correct": false,
+            "explanationMarkdown": "Plausible, and it does nothing here: the automatic *minimum* size wins over the maximum, so the item still refuses to shrink."
+          },
+          {
+            "id": "media-query",
+            "textMarkdown": "Add a `max-width: 480px` media query that switches `.row` to `display: block`.",
+            "correct": false,
+            "explanationMarkdown": "Stacking the row does stop flex from holding the items side by side, but the reference is still one unbreakable string wider than 360px, so the page keeps scrolling sideways."
+          }
+        ]
+      },
+      "primaryConceptId": "css.overflow",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e050",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose a card layout that adapts on its own",
+      "conceptIds": [
+        "css.layout",
+        "css.responsive"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Four workable-looking approaches to the same gallery, with different behaviour at the widths nobody designed for.",
+      "lessonId": "v1-l17",
+      "sortOrder": 1,
+      "type": "choice",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "The Pinegate Library catalogue shows a variable number of cards. It should fit one column on a narrow phone and as many columns as the width allows on a large screen, with cards never narrower than about 16rem, and it should behave sensibly at widths nobody has tested.\n\nWhich approach best meets that?",
+      "hints": [
+        "Ask which option keeps working at a width the author never considered, including a very large monitor and a phone with the text size increased.",
+        "Breakpoint-based column counts only produce the widths you enumerated; anything intrinsic — a track size expressed as a minimum plus a share of the remainder — adapts continuously.",
+        "`repeat(auto-fill, minmax(16rem, 1fr))` states the rule (never narrower than 16rem, otherwise share the space) and lets the browser compute the column count at every width, with no media query to maintain."
+      ],
+      "solution": {
+        "modelAnswer": "`display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 1rem;` — the track definition expresses the requirement directly and the browser recomputes the column count at any width, including ones nobody tested.",
+        "explanationMarkdown": "The distinction worth taking away is between describing the intent and enumerating the outcomes. A breakpoint list says \"at these widths, use these column counts\", which is correct only at the widths someone thought of and needs maintenance every time the design or the card size changes. An intrinsic track definition says \"never narrower than this, otherwise share what is left\", which is the actual requirement, so it stays correct on a monitor twice as wide as anything you own and on a phone whose user has doubled the text size."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "auto-fill-minmax",
+            "textMarkdown": "`display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 1rem;`",
+            "correct": true,
+            "explanationMarkdown": "Correct. The requirement is stated as a rule the browser applies at every width, so no breakpoints are needed and untested widths are handled."
+          },
+          {
+            "id": "flex-percent-basis",
+            "textMarkdown": "`display: flex; flex-wrap: wrap;` with `.card { flex: 1 1 25%; }`",
+            "correct": false,
+            "explanationMarkdown": "This wraps and is close, but the basis is a percentage of the container, so on a narrow phone four cards still try to share the row and each ends up far below 16rem."
+          },
+          {
+            "id": "media-query-columns",
+            "textMarkdown": "`display: grid;` with `grid-template-columns: 1fr` and media queries at 600px, 900px and 1200px setting two, three and four columns.",
+            "correct": false,
+            "explanationMarkdown": "It works at the four widths enumerated and nowhere else in particular: above 1200px the cards stretch indefinitely, and every change to the card size means revisiting all three breakpoints."
+          },
+          {
+            "id": "float-fixed",
+            "textMarkdown": "`.card { float: left; width: 16rem; margin-right: 1rem; }` with a clearfix on the container.",
+            "correct": false,
+            "explanationMarkdown": "Fixed-width floats do wrap, but the cards never grow to use leftover space, the trailing gap is uneven, and at 360px a 16rem card plus its margin overflows the viewport."
+          }
+        ]
+      },
+      "primaryConceptId": "css.layout",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e051",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain a breakpoint strategy you would defend in review",
+      "conceptIds": [
+        "css.responsive",
+        "css.overflow"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Argue for a way of deciding where breakpoints go, rather than reciting a list of device widths.",
+      "lessonId": "v1-l17",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "A stylesheet you have inherited contains breakpoints at 320px, 375px, 414px, 768px, 1024px and 1366px, each named after a device, all written with `max-width`. New phones keep arriving that fall between them, and a bug report says the layout breaks when a user increases their browser's text size.\n\nExplain what is wrong with choosing breakpoints this way, what you would replace it with, and why the text-size report is a symptom of the same underlying decision.",
+      "hints": [
+        "Ask what question a breakpoint should answer: \"which device is this\" or \"has this particular layout run out of room\".",
+        "Device widths are a moving target and there are far more of them than any list; a breakpoint chosen where the content itself starts to look wrong keeps working on hardware that does not exist yet.",
+        "Units are the link to the text-size report: breakpoints in `px` do not respond when the user enlarges text, whereas `em`-based breakpoints scale with it — so the layout switches at the point where the content is genuinely too cramped, not at a fixed physical width."
+      ],
+      "solution": {
+        "modelAnswer": "Naming breakpoints after devices ties the stylesheet to a list that was already incomplete when it was written and grows every year, and it answers the wrong question: what matters is whether this layout has run out of room, not which handset is being used. I would delete the device list and add breakpoints only where the content itself starts to look wrong — usually two or three for a page — and I would write them mobile-first with `min-width`, so the simplest layout is the default and complexity is added as space appears rather than subtracted with overrides. I would also replace most of them with intrinsically flexible layouts: wrapping flex items with a sensible minimum, or `repeat(auto-fill, minmax(...))` grid tracks, which need no breakpoint at all. The text-size report is the same decision seen from another angle: `px` breakpoints ignore the user's font size, so someone who doubles their text gets the wide layout with text far too large for it, and columns overflow. Breakpoints in `em` scale with the text, so the switch happens when the content is genuinely cramped.",
+        "explanationMarkdown": "The general move is from enumerating cases to expressing the rule. A device list is a set of examples, and examples always run out; a content-driven breakpoint is a statement about the design that remains true on hardware nobody has built. The `min-width` ordering matters for the same reason it matters everywhere: the default case should be the simple one, so the narrow layout is what you get by omission rather than what you get after a chain of overrides. And the unit question is not a detail — a layout that changes with physical width but not with text size is one that quietly excludes anyone who needs larger text."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Explains that device-width breakpoints enumerate an incomplete and growing list, and answers the wrong question about the layout.",
+          "Proposes content-driven breakpoints — placed where the design itself starts to fail — and far fewer of them.",
+          "Argues for mobile-first `min-width` ordering, so the simple layout is the default rather than the result of overrides.",
+          "Connects the text-size report to the choice of unit, explaining that `em`-based breakpoints respond to the user's font size while `px` ones do not.",
+          "Mentions replacing some breakpoints entirely with intrinsically flexible layout such as wrapping flex items or auto-fill grid tracks."
+        ],
+        "modelAnswerMarkdown": "The device list was out of date the day it was written and gets worse every year, and it answers the wrong question: what matters is whether this layout has run out of room, not which phone someone owns. I would remove the device names, keep two or three breakpoints chosen by narrowing the browser until the design itself starts to look wrong, and write them mobile-first with `min-width` so the simple layout is the default and complexity is added as space appears instead of overridden away. Several of them would disappear entirely in favour of intrinsic layout: wrapping flex items with a minimum size, or grid tracks written as `repeat(auto-fill, minmax(16rem, 1fr))`, which need no breakpoint at all. The text-size bug is the same decision in a different disguise. A breakpoint in `px` cannot see that the user has enlarged their text, so they are served the wide multi-column layout at a font size it was never designed for and the columns overflow. Written in `em`, the breakpoint scales with the text and the layout simplifies exactly when the content becomes cramped."
+      },
+      "primaryConceptId": "css.responsive",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c033",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Flexbox or grid",
+      "conceptIds": [
+        "css.layout"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the distinction that decides between the two layout systems.",
+      "lessonId": "v1-l17",
+      "type": "recall",
+      "promptMarkdown": "What is the one-sentence distinction between flexbox and grid, and give an example where each is the obvious choice.",
+      "answerMarkdown": "Flexbox arranges content along a single axis and sizes items from their content; grid arranges content on two axes at once against a track structure you define. A toolbar of buttons or a card's internal stack is flexbox; a page skeleton or a gallery of equal cards is grid.",
+      "explanationMarkdown": "The practical tell is whether you care about alignment across rows as well as within them. If items in different rows must line up in columns, you want grid; if each line is independent, flexbox with wrapping is simpler.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "css.layout"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c034",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The flex child that will not shrink",
+      "conceptIds": [
+        "css.overflow",
+        "css.layout"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Diagnose the most common cause of an element overflowing its flex container.",
+      "lessonId": "v1-l17",
+      "type": "debugging",
+      "promptMarkdown": "A flex child has `width: 100%` and `max-width: 100%` and still pushes its container wider than the viewport when it contains a long unbroken string. Why, and what is the fix?",
+      "answerMarkdown": "Flex and grid children default to `min-width: auto`, meaning they will not shrink below the intrinsic width of their content — and the automatic minimum wins over `width` and `max-width`. Set `min-width: 0` on the child so it may shrink, and add `overflow-wrap: anywhere` so the long string can break.",
+      "explanationMarkdown": "This is the single most common CSS surprise in flex layouts, because both properties people reach for describe the maximum and the binding constraint is the minimum. Reach for `min-width: 0` whenever a flex or grid child overflows and the declared widths appear to be ignored.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "auto-minimum",
+            "textMarkdown": "The automatic minimum size (`min-width: auto`) prevents shrinking below the content width and overrides both declarations; set `min-width: 0` and let the string wrap.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The minimum is the binding constraint, which is why adjusting the maximum changes nothing."
+          },
+          {
+            "id": "percent-of-nothing",
+            "textMarkdown": "`width: 100%` resolves against a container with no definite width, so it is ignored entirely.",
+            "correct": false,
+            "explanationMarkdown": "The percentage does resolve against the flex container. It is the automatic minimum, not an unresolvable percentage, that keeps the item wide."
+          },
+          {
+            "id": "needs-flex-shrink",
+            "textMarkdown": "The child needs `flex-shrink: 1`, which is not the default for flex items.",
+            "correct": false,
+            "explanationMarkdown": "`flex-shrink: 1` is already the default. Shrinking is permitted; it is stopped at the automatic minimum."
+          },
+          {
+            "id": "box-sizing",
+            "textMarkdown": "`box-sizing` is set to `content-box`, so padding is added on top of the 100% width.",
+            "correct": false,
+            "explanationMarkdown": "That can add a few pixels of overflow, but it would not depend on whether the content contains a long unbroken string."
+          }
+        ]
+      },
+      "primaryConceptId": "css.overflow"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l18",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Accessibility states",
+      "conceptIds": [
+        "a11y.keyboard-navigation",
+        "a11y.color-only",
+        "a11y.accessible-name",
+        "a11y.focus"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Interfaces are full of states: this field is invalid, this button is busy, this panel is expanded, this row is selected. A state that is only expressed visually, or only reachable with a pointer, does not exist for a large number of people.\n\n**Keyboard.** Every interactive thing must be reachable with Tab and operable with Enter or Space. You get that automatically from `<button>`, `<a href>`, `<input>`, `<select>` and `<textarea>`. You get none of it from a `<div onclick>`, and bolting on `tabindex=\"0\"` plus a keydown handler reproduces perhaps half of it. Never use a positive `tabindex` value: it jumps the element ahead of everything else and scrambles the order for the whole page.\n\n**Focus.** Focus must be visible and must go somewhere sensible. Removing the focus ring with `outline: none` and putting nothing back is the single most damaging line of CSS you can write; if the default ring clashes with your design, replace it with your own using `:focus-visible`. When you open a dialog, move focus into it, keep Tab inside it while it is open, close it on Escape, and return focus to the control that opened it — otherwise a keyboard user is left at the top of the page with no idea where they are.\n\n**Names.** Assistive technology announces a control by its accessible name, computed from its content, its associated `<label>`, or an `aria-label`. This is why a row of icon-only buttons all announce as \"button\", and why \"Read more\" repeated eleven times is useless in a list of links pulled out of context. Name the control by what it does to what: \"Cancel booking BK-1042\".\n\n**Colour.** Colour is a decoration on meaning, never the meaning itself. A red border on an invalid field is invisible to someone with a colour vision deficiency, to someone on a washed-out screen in sunlight, and to a screen reader entirely. Pair it with text that says what is wrong, associate that text with the field via `aria-describedby`, and set `aria-invalid=\"true\"`. The same rule applies to a status shown only as a coloured dot, or a chart whose series are distinguished only by hue.",
+      "chapterId": "v1-ch06",
+      "sortOrder": 2,
+      "objectives": [
+        "Make every control reachable and operable from the keyboard.",
+        "Move and show focus so a keyboard user always knows where they are.",
+        "Convey every state through more than colour, with a name that says what the control acts on."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "An invalid field and an icon button from the Halcyon Notices settings page, before and after.\n\n```html\n<!-- Before: the only signal is a colour, and the button announces nothing useful -->\n<input id=\"reply-to\" class=\"invalid\">\n<div class=\"icon-btn\" onclick=\"remove()\">🗑</div>\n```\n\n```css\n.invalid { border-color: #d33; }\n:focus { outline: none; }\n```\n\nA colour-blind user sees a normal field. A screen reader user hears \"edit text\" with no name and no indication of a problem, then finds a bin glyph that is not focusable at all. And nobody can see where focus is anywhere on the page.\n\n```html\n<!-- After -->\n<label for=\"reply-to\">Reply-to address</label>\n<input id=\"reply-to\"\n       type=\"email\"\n       aria-invalid=\"true\"\n       aria-describedby=\"reply-to-error\">\n<p id=\"reply-to-error\" class=\"error\">\n  <span aria-hidden=\"true\">⚠</span>\n  Enter an address in the form name@example.com\n</p>\n\n<button type=\"button\" onclick=\"remove()\">\n  <span aria-hidden=\"true\">🗑</span>\n  <span class=\"visually-hidden\">Delete reply-to address</span>\n</button>\n```\n\n```css\n.error { color: #b3261e; }              /* colour reinforces; the text carries the meaning */\n.invalid { border-color: #b3261e; }\n\n:focus-visible {                        /* replace the ring, never just remove it */\n  outline: 3px solid #1a73e8;\n  outline-offset: 2px;\n}\n\n.visually-hidden {                      /* available to assistive tech, invisible on screen */\n  position: absolute;\n  width: 1px; height: 1px;\n  padding: 0; margin: -1px;\n  overflow: hidden;\n  clip-path: inset(50%);\n  white-space: nowrap;\n}\n```\n\nThe error is now text, tied to the field so it is announced when focus lands there. The button is a real button, so it is in the tab order and works with Enter and Space, and it announces what it deletes rather than \"button\". The focus ring is styled rather than deleted.",
+      "commonMistakes": [
+        "Writing `outline: none` to tidy up the design and putting no visible focus style back.",
+        "Marking a field invalid with a red border only, so the state is invisible to colour-blind users and to screen readers alike.",
+        "Making a `<div>` clickable and considering `tabindex=\"0\"` sufficient, without Enter and Space handling or the right announced role.",
+        "Using a positive `tabindex` such as `tabindex=\"3\"`, which pulls the element ahead of everything else and breaks the order of the whole page.",
+        "Opening a dialog without moving focus into it, or closing it without returning focus to the control that opened it.",
+        "Labelling icon buttons identically — eleven buttons that all announce as \"Delete\" with no indication of what each one deletes."
+      ],
+      "summaryMarkdown": "Every state needs a non-visual channel and every control needs a keyboard path. Use real interactive elements, keep a visible focus style, move focus deliberately when the interface changes, name controls by what they act on, and never let colour be the only carrier of meaning.",
+      "exerciseIds": [
+        "v1-e052",
+        "v1-e053",
+        "v1-e054"
+      ],
+      "reviewCardIds": [
+        "v1-c035",
+        "v1-c036"
+      ],
+      "references": [
+        {
+          "label": "MDN: Keyboard-navigable JavaScript widgets",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/Keyboard-navigable_JavaScript_widgets"
+        },
+        {
+          "label": "WCAG 2.2: Use of Color (1.4.1)",
+          "url": "https://www.w3.org/WAI/WCAG22/Understanding/use-of-color.html"
+        },
+        {
+          "label": "MDN: :focus-visible",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/:focus-visible"
+        },
+        {
+          "label": "ARIA Authoring Practices: Dialog (modal) pattern",
+          "url": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e052",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a control no keyboard user can reach",
+      "conceptIds": [
+        "a11y.keyboard-navigation",
+        "html.semantics"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A row action that works perfectly with a mouse and does not exist without one.",
+      "lessonId": "v1-l18",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "foundation",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "Every row of the Halcyon Notices table has a remove action:\n\n```html\n<div class=\"row-action\" onclick=\"removeNotice(id)\">Remove</div>\n```\n\nA tester reports that they cannot remove anything without a mouse. Which change fixes this properly, and what would a partial fix miss?",
+      "hints": [
+        "List what has to be true for a keyboard user: they must be able to reach it, see that they have reached it, and activate it.",
+        "A `<div>` is not in the tab order, has no announced role, and does not respond to Enter or Space. Adding `tabindex=\"0\"` solves only the first of those.",
+        "Replace it with `<button type=\"button\" onclick=\"removeNotice(id)\">Remove</button>` — that supplies the tab stop, the announced role, Enter and Space activation, the focus ring and disabled support in one change, none of which you have to write or maintain."
+      ],
+      "solution": {
+        "modelAnswer": "Use a real `<button type=\"button\">`. A `<div>` is not focusable, has no role, and ignores Enter and Space. Adding `tabindex=\"0\"` is a partial fix: the element becomes reachable, but it is still announced as plain text, still does nothing when activated from the keyboard, and still has no disabled state — so a tester could now Tab to it and still not be able to use it.",
+        "explanationMarkdown": "The value of a native element is that it bundles several behaviours that are easy to enumerate separately and easy to implement incompletely. Focusability, announced role, activation by two different keys, a visible focus style and a disabled state all arrive together and stay correct as browsers change. Reproducing them by hand means five things to get right and five things to keep right, and the usual outcome is a control that a keyboard user can reach but not operate — which is arguably worse than one they cannot reach at all, because it looks available."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "use-button",
+            "textMarkdown": "Replace the `<div>` with `<button type=\"button\">`; adding `tabindex=\"0\"` alone would make it reachable but still unannounced and still inert on Enter and Space.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The native element supplies the tab stop, the role, both activation keys, the focus style and the disabled state together."
+          },
+          {
+            "id": "tabindex-only",
+            "textMarkdown": "Add `tabindex=\"0\"` to the `<div>`, which puts it in the tab order and makes the existing `onclick` fire.",
+            "correct": false,
+            "explanationMarkdown": "`tabindex` only makes it focusable. A `click` handler on a `<div>` does not fire from Enter or Space, so the tester could reach it and still not activate it."
+          },
+          {
+            "id": "role-button",
+            "textMarkdown": "Add `role=\"button\"`, which gives the element the full behaviour of a button.",
+            "correct": false,
+            "explanationMarkdown": "`role` changes only what is announced. It adds no focusability and no keyboard activation — a role is a claim about behaviour, not an implementation of it."
+          },
+          {
+            "id": "positive-tabindex",
+            "textMarkdown": "Add `tabindex=\"1\"` so the action is reached early in the tab order and cannot be missed.",
+            "correct": false,
+            "explanationMarkdown": "A positive `tabindex` pulls the element ahead of every element with `tabindex=\"0\"`, scrambling the order for the entire page, and it still does not make Enter or Space work."
+          }
+        ]
+      },
+      "primaryConceptId": "a11y.keyboard-navigation",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e053",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review an error state that only exists in red",
+      "conceptIds": [
+        "a11y.color-only",
+        "html.forms"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A validation style that passes visual review and tells several groups of users nothing at all.",
+      "lessonId": "v1-l18",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "The Halcyon Notices signup form marks bad fields like this:\n\n```html\n<label for=\"reply-to\">Reply-to address</label>\n<input id=\"reply-to\" class=\"field is-invalid\" type=\"email\">\n```\n\n```css\n.is-invalid { border-color: #d33; background: #fff5f5; }\n```\n\nUsers report submitting the form repeatedly without ever learning what is wrong. Which change addresses the underlying problem?",
+      "hints": [
+        "Ask who can perceive this state: someone with a colour vision deficiency, someone in bright sunlight, someone using a screen reader, someone who has just moved focus to the field.",
+        "Even a user who sees the red border learns only that something is wrong, not what — colour can flag a problem but cannot describe it.",
+        "Add a text message saying what is required, link it with `aria-describedby` so it is announced when focus reaches the field, and set `aria-invalid=\"true\"` so the state itself is exposed; the colour then reinforces a message that already stands on its own."
+      ],
+      "solution": {
+        "modelAnswer": "Add a visible text message next to the field explaining what is required, associate it with `aria-describedby`, and mark the control with `aria-invalid=\"true\"`. The border colour then reinforces information that is already available without it. Colour alone cannot be perceived by everyone, and even when it is perceived it says only that something is wrong, never what.",
+        "explanationMarkdown": "Two separate failures are stacked here and it is worth keeping them apart. The first is perceivability: a signal carried only by hue is unavailable to people with a colour vision deficiency, to anyone on a poor screen or in glare, and to assistive technology entirely. The second is specificity: even a user who sees the red border has to guess the rule. Text fixes both at once, which is why the guidance is to make colour redundant rather than to choose a better colour. Linking the message with `aria-describedby` matters because a message that is only positioned nearby is not announced when focus arrives at the control."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "text-plus-aria",
+            "textMarkdown": "Add a text message describing what is required, link it via `aria-describedby`, and set `aria-invalid=\"true\"`; keep the colour as reinforcement.",
+            "correct": true,
+            "explanationMarkdown": "Correct. This makes the state both perceivable without colour and specific enough to act on, and exposes it to assistive technology."
+          },
+          {
+            "id": "darker-red",
+            "textMarkdown": "Use a darker red so the border meets the contrast requirement against the background.",
+            "correct": false,
+            "explanationMarkdown": "Contrast is worth fixing, but it still leaves the meaning carried by hue alone and still does not say what is wrong."
+          },
+          {
+            "id": "thicker-border",
+            "textMarkdown": "Make the border thicker as well as red, so the state is signalled by shape and not only by colour.",
+            "correct": false,
+            "explanationMarkdown": "A genuine improvement for perceivability — a non-colour visual signal — but it is still not announced to a screen reader and still does not tell anyone the rule they broke."
+          },
+          {
+            "id": "title-attribute",
+            "textMarkdown": "Add a `title` attribute to the input containing the error message.",
+            "correct": false,
+            "explanationMarkdown": "A `title` appears only on hover after a delay, is unavailable to touch and keyboard users, and is inconsistently announced. It is not a reliable place for an error message."
+          }
+        ]
+      },
+      "primaryConceptId": "a11y.color-only",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e054",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain focus and naming for a confirmation dialog",
+      "conceptIds": [
+        "a11y.focus",
+        "a11y.accessible-name"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Design the focus behaviour of a small dialog and justify each decision in terms of what the user experiences.",
+      "lessonId": "v1-l18",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "Ferndale Bike Hire has a booking list where each row has a bin icon. Pressing it opens a confirmation dialog with \"Cancel booking?\", a Confirm button and a Cancel button.\n\nDescribe what should happen to focus when the dialog opens, while it is open, and when it closes by either route. Then explain what each of the icon buttons should be named and why naming them all \"Delete\" would be a problem.",
+      "hints": [
+        "Follow one keyboard user through the whole interaction and say where their focus is at each moment.",
+        "On open, focus moves into the dialog; while open, Tab stays inside it and Escape closes it; on close by either route, focus returns to the control that opened it so the user resumes where they were.",
+        "For naming, consider what a screen reader user hears when they move through a list of twenty rows: twenty identical announcements give no way to tell which booking each button acts on, so the name must include the booking's identity — \"Cancel booking BK-1042\"."
+      ],
+      "solution": {
+        "modelAnswer": "When the dialog opens, focus should move into it — onto the dialog container or its first control — so that the next Tab press is inside the dialog rather than somewhere behind it, and the dialog's title should be announced as its name. While it is open, Tab and Shift+Tab should cycle within the dialog, the content behind should be inert so it cannot be reached, and Escape should dismiss it as Cancel does. When it closes by either Confirm or Cancel, focus must return to the bin button that opened it, so the user resumes at the row they were on rather than at the top of the document. If Confirm removes that row, focus should go to a sensible neighbour — the next row's action, or the list heading — and the outcome should be announced. Each bin button should be named for what it acts on: \"Cancel booking BK-1042\". Twenty buttons all named \"Delete\" are indistinguishable when a screen reader user moves through the list or pulls up a list of controls out of context, so choosing the right one becomes guesswork and the consequence of guessing wrong is a cancelled booking.",
+        "explanationMarkdown": "Focus is the keyboard user's cursor and their sense of place. Every time the interface changes what is on screen, someone has to decide where that cursor goes, and if nobody decides, the browser leaves it on an element that may no longer exist — which usually means the top of the document. Returning focus to the opener is what makes a dialog feel like a detour rather than a reset. The naming point is the same idea applied to identification rather than position: a name is announced without the surrounding row for context, so anything that depends on visual adjacency to be meaningful is not a name at all."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that focus moves into the dialog on open, so the next Tab is inside it.",
+          "States that focus is kept within the dialog while it is open and that Escape dismisses it.",
+          "States that focus returns to the control that opened the dialog on close, by either route, and addresses what to do when the originating row has been removed.",
+          "Explains that an icon button's name must identify what it acts on, and why identical names across a list are unusable when announced without visual context."
+        ],
+        "modelAnswerMarkdown": "On open, focus moves into the dialog — the container or the Cancel button — and the dialog is named by its heading, so the user hears what they are being asked. While it is open, Tab and Shift+Tab cycle inside it, the page behind is inert, and Escape closes it exactly as Cancel does. On close by either route, focus goes back to the bin button in the row that opened it, so the user carries on where they were instead of being dropped at the top of the page. If Confirm removed that row, focus moves to the next row's action or the list heading, and the result is announced so the user knows it worked. Each bin button is named \"Cancel booking BK-1042\", not \"Delete\": a screen reader announces the button without the row around it, so twenty identical names leave the user guessing which booking they are about to cancel."
+      },
+      "primaryConceptId": "a11y.focus",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c035",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Never remove the focus ring",
+      "conceptIds": [
+        "a11y.focus"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall why the default focus indicator matters and what to do when it clashes with a design.",
+      "lessonId": "v1-l18",
+      "type": "recall",
+      "promptMarkdown": "Why is `outline: none` with no replacement so damaging, and what should you write instead when the default ring does not suit the design?",
+      "answerMarkdown": "It removes the only indication of where keyboard focus is, so a keyboard user cannot tell which control they are about to activate — the interface becomes unusable without a pointer. Replace it rather than remove it: style `:focus-visible` with your own high-contrast outline and an `outline-offset`, which shows a ring for keyboard focus while leaving mouse clicks clean.",
+      "explanationMarkdown": "`:focus-visible` exists precisely because the usual motivation for deleting the ring is that it appears on mouse clicks. It lets you satisfy the design objection without taking the indicator away from the people who depend on it.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "a11y.focus"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c036",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer the colour-only rule to a status chart",
+      "conceptIds": [
+        "a11y.color-only"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the colour-only principle away from form validation, where it is usually taught.",
+      "lessonId": "v1-l18",
+      "type": "transfer",
+      "promptMarkdown": "A dashboard shows delivery status as a coloured dot — green on time, amber delayed, red failed — and a line chart whose three series are distinguished only by colour. Name the problem and give one concrete fix for each.",
+      "answerMarkdown": "In both cases the meaning is carried by hue alone, so it is unavailable to users with a colour vision deficiency, on poor or glared screens, in print, and to screen readers. For the dot, add the status word next to it, or give the dot an accessible text label so the state is announced. For the chart, distinguish the series by a second channel as well — dash pattern or marker shape — and label the lines directly rather than relying on a colour key.",
+      "explanationMarkdown": "The principle generalises beyond errors: colour may reinforce meaning but must never be its only carrier. The practical test is to view the interface in greyscale and ask whether every distinction survives.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "a11y.color-only"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v1-a06",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Web interface fundamentals placement check",
+      "conceptIds": [
+        "html.semantics",
+        "html.labels",
+        "css.responsive",
+        "css.overflow",
+        "a11y.keyboard-navigation",
+        "a11y.color-only"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items on element choice, labelling, layout behaviour and perceivable state. Explanations appear after you submit.",
+      "chapterId": "v1-ch06",
+      "items": [
+        {
+          "id": "v1-a06-i1",
+          "objectiveIds": [
+            "html.semantics"
+          ],
+          "critical": false,
+          "promptMarkdown": "A control opens a panel further down the same page without loading anything new. Which element is the better choice, and on what grounds?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "button-action",
+                "textMarkdown": "`<button>`, because the control performs an action in the current page rather than navigating to a resource.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The distinction is navigation against action: a link goes somewhere, a button does something."
+              },
+              {
+                "id": "anchor-hash",
+                "textMarkdown": "`<a href=\"#panel\">`, because it gives the browser a target and works without JavaScript.",
+                "correct": false,
+                "explanationMarkdown": "Reasonable when the goal really is to move to a location. Here the control toggles a panel, so it advertises navigation and delivers an action, and it wrongly offers open-in-new-tab."
+              },
+              {
+                "id": "div-role",
+                "textMarkdown": "`<div role=\"button\">`, because it announces correctly and can be styled freely without resetting browser defaults.",
+                "correct": false,
+                "explanationMarkdown": "The announcement is right and nothing else is: no tab stop, no Enter or Space handling, no disabled state. A `<button>` can be styled just as freely."
+              },
+              {
+                "id": "either-same",
+                "textMarkdown": "Either is fine; the choice is stylistic once both are given the same click handler and appearance.",
+                "correct": false,
+                "explanationMarkdown": "They differ in announced role, in keyboard behaviour and in what the browser's context menu offers. The choice is behavioural, not cosmetic."
+              }
+            ]
+          },
+          "explanationMarkdown": "Element choice is a promise to the user about what will happen. A link that does not navigate breaks middle-click and open-in-new-tab, and a button that navigates loses those affordances where they would have been genuinely useful."
+        },
+        {
+          "id": "v1-a06-i2",
+          "objectiveIds": [
+            "html.labels",
+            "a11y.accessible-name"
+          ],
+          "critical": true,
+          "promptMarkdown": "Which markup gives the checkbox an accessible name **and** makes the visible text a click target that toggles it?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "nested-label",
+                "textMarkdown": "`<label><input type=\"checkbox\" name=\"digest\"> Send me a weekly digest</label>`",
+                "correct": true,
+                "explanationMarkdown": "Correct. Nesting associates the label with the control, so the text names it and clicking the text toggles it — no matching ids required."
+              },
+              {
+                "id": "aria-label-checkbox",
+                "textMarkdown": "`<input type=\"checkbox\" aria-label=\"Send me a weekly digest\"> <span>Send me a weekly digest</span>`",
+                "correct": false,
+                "explanationMarkdown": "The name is supplied, but the visible span is associated with nothing, so clicking the words does nothing and the tap target stays tiny."
+              },
+              {
+                "id": "adjacent-span",
+                "textMarkdown": "`<input type=\"checkbox\" name=\"digest\"> <span>Send me a weekly digest</span>`",
+                "correct": false,
+                "explanationMarkdown": "Nothing associates the two. The checkbox has no accessible name and the words are not a click target."
+              },
+              {
+                "id": "title-attr",
+                "textMarkdown": "`<input type=\"checkbox\" title=\"Send me a weekly digest\">`",
+                "correct": false,
+                "explanationMarkdown": "A `title` can act as a fallback name but appears only on hover, gives no visible text, and provides no click target at all."
+              }
+            ]
+          },
+          "explanationMarkdown": "There are two requirements in the question and they are met by different mechanisms in the wrong answers. Only a real `<label>` — nested, or joined by `for`/`id` — satisfies both at once."
+        },
+        {
+          "id": "v1-a06-i3",
+          "objectiveIds": [
+            "css.overflow",
+            "css.layout"
+          ],
+          "critical": false,
+          "promptMarkdown": "A wide data table must not make the whole page scroll sideways on a phone. What is the right containment?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "wrapper-overflow-auto",
+                "textMarkdown": "Wrap the table in a container with `overflow-x: auto` so the table scrolls inside its own box.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The wide content stays fully reachable, and the scrolling is confined to the region that is genuinely too wide."
+              },
+              {
+                "id": "body-overflow-hidden",
+                "textMarkdown": "Set `overflow-x: hidden` on `body` so the document cannot scroll horizontally.",
+                "correct": false,
+                "explanationMarkdown": "That removes the means of reaching the far columns without making them fit. The data becomes permanently invisible."
+              },
+              {
+                "id": "table-fixed-small",
+                "textMarkdown": "Set `table-layout: fixed` with `width: 100%` so every column is squeezed into the viewport.",
+                "correct": false,
+                "explanationMarkdown": "Everything fits and nothing is legible: ten columns in 360px leaves each one a few characters wide."
+              },
+              {
+                "id": "font-scale",
+                "textMarkdown": "Reduce the table's font size on narrow screens until the whole table fits.",
+                "correct": false,
+                "explanationMarkdown": "It trades one accessibility problem for another, and it fails as soon as a column contains a long value or the user enlarges their text."
+              }
+            ]
+          },
+          "explanationMarkdown": "Containment and concealment look similar from a screenshot and are opposites in practice. Give the wide thing its own scroll region and the page stays still while the data stays reachable."
+        },
+        {
+          "id": "v1-a06-i4",
+          "objectiveIds": [
+            "a11y.keyboard-navigation",
+            "a11y.focus"
+          ],
+          "critical": true,
+          "promptMarkdown": "Which of these makes an interface unusable for someone navigating with a keyboard?",
+          "grading": {
+            "kind": "choice",
+            "mode": "multiple",
+            "options": [
+              {
+                "id": "outline-none",
+                "textMarkdown": "`:focus { outline: none; }` with no replacement style.",
+                "correct": true,
+                "explanationMarkdown": "Yes. Focus still moves, but there is no way to see where it is, so the user cannot tell what they are about to activate."
+              },
+              {
+                "id": "positive-tabindex",
+                "textMarkdown": "`tabindex=\"5\"` on a mid-page control.",
+                "correct": true,
+                "explanationMarkdown": "Yes. Positive values are visited before every `tabindex=\"0\"` element, so the order no longer follows the page and becomes unpredictable."
+              },
+              {
+                "id": "tabindex-minus-one",
+                "textMarkdown": "`tabindex=\"-1\"` on a dialog container that receives focus programmatically when it opens.",
+                "correct": false,
+                "explanationMarkdown": "No. That is the standard technique for a container that should be focusable by script but not a Tab stop of its own."
+              },
+              {
+                "id": "visually-hidden-label",
+                "textMarkdown": "A visually hidden `<span>` supplying the text of an icon button.",
+                "correct": false,
+                "explanationMarkdown": "No. The button remains focusable and operable, and the hidden text is what gives it a useful announced name."
+              }
+            ]
+          },
+          "explanationMarkdown": "Two of these break the two things a keyboard user depends on: knowing where focus is, and being able to predict where it goes next. The other two are ordinary techniques that support keyboard use rather than obstructing it."
+        },
+        {
+          "id": "v1-a06-i5",
+          "objectiveIds": [
+            "a11y.color-only",
+            "css.responsive"
+          ],
+          "critical": false,
+          "promptMarkdown": "A build pipeline shows each job as a small coloured square: green passed, red failed, grey skipped. A user asks for the colours to be changed. What is the most useful response?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "add-second-channel",
+                "textMarkdown": "Add a second channel — an icon or the status word, with a text alternative — so the status is legible without relying on hue at all.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Changing the palette helps some users and not others; making colour redundant helps everyone, including screen reader users."
+              },
+              {
+                "id": "colourblind-palette",
+                "textMarkdown": "Switch to a colour-blind-safe palette such as blue and orange, which resolves the issue.",
+                "correct": false,
+                "explanationMarkdown": "A better palette is worth having, but the meaning is still carried by hue alone — it remains unavailable in greyscale, in glare, and to assistive technology."
+              },
+              {
+                "id": "user-setting",
+                "textMarkdown": "Add a setting so each user can choose their own status colours.",
+                "correct": false,
+                "explanationMarkdown": "It pushes the work onto the people least able to absorb it, and still leaves the status unavailable to anyone who cannot perceive colour at all."
+              },
+              {
+                "id": "tooltip",
+                "textMarkdown": "Add a tooltip to each square giving the status in words.",
+                "correct": false,
+                "explanationMarkdown": "Better than nothing, but hover-only text is unavailable on touch, awkward from the keyboard, and requires interacting with squares one at a time to read a list."
+              }
+            ]
+          },
+          "explanationMarkdown": "The request was about colour; the underlying problem is that colour is doing all the work. The durable answer is redundancy — a second, non-colour channel — rather than a better choice of hue."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

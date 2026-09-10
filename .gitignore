@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+coverage/
+playwright-report/
+test-results/
+.turbo/
+
+# Playwright saved session
+apps/web/e2e/.auth/
+apps/web/test-results/
+apps/web/playwright-report/

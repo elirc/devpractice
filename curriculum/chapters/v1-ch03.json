@@ -1,0 +1,1483 @@
+{
+  "note": "V1 chapter 3 — Records and collections. prerequisiteIds hold CONCEPT ids and point only at concepts taught earlier in the release order.",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Records and collections",
+      "conceptIds": [
+        "js.object-access",
+        "js.immutable-update",
+        "js.shallow-copy",
+        "js.array-filter",
+        "js.array-map",
+        "js.mutation",
+        "js.array-reduce",
+        "js.collection-choice",
+        "js.grouping",
+        "js.missing-record"
+      ],
+      "prerequisiteIds": [
+        "js.functions"
+      ],
+      "bodyMarkdown": "Applications spend most of their time doing four things to data: reading a field out of a nested record, producing a changed copy of a record, selecting or reshaping a list, and reducing a list to a summary.\n\nThis chapter does all four without ever editing data in place. That constraint is not stylistic. Shared mutable records are the single most common source of \"it worked a minute ago\" defects, and later chapters — React state especially — simply stop working when a record is changed rather than replaced.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v1-l07",
+        "v1-l08",
+        "v1-l09"
+      ],
+      "assessmentId": "v1-a03",
+      "objectiveIds": [
+        "js.object-access",
+        "js.immutable-update",
+        "js.shallow-copy",
+        "js.array-filter",
+        "js.array-map",
+        "js.mutation",
+        "js.array-reduce",
+        "js.collection-choice",
+        "js.grouping",
+        "js.missing-record"
+      ],
+      "missionIds": [],
+      "sortOrder": 2
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l07",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Objects and immutable changes",
+      "conceptIds": [
+        "js.object-access",
+        "js.immutable-update",
+        "js.shallow-copy"
+      ],
+      "prerequisiteIds": [
+        "js.functions"
+      ],
+      "bodyMarkdown": "An object is a bag of named values, and a variable holding one holds a **reference** to it. Two variables can therefore point at the same record, and writing through either one changes what the other sees. That is the whole story behind most surprising data bugs.\n\nReading is the easy half. `order.customer.city` walks two levels, and it throws if `order.customer` is missing, because you cannot read a property of `undefined`. Optional chaining, `order.customer?.city`, produces `undefined` instead of throwing. It is a good tool and a bad reflex: reach for it when a value is *legitimately* optional, not to silence a value that should always have been there. Silencing turns a loud bug into a wrong number.\n\nChanging is the half that needs discipline. Instead of `order.status = 'closed'`, build a new record: `{ ...order, status: 'closed' }`. The spread copies every own property of the original into a fresh object, and the later `status` wins. The caller's order is untouched, so anything still holding it — a cache, a list, a previous render — keeps seeing the value it was given.\n\nThe catch is that a spread copies exactly **one level**. Nested objects and arrays are copied by reference, so `{ ...order }` and `order` still share the same `customer` object. Editing `copy.customer.city` edits the original too. To change something nested you must rebuild each level on the path: `{ ...order, customer: { ...order.customer, city: 'Ashfield' } }`.",
+      "chapterId": "v1-ch03",
+      "sortOrder": 0,
+      "objectives": [
+        "Read values out of nested records and handle a genuinely missing level.",
+        "Produce a changed copy of a record instead of editing it in place.",
+        "Explain what a spread does and does not copy, and rebuild a nested path correctly."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "```js\nconst order = {\n  id: 'o-1041',\n  status: 'open',\n  customer: { name: 'R. Vance', city: 'Marrickville' },\n};\n\n// 1. Changing a top-level field: safe.\nconst closed = { ...order, status: 'closed' };\nclosed.status;   // 'closed'\norder.status;    // still 'open'  <- the caller's record survived\n\n// 2. Changing a NESTED field through a shallow copy: not safe.\nconst moved = { ...order };\nmoved.customer.city = 'Ashfield';\norder.customer.city;   // 'Ashfield'  <- the original changed too\n\n// 3. Changing a nested field correctly: rebuild each level on the path.\nconst movedProperly = {\n  ...order,\n  customer: { ...order.customer, city: 'Ashfield' },\n};\n```\n\nCase 2 is worth staring at. Nothing looks wrong: a copy was made, and only the copy was assigned to. But the copy's `customer` is the *same object* the original refers to, so there was only ever one city to change.\n\nA quick way to keep this straight: a spread copies the values in the boxes, and for a nested object the value in the box is an arrow pointing elsewhere. Copying the arrow does not copy what it points at.",
+      "commonMistakes": [
+        "Assuming a spread or `Object.assign` produces a deep copy and then editing a nested field.",
+        "Editing an argument in place inside a helper, so a caller that still holds the record sees it change under them.",
+        "Sprinkling `?.` across a path to stop a crash, which converts a missing-data bug into a silently wrong result.",
+        "Using `JSON.parse(JSON.stringify(record))` as a general deep copy; it silently drops undefined values, functions and Date objects.",
+        "Believing `const` protects the object; it only stops the binding being pointed at something else."
+      ],
+      "summaryMarkdown": "Objects are held by reference, so two names can refer to one record. Read nested values carefully and use optional chaining only where absence is legitimate. Change records by building new ones with a spread, and remember the spread copies one level — nested changes require rebuilding every level along the path.",
+      "exerciseIds": [
+        "v1-e019",
+        "v1-e020",
+        "v1-e021"
+      ],
+      "reviewCardIds": [
+        "v1-c013",
+        "v1-c014"
+      ],
+      "references": [
+        {
+          "label": "MDN: Spread syntax",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Spread_syntax"
+        },
+        {
+          "label": "MDN: Optional chaining",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Optional_chaining"
+        },
+        {
+          "label": "MDN: structuredClone()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Window/structuredClone"
+        }
+      ]
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l08",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Array selection and transformation",
+      "conceptIds": [
+        "js.array-filter",
+        "js.array-map",
+        "js.mutation"
+      ],
+      "prerequisiteIds": [
+        "js.object-access"
+      ],
+      "bodyMarkdown": "Two methods cover an enormous share of everyday list work, and they answer two different questions.\n\n`filter` answers **which ones**. You give it a predicate — a function returning true or false for one element — and it returns a new array containing the elements it accepted. The length can shrink; the elements themselves are the same objects.\n\n`map` answers **what shape**. You give it a function from one element to one result, and it returns a new array of exactly the same length. The length never changes; that is the property that makes `map` safe to reason about, and it is why using `map` when you meant `filter` produces an array full of `undefined` rather than a shorter list.\n\nBoth return new arrays and neither modifies the one you called them on. That is the whole reason to prefer them over a hand-rolled loop that pushes into an accumulator: the source list survives, so it can answer a second question.\n\nThe trap is that \"returns a new array\" does not mean \"returns new elements\". `orders.map((order) => { order.total = 0; return order; })` returns a brand-new array whose elements are the *same objects*, all of which you just edited. The caller's data is now wrong, and the new array is cold comfort. If a transformation changes fields, it must build new records: `orders.map((order) => ({ ...order, total: 0 }))`.\n\nChaining reads naturally in the order the work happens: select first, reshape second — `users.filter(isActive).map(toRow)`. Filtering first also means the transformation runs on fewer elements, though correctness is the reason that matters.",
+      "chapterId": "v1-ch03",
+      "sortOrder": 1,
+      "objectives": [
+        "Choose between filter and map by asking which question is being answered.",
+        "Chain a selection and a transformation without modifying the source array.",
+        "Recognise a transformation that returns a new array of edited original records."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "```js\nconst tickets = [\n  { id: 'T-1', status: 'open', priority: 1, subject: 'Late delivery' },\n  { id: 'T-2', status: 'closed', priority: 3, subject: 'Wrong item' },\n  { id: 'T-3', status: 'open', priority: 2, subject: 'Refund query' },\n];\n\n// Which ones?  -> filter. Length may shrink.\nconst open = tickets.filter((ticket) => ticket.status === 'open');\nopen.length;     // 2\ntickets.length;  // still 3\n\n// What shape?  -> map. Length is always the same.\nconst rows = open.map((ticket) => ({ id: ticket.id, label: ticket.subject }));\nrows.length;     // 2\n\n// The trap: a new ARRAY of the SAME objects, edited.\nconst bad = tickets.map((ticket) => {\n  ticket.priority = 1;   // edits the caller's ticket\n  return ticket;\n});\ntickets[1].priority;     // 1  <- the source data changed\n\n// The fix: new records, not edited ones.\nconst good = tickets.map((ticket) => ({ ...ticket, priority: 1 }));\n```\n\nNotice the shape of the arrow function in the good version: `({ ...ticket, ... })`. The parentheses are required, because a `{` at the start of an arrow body would otherwise begin a block rather than an object literal. Forgetting them gives a function that returns `undefined` for every element — a very recognisable array of `undefined`s.",
+      "commonMistakes": [
+        "Using `map` to select, producing an array of `undefined` for the elements that did not match.",
+        "Editing the element inside a `map` callback and assuming the new array protects the original.",
+        "Forgetting the parentheses around an object literal in an arrow body and getting `undefined` for every element.",
+        "Reaching for `forEach` with a `push` when `filter` or `map` says the intent directly.",
+        "Using `splice` or `sort` on an array a caller still holds; both change the array in place."
+      ],
+      "summaryMarkdown": "`filter` selects and can shorten the list; `map` transforms and never changes the length. Both return new arrays and leave the source alone — but only the array is new, so a callback that edits its element still corrupts the caller's data. Build new records inside the callback when fields change.",
+      "exerciseIds": [
+        "v1-e022",
+        "v1-e023",
+        "v1-e024"
+      ],
+      "reviewCardIds": [
+        "v1-c015",
+        "v1-c016"
+      ],
+      "references": [
+        {
+          "label": "MDN: Array.prototype.map()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map"
+        },
+        {
+          "label": "MDN: Array.prototype.filter()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/filter"
+        }
+      ]
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l09",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Lookup and aggregation",
+      "conceptIds": [
+        "js.array-reduce",
+        "js.collection-choice",
+        "js.grouping",
+        "js.missing-record"
+      ],
+      "prerequisiteIds": [
+        "js.array-filter",
+        "js.array-map"
+      ],
+      "bodyMarkdown": "`reduce` is the general case of walking a list. It carries an accumulator from one element to the next and returns whatever the accumulator ended up as. `filter` and `map` are both special cases of it, which is why you should reach for those first — they say more with less. Use `reduce` when the result is not a list: a total, a count, a keyed summary.\n\nThe accumulator's **initial value** is not optional in practice. Without it, `reduce` uses the first element as the seed, which changes the result type and throws on an empty array. Passing `0` or `{}` explicitly makes the empty case correct for free, and the empty case is the one real data eventually produces.\n\nGrouping and counting are the everyday uses: walk a flat list and build an object keyed by something, accumulating as you go. The result is a plain object used as a lookup table.\n\nThat raises the collection question. An **array** preserves order and allows duplicates, and finding an item by id means scanning. An **object used as a map** gives direct access by key but has string keys and no order guarantee. A **Set** answers only membership, but answers it exactly. A **Map** keeps insertion order and allows keys of any type. Choosing badly is not usually a performance problem at small sizes; it is a clarity problem, because the wrong structure forces awkward code around it.\n\nFinally, every lookup can miss. `find` returns `undefined`, and an object lookup on an absent key does the same. Decide, deliberately, what a miss means: a default, an empty result, or an error. And distinguish *absent* from *present but falsy* — a price of `0` is a real price, and `catalog[sku] || -1` throws it away.",
+      "chapterId": "v1-ch03",
+      "sortOrder": 2,
+      "objectives": [
+        "Fold a list into a total or a keyed summary with an explicit initial value.",
+        "Choose between an array, an object map and a Set for a given lookup.",
+        "Handle a missing record without confusing it with a falsy one."
+      ],
+      "estimatedMinutes": 17,
+      "workedExampleMarkdown": "```js\nconst tickets = [\n  { id: 'T-1', status: 'open' },\n  { id: 'T-2', status: 'closed' },\n  { id: 'T-3', status: 'open' },\n];\n\n// Counting: the accumulator is an object built up key by key.\nconst counts = tickets.reduce((acc, ticket) => {\n  acc[ticket.status] = (acc[ticket.status] || 0) + 1;\n  return acc;\n}, {});\n// { open: 2, closed: 1 }\n\n// Without the {} seed this throws on an empty array. With it, an empty\n// list correctly produces {} and no caller needs a special case.\n[].reduce((acc, t) => acc, {});   // {}\n```\n\nNow the lookup question. Given a list of tickets and a page that must show one ticket per row with its customer's name, scanning the customer list for every row is both slow and hard to read. Build a lookup first:\n\n```js\nconst customers = [\n  { id: 'c-1', name: 'R. Vance' },\n  { id: 'c-2', name: 'J. Okoro' },\n];\n\nconst byId = customers.reduce((acc, customer) => {\n  acc[customer.id] = customer;\n  return acc;\n}, {});\n\nbyId['c-2'].name;        // 'J. Okoro'\nbyId['c-9'];             // undefined  <- a miss, and it is silent\n```\n\nThat last line is the one to plan for. `byId['c-9'].name` throws; `byId['c-9']?.name` gives `undefined`; a deliberate default such as `byId[id] ?? { name: 'Unknown customer' }` says what should happen. Note `??` rather than `||`: the first only replaces `null` and `undefined`, so a legitimately falsy value survives.",
+      "commonMistakes": [
+        "Calling `reduce` with no initial value and getting a crash the first time the list is empty.",
+        "Using `reduce` for something `map` or `filter` already expresses, making the code harder to read for no gain.",
+        "Rebuilding a lookup object inside a loop, so the work is repeated for every row.",
+        "Using `||` to supply a default and thereby discarding a legitimate `0`, `''` or `false`.",
+        "Treating `find` returning `undefined` as impossible and reading a property straight off it.",
+        "Keying an object map with numbers and being surprised that the keys come back as strings."
+      ],
+      "summaryMarkdown": "`reduce` folds a list into a non-list result and needs an explicit initial value so the empty case works. Grouping and counting build a keyed object used as a lookup. Pick the collection that matches the question — order and duplicates, direct access by key, or membership — and always decide what a missed lookup means, keeping *absent* distinct from *falsy*.",
+      "exerciseIds": [
+        "v1-e025",
+        "v1-e026",
+        "v1-e027"
+      ],
+      "reviewCardIds": [
+        "v1-c017",
+        "v1-c018"
+      ],
+      "references": [
+        {
+          "label": "MDN: Array.prototype.reduce()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/reduce"
+        },
+        {
+          "label": "MDN: Nullish coalescing operator (??)",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Nullish_coalescing"
+        },
+        {
+          "label": "MDN: Map",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e019",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Close a ticket without editing it",
+      "conceptIds": [
+        "js.immutable-update",
+        "js.mutation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Return a changed copy and leave the caller's record exactly as it was.",
+      "lessonId": "v1-l07",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "foundation",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "Implement `withStatus(ticket, status)`. It returns a **new** ticket object carrying every property of the original, except that `status` is the value passed in. If the original had no `status` property at all, the returned object has one.\n\nThe ticket passed in must be unchanged when the function returns.",
+      "hints": [
+        "You need every existing property plus one override — that is one expression, not a loop.",
+        "Object spread copies the original's own properties into a fresh object literal.",
+        "Write `return { ...ticket, status: status };` — a later property in an object literal wins over an earlier one, which is what performs the override."
+      ],
+      "solution": {
+        "code": "function withStatus(ticket, status) {\n  return { ...ticket, status: status };\n}",
+        "explanationMarkdown": "The whole idea is that a change produces a new value rather than editing an old one. Because the original survives, anything still holding it — a list rendered a moment ago, an undo buffer, a test assertion about the input — remains correct. Order inside the object literal is what performs the override: the spread lays down the existing properties first, and the explicit `status` afterwards replaces whatever it found, or adds it if there was nothing there."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "withStatus",
+        "starterCode": "function withStatus(ticket, status) {\n  // Changes the caller's record instead of copying it.\n  ticket.status = status;\n  return ticket;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "changes-the-status",
+            "args": [
+              {
+                "id": "t-1",
+                "status": "open",
+                "assignee": "ana"
+              },
+              "closed"
+            ],
+            "expected": {
+              "id": "t-1",
+              "status": "closed",
+              "assignee": "ana"
+            },
+            "hidden": false
+          },
+          {
+            "id": "same-status-is-still-a-copy",
+            "args": [
+              {
+                "id": "t-2",
+                "status": "open"
+              },
+              "open"
+            ],
+            "expected": {
+              "id": "t-2",
+              "status": "open"
+            },
+            "hidden": false
+          },
+          {
+            "id": "adds-status-when-absent",
+            "args": [
+              {
+                "id": "t-4"
+              },
+              "open"
+            ],
+            "expected": {
+              "id": "t-4",
+              "status": "open"
+            },
+            "hidden": false
+          },
+          {
+            "id": "every-other-field-survives",
+            "args": [
+              {
+                "id": "t-3",
+                "status": "new",
+                "priority": 2,
+                "subject": "Refund query"
+              },
+              "open"
+            ],
+            "expected": {
+              "id": "t-3",
+              "status": "open",
+              "priority": 2,
+              "subject": "Refund query"
+            },
+            "hidden": false
+          },
+          {
+            "id": "null-fields-are-preserved",
+            "args": [
+              {
+                "id": "t-5",
+                "status": "closed",
+                "assignee": null
+              },
+              "waiting"
+            ],
+            "expected": {
+              "id": "t-5",
+              "status": "waiting",
+              "assignee": null
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.immutable-update",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e020",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a copy that did not copy far enough",
+      "conceptIds": [
+        "js.shallow-copy",
+        "js.mutation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Decide how many levels the copy actually reached.",
+      "lessonId": "v1-l07",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "A dispatcher edits a draft before saving it, and the original order changes too.\n\n```js\nconst draft = { ...order };\ndraft.reference = 'DR-77';\ndraft.customer.city = 'Ashfield';\n\norder.reference;      // unchanged\norder.customer.city;  // 'Ashfield'\n```\n\nWhy does one assignment leak into `order` and the other does not?",
+      "hints": [
+        "Two assignments, two different outcomes — so the difference must be in what kind of value each property holds.",
+        "A spread copies the value stored in each own property. For a nested object, the value stored is a reference.",
+        "`draft.customer` and `order.customer` are the same object, so `draft.customer.city = ...` writes into the one object both records point at; `reference` is a string, which was genuinely copied."
+      ],
+      "solution": {
+        "modelAnswer": "The spread is a shallow copy. `reference` holds a string, which was copied, so assigning to `draft.reference` affects only the draft. `customer` holds a reference to a nested object, and only that reference was copied, so both records point at the same customer and writing `city` through either one is writing the same object.",
+        "explanationMarkdown": "The fix is to rebuild every level on the path you intend to change: `{ ...order, customer: { ...order.customer, city: 'Ashfield' } }`. Note what is *not* the fix — `structuredClone` or a JSON round trip would work here but copies the whole record whether or not you needed it, and the JSON version silently drops dates, functions and `undefined` values. Rebuilding the path states exactly which part of the record is new."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "one-level",
+            "textMarkdown": "The spread copied one level. `reference` is a string and was copied; `customer` is a nested object, so both records hold a reference to the same one.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Copying a reference does not copy what it refers to."
+          },
+          {
+            "id": "spread-is-deep",
+            "textMarkdown": "The spread is a deep copy, so the leak must come from somewhere else in the code.",
+            "correct": false,
+            "explanationMarkdown": "Object spread copies own enumerable properties one level deep. Nested values stay shared."
+          },
+          {
+            "id": "const-issue",
+            "textMarkdown": "`draft` was declared with `const`, so assignments to its properties fall through to the original.",
+            "correct": false,
+            "explanationMarkdown": "`const` prevents rebinding the name. It has no effect on property assignment, and the `reference` assignment worked fine."
+          },
+          {
+            "id": "strings-are-special",
+            "textMarkdown": "Strings are copied by reference too; `reference` simply has not been read again yet.",
+            "correct": false,
+            "explanationMarkdown": "Strings are primitives and are copied by value. The evidence in the snippet already shows `order.reference` unchanged."
+          }
+        ]
+      },
+      "primaryConceptId": "js.shallow-copy",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e021",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Read a city that may not be there",
+      "conceptIds": [
+        "js.object-access",
+        "js.missing-record"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Walk a nested path where any level may be absent, and decide what absence means.",
+      "lessonId": "v1-l07",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Some orders in the Larkspur Bakery system are for collection, so they carry no shipping address at all; a few carry an address with no city recorded.\n\nImplement `cityOf(order)`. It returns the order's `shippingAddress.city` when that is a string with at least one non-whitespace character, and the string `\"unknown\"` in every other case. It must never throw, including when `order` itself is `null`.",
+      "hints": [
+        "Three separate things can be missing here: the order, the address, and the city. Reading straight through the path assumes all three exist.",
+        "Guard each level before reading the next, then check that what you found is actually usable text.",
+        "Get the address safely, get the city from it safely, then return the city only if `typeof city === 'string'` and `city.trim()` is not empty; otherwise return `'unknown'`."
+      ],
+      "solution": {
+        "code": "function cityOf(order) {\n  const address = order && order.shippingAddress;\n  const city = address && address.city;\n  if (typeof city === 'string' && city.trim() !== '') {\n    return city;\n  }\n  return 'unknown';\n}",
+        "explanationMarkdown": "There are two different questions here and it pays to keep them apart. Reaching the value safely is a structural question about the path; deciding whether the value is usable is a question about the data. Collapsing both into `order?.shippingAddress?.city ?? 'unknown'` handles the first but not the second, so a city recorded as a blank string would flow through to a shipping label. Returning a defined fallback rather than `undefined` also means every caller gets something printable without repeating the decision."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "cityOf",
+        "starterCode": "function cityOf(order) {\n  // Assumes every order has an address with a city.\n  return order.shippingAddress.city;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "city-present",
+            "args": [
+              {
+                "id": "o-1",
+                "shippingAddress": {
+                  "city": "Ashfield",
+                  "postcode": "2131"
+                }
+              }
+            ],
+            "expected": "Ashfield",
+            "hidden": false
+          },
+          {
+            "id": "collection-order-has-no-address",
+            "args": [
+              {
+                "id": "o-2"
+              }
+            ],
+            "expected": "unknown",
+            "hidden": false
+          },
+          {
+            "id": "address-without-a-city",
+            "args": [
+              {
+                "id": "o-3",
+                "shippingAddress": {
+                  "postcode": "2204"
+                }
+              }
+            ],
+            "expected": "unknown",
+            "hidden": false
+          },
+          {
+            "id": "blank-city-is-not-usable",
+            "args": [
+              {
+                "id": "o-4",
+                "shippingAddress": {
+                  "city": "   "
+                }
+              }
+            ],
+            "expected": "unknown",
+            "hidden": false
+          },
+          {
+            "id": "null-order",
+            "args": [
+              null
+            ],
+            "expected": "unknown",
+            "hidden": true
+          },
+          {
+            "id": "a-different-city",
+            "args": [
+              {
+                "id": "o-5",
+                "shippingAddress": {
+                  "city": "Marrickville"
+                }
+              }
+            ],
+            "expected": "Marrickville",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.object-access",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e022",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Select the active subscribers and normalise their addresses",
+      "conceptIds": [
+        "js.array-filter",
+        "js.array-map"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "One selection followed by one transformation, with the source list left alone.",
+      "lessonId": "v1-l08",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "The bakery newsletter goes only to subscribers whose `active` property is exactly `true` — a value such as the string `\"yes\"` does not count, because it means somebody's import script guessed.\n\nImplement `activeEmails(subscribers)` returning an array of the matching subscribers' `email` values, lower-cased, in the original order. The input array and its records must be unchanged.",
+      "hints": [
+        "Two different questions are being asked here — which records, and what value from each — so two different array methods are involved.",
+        "Answer 'which ones' first with a predicate, then answer 'what shape' on the shorter list.",
+        "`subscribers.filter(s => s.active === true).map(s => s.email.toLowerCase())` — strict equality is what excludes the string `\"yes\"`."
+      ],
+      "solution": {
+        "code": "function activeEmails(subscribers) {\n  return subscribers\n    .filter(subscriber => subscriber.active === true)\n    .map(subscriber => subscriber.email.toLowerCase());\n}",
+        "explanationMarkdown": "Separating the two steps is what keeps each one obvious: the predicate contains the entire definition of 'active', and the transformation contains the entire definition of the output. Because both methods return new arrays and the callback only reads, the caller's list is untouched and can still be used for a different question. Strict equality against `true` is doing real work here — with a truthiness check, `active: \"no\"` would be a subscriber, since any non-empty string is truthy."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "activeEmails",
+        "starterCode": "function activeEmails(subscribers) {\n  // Takes everyone, and leaves the addresses as they were typed.\n  return subscribers.map(subscriber => subscriber.email);\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-list",
+            "args": [
+              []
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "selects-and-lowercases",
+            "args": [
+              [
+                {
+                  "email": "R.Vance@larkspur.test",
+                  "active": true
+                },
+                {
+                  "email": "j.okoro@larkspur.test",
+                  "active": false
+                }
+              ]
+            ],
+            "expected": [
+              "r.vance@larkspur.test"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "nobody-active",
+            "args": [
+              [
+                {
+                  "email": "a@larkspur.test",
+                  "active": false
+                },
+                {
+                  "email": "b@larkspur.test",
+                  "active": false
+                }
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "truthy-is-not-true",
+            "args": [
+              [
+                {
+                  "email": "c@larkspur.test",
+                  "active": "yes"
+                }
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "order-is-preserved",
+            "args": [
+              [
+                {
+                  "email": "Second@larkspur.test",
+                  "active": true
+                },
+                {
+                  "email": "skip@larkspur.test",
+                  "active": false
+                },
+                {
+                  "email": "THIRD@larkspur.test",
+                  "active": true
+                }
+              ]
+            ],
+            "expected": [
+              "second@larkspur.test",
+              "third@larkspur.test"
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.array-filter",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e023",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Raise every ticket priority by one, capped",
+      "conceptIds": [
+        "js.array-map",
+        "js.mutation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A transformation that changes a field has to build new records, not edit the ones it was given.",
+      "lessonId": "v1-l08",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "When the bakery support queue is escalated, every ticket moves up one priority level. Priority runs from 1 (lowest) to 3 (highest) and must never exceed 3.\n\nImplement `bumpPriorities(tickets)` returning a new array of new ticket objects, each with `priority` raised by one but capped at 3 and every other property preserved. Neither the array nor any ticket in it may be modified.",
+      "hints": [
+        "The output has exactly as many elements as the input, which tells you which array method fits.",
+        "Returning the same ticket object with an edited field would corrupt the caller's data even though the array is new.",
+        "Inside the callback return `({ ...ticket, priority: ticket.priority < 3 ? ticket.priority + 1 : 3 })` — the surrounding parentheses are required so the `{` starts an object literal rather than a function body."
+      ],
+      "solution": {
+        "code": "function bumpPriorities(tickets) {\n  return tickets.map(ticket => ({\n    ...ticket,\n    priority: ticket.priority < 3 ? ticket.priority + 1 : 3,\n  }));\n}",
+        "explanationMarkdown": "`map` guarantees one output per input, which is exactly the shape of an escalation: no ticket appears or disappears. The important discipline is inside the callback — spreading into a fresh object means the caller's tickets survive, so a screen rendered before the escalation still shows what it showed, and a test can assert on the input afterwards. The cap is a boundary rule, which is why the cases check priority 3 specifically rather than only the middle of the range."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "bumpPriorities",
+        "starterCode": "function bumpPriorities(tickets) {\n  // Edits the caller's tickets, and ignores the cap.\n  tickets.forEach(ticket => {\n    ticket.priority = ticket.priority + 1;\n  });\n  return tickets;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-queue",
+            "args": [
+              []
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "lowest-priority-moves-up",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "priority": 1
+                }
+              ]
+            ],
+            "expected": [
+              {
+                "id": "t-1",
+                "priority": 2
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "highest-priority-is-capped",
+            "args": [
+              [
+                {
+                  "id": "t-2",
+                  "priority": 3
+                }
+              ]
+            ],
+            "expected": [
+              {
+                "id": "t-2",
+                "priority": 3
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "mixed-queue",
+            "args": [
+              [
+                {
+                  "id": "t-3",
+                  "priority": 2
+                },
+                {
+                  "id": "t-4",
+                  "priority": 3
+                }
+              ]
+            ],
+            "expected": [
+              {
+                "id": "t-3",
+                "priority": 3
+              },
+              {
+                "id": "t-4",
+                "priority": 3
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "id": "other-fields-survive",
+            "args": [
+              [
+                {
+                  "id": "t-5",
+                  "priority": 1,
+                  "subject": "Late delivery"
+                }
+              ]
+            ],
+            "expected": [
+              {
+                "id": "t-5",
+                "priority": 2,
+                "subject": "Late delivery"
+              }
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.array-map",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e024",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a transformation that corrupts its source",
+      "conceptIds": [
+        "js.mutation",
+        "js.array-map"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Work out what is new about the returned array and what is not.",
+      "lessonId": "v1-l08",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "A report page shows anonymised orders. After viewing the report, the operator's own order list shows every customer as \"Redacted\".\n\n```js\nfunction anonymise(orders) {\n  return orders.map((order) => {\n    order.customerName = 'Redacted';\n    return order;\n  });\n}\n```\n\nThe author points out that `map` returns a new array and never modifies the one you called it on. Are they right, and what is the defect?",
+      "hints": [
+        "Their claim about `map` is true. Ask whether it is the claim that matters here.",
+        "A new array can still be full of the very same objects the old array held.",
+        "The callback assigns to `order.customerName`, which writes into the caller's record; the fix is to return a new object per element instead of the one that came in."
+      ],
+      "solution": {
+        "modelAnswer": "They are right about `map` and it does not help. The returned array is new, but its elements are the same order objects, and the callback overwrites a field on each one. Every holder of those orders now sees 'Redacted'. The fix is `orders.map((order) => ({ ...order, customerName: 'Redacted' }))`.",
+        "explanationMarkdown": "This is the most common way a supposedly functional transformation still corrupts data: newness of the container is confused with newness of the contents. It is also a quiet failure, because the report itself looks perfect — the damage appears somewhere else entirely, which is why it took a second screen to notice. Any callback that writes to its argument should be treated as a side effect regardless of which array method wraps it."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "same-elements",
+            "textMarkdown": "Right about the array, wrong about the consequence: the new array holds the same objects, and the callback edits them. Return `{ ...order, customerName: 'Redacted' }` instead.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A new array of unchanged references still lets the callback write into the caller's records."
+          },
+          {
+            "id": "map-mutates",
+            "textMarkdown": "Wrong: `map` does modify the array it is called on when the callback returns the same element.",
+            "correct": false,
+            "explanationMarkdown": "`map` always builds a new array. What it puts in that array is whatever the callback returned."
+          },
+          {
+            "id": "use-foreach",
+            "textMarkdown": "The defect is using `map` at all; `forEach` with a `push` into a new array would avoid it.",
+            "correct": false,
+            "explanationMarkdown": "That collects the same edited objects into a different array. The assignment inside the callback is the problem, not the method around it."
+          },
+          {
+            "id": "freeze",
+            "textMarkdown": "The defect is that the orders were not frozen; `Object.freeze` on each order is the fix.",
+            "correct": false,
+            "explanationMarkdown": "Freezing would turn a silent corruption into a failure, which is an improvement, but the transformation would still not produce the anonymised records the report needs."
+          }
+        ]
+      },
+      "primaryConceptId": "js.mutation",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e025",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Count the support queue by status",
+      "conceptIds": [
+        "js.array-reduce",
+        "js.grouping"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Fold a flat list into a keyed summary, and get the empty case right for free.",
+      "lessonId": "v1-l09",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "Implement `countByStatus(tickets)`. It returns an object whose keys are the statuses that actually appear in the list and whose values are how many tickets carry each one. An empty list returns an empty object. Statuses that do not appear must not be present as keys with a count of zero. The input must not be modified.",
+      "hints": [
+        "The result is not a list, so neither `map` nor `filter` fits; you are accumulating one object across the whole walk.",
+        "Seed the accumulator with `{}` so the empty list needs no special case, and add each status key the first time you meet it.",
+        "Inside the callback write `acc[ticket.status] = (acc[ticket.status] || 0) + 1;` and return `acc`, passing `{}` as reduce's second argument."
+      ],
+      "solution": {
+        "code": "function countByStatus(tickets) {\n  return tickets.reduce((counts, ticket) => {\n    counts[ticket.status] = (counts[ticket.status] || 0) + 1;\n    return counts;\n  }, {});\n}",
+        "explanationMarkdown": "The accumulator is created inside the call, so nothing outside is being modified even though the callback assigns to it — that is the difference between building a result and mutating an input. The `|| 0` handles the first sighting of a status, which is what lets the keys appear only when the data justifies them. And the explicit `{}` seed is what makes the empty list return `{}` instead of throwing: without it, `reduce` would try to use the first ticket as the starting accumulator and there is no first ticket."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "countByStatus",
+        "starterCode": "function countByStatus(tickets) {\n  // Reports every queue as empty.\n  return {};\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-queue",
+            "args": [
+              []
+            ],
+            "expected": {},
+            "hidden": false
+          },
+          {
+            "id": "one-ticket",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "status": "open"
+                }
+              ]
+            ],
+            "expected": {
+              "open": 1
+            },
+            "hidden": false
+          },
+          {
+            "id": "two-statuses",
+            "args": [
+              [
+                {
+                  "id": "t-1",
+                  "status": "open"
+                },
+                {
+                  "id": "t-2",
+                  "status": "closed"
+                },
+                {
+                  "id": "t-3",
+                  "status": "open"
+                }
+              ]
+            ],
+            "expected": {
+              "open": 2,
+              "closed": 1
+            },
+            "hidden": false
+          },
+          {
+            "id": "all-the-same-status",
+            "args": [
+              [
+                {
+                  "id": "t-4",
+                  "status": "closed"
+                },
+                {
+                  "id": "t-5",
+                  "status": "closed"
+                },
+                {
+                  "id": "t-6",
+                  "status": "closed"
+                }
+              ]
+            ],
+            "expected": {
+              "closed": 3
+            },
+            "hidden": false
+          },
+          {
+            "id": "three-statuses",
+            "args": [
+              [
+                {
+                  "id": "t-7",
+                  "status": "waiting"
+                },
+                {
+                  "id": "t-8",
+                  "status": "open"
+                },
+                {
+                  "id": "t-9",
+                  "status": "waiting"
+                },
+                {
+                  "id": "t-10",
+                  "status": "closed"
+                }
+              ]
+            ],
+            "expected": {
+              "waiting": 2,
+              "open": 1,
+              "closed": 1
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.array-reduce",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e026",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain which collection the screen needs",
+      "conceptIds": [
+        "js.collection-choice",
+        "js.missing-record"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Justify a data-structure choice from the questions the code has to answer.",
+      "lessonId": "v1-l09",
+      "sortOrder": 1,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "A delivery screen renders a list of 400 stops in a fixed sequence. For each stop it must show the driver's name (stops carry a `driverId`), and it must show a star beside stops the operator has flagged during this session.\n\nThe current code keeps drivers in an array and calls `drivers.find(d => d.id === stop.driverId)` per row, and keeps flagged stop ids in an array checked with `flagged.includes(stop.id)`.\n\nExplain which collection you would use for each of the three pieces of data and why. Say what should happen when a stop's driver is not in the list.",
+      "hints": [
+        "Ask what question each collection has to answer: ordered rendering, lookup by key, or plain membership.",
+        "Two of the three are lookups where the identity of the key is all that matters, and one genuinely needs order.",
+        "Keep the stops as an ordered array, build the drivers into an object or Map keyed by id once before rendering, hold the flagged ids in a Set, and give a missing driver an explicit visible fallback rather than letting the row throw or silently blank."
+      ],
+      "solution": {
+        "modelAnswer": "Stops stay an array: order is part of the meaning, and duplicates are possible. Drivers become a lookup keyed by id, built once before the render, because the only question asked of them is 'who is this id' — a per-row `find` re-answers that by scanning, which is both slower and less clear about intent. Flagged ids become a Set, because the only question is membership and a Set says so directly. A missing driver should render a deliberate fallback such as 'Unassigned driver' and, if it should be impossible, be logged, because the row must not throw and must not silently show an empty cell.",
+        "explanationMarkdown": "The reasoning to internalise is that a collection should match the question, not the origin of the data. Almost every performance complaint about list rendering is a lookup that repeats a scan per row, and almost every clarity complaint is a structure that forces the reader to work out what the collection is for. The missing-record decision matters just as much: `find` and object lookups both return `undefined` silently, so the choice between a default, an empty state and an error must be made on purpose or it will be made by whichever line happens to throw first."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Keeps stops in an array and says why — the sequence is meaningful and duplicates are allowed.",
+          "Replaces the per-row `find` with a lookup keyed by driver id, built once before rendering, and explains that the question being asked is direct access by key.",
+          "Uses a Set for the flagged ids and justifies it by membership being the only question asked.",
+          "Specifies what a missing driver renders — an explicit fallback or empty state — rather than leaving `undefined` to propagate.",
+          "Argues from the questions the data must answer rather than only from speed."
+        ],
+        "modelAnswerMarkdown": "The stops stay an array. Their order is part of what the screen means, and two stops could legitimately be identical apart from their id.\n\nThe drivers should be turned into a lookup keyed by id — a plain object or a `Map` — built once before the rows are rendered. The only question ever asked of that data is 'which driver has this id', which is exactly what a keyed structure answers. The current `find` re-scans the array for every row, so the work grows with drivers times stops, and, more importantly, the code no longer says what it is for.\n\nThe flagged ids should be a `Set`. Membership is the only question, `has` states it directly, and it removes any chance of the same id being added twice.\n\nFor a stop whose `driverId` is not in the lookup, the row should render an explicit 'Unassigned driver' rather than an empty cell, because a blank cell is indistinguishable from a driver with no name. If an unknown driver id is supposed to be impossible, I would also log it, so the data problem is visible instead of being permanently papered over by the fallback."
+      },
+      "primaryConceptId": "js.collection-choice",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e027",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Look up a price without losing the free ones",
+      "conceptIds": [
+        "js.missing-record",
+        "js.collection-choice"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Distinguish a key that is absent from a key whose value happens to be falsy.",
+      "lessonId": "v1-l09",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "The bakery catalogue is an object keyed by SKU, with prices in whole cents. Some items are genuinely free promotional samples and have a price of `0`.\n\nImplement `priceFor(catalog, sku)` returning the recorded price when the catalogue has that SKU, and `-1` when it does not. A recorded price of `0` must be returned as `0`, not treated as missing.",
+      "hints": [
+        "The obvious `catalog[sku] || -1` is the misconception here; work out what it returns for a free item.",
+        "You need to ask whether the key exists, which is a different question from what its value converts to.",
+        "`Object.prototype.hasOwnProperty.call(catalog, sku)` answers the existence question directly; return `catalog[sku]` when it is true and `-1` otherwise."
+      ],
+      "solution": {
+        "code": "function priceFor(catalog, sku) {\n  if (Object.prototype.hasOwnProperty.call(catalog, sku)) {\n    return catalog[sku];\n  }\n  return -1;\n}",
+        "explanationMarkdown": "'Absent' and 'falsy' are different facts, and `||` cannot tell them apart — which is why a free sample priced at `0` disappears from every total that uses that shortcut. Asking whether the key exists separates the two questions cleanly. `??` would also work for this data and is the right reflex in most code, but it answers a slightly different question: it treats a stored `null` as missing, which may or may not be what the catalogue means. Calling `hasOwnProperty` through `Object.prototype` rather than off the object avoids a catalogue that happens to contain a SKU named `hasOwnProperty` breaking the lookup."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "priceFor",
+        "starterCode": "function priceFor(catalog, sku) {\n  // Treats a price of 0 as a missing item.\n  return catalog[sku] || -1;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "price-present",
+            "args": [
+              {
+                "sku-1": 250,
+                "sku-2": 0
+              },
+              "sku-1"
+            ],
+            "expected": 250,
+            "hidden": false
+          },
+          {
+            "id": "sku-not-in-catalogue",
+            "args": [
+              {
+                "sku-1": 250
+              },
+              "sku-9"
+            ],
+            "expected": -1,
+            "hidden": false
+          },
+          {
+            "id": "free-sample-is-a-real-price",
+            "args": [
+              {
+                "sku-1": 250,
+                "sku-2": 0
+              },
+              "sku-2"
+            ],
+            "expected": 0,
+            "hidden": false
+          },
+          {
+            "id": "empty-catalogue",
+            "args": [
+              {},
+              "sku-1"
+            ],
+            "expected": -1,
+            "hidden": false
+          },
+          {
+            "id": "only-a-free-item",
+            "args": [
+              {
+                "sku-3": 0
+              },
+              "sku-3"
+            ],
+            "expected": 0,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.missing-record",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c013",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "How deep a spread copies",
+      "conceptIds": [
+        "js.shallow-copy",
+        "js.immutable-update"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall exactly what a spread duplicates.",
+      "lessonId": "v1-l07",
+      "type": "recall",
+      "promptMarkdown": "What does `{ ...record }` copy, and what does it leave shared with the original?",
+      "answerMarkdown": "It copies the record's own enumerable properties into a new object — one level deep. Primitive values are duplicated; any property holding an object or array has only its **reference** copied, so both records point at the same nested value.",
+      "explanationMarkdown": "This single fact explains most 'I copied it and it still changed' reports. Changing something nested means rebuilding every level along the path.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.shallow-copy"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c014",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Rebuilding a nested path",
+      "conceptIds": [
+        "js.immutable-update",
+        "js.object-access"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read two candidate updates and pick the one that leaves the original intact.",
+      "lessonId": "v1-l07",
+      "type": "code-reading",
+      "promptMarkdown": "You need a copy of `order` whose `customer.city` is `'Ashfield'`, with `order` unchanged. Which expression does that?",
+      "answerMarkdown": "`{ ...order, customer: { ...order.customer, city: 'Ashfield' } }` — every level on the path from the root to the changed field is rebuilt, and everything off the path is shared harmlessly.",
+      "explanationMarkdown": "Only the levels you change need rebuilding. Sibling branches can keep sharing, because nothing writes to them.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "rebuild-path",
+            "textMarkdown": "`{ ...order, customer: { ...order.customer, city: 'Ashfield' } }`",
+            "correct": true,
+            "explanationMarkdown": "Correct. Both levels on the path are new objects, so nothing writes into the original."
+          },
+          {
+            "id": "assign-through-copy",
+            "textMarkdown": "`const copy = { ...order }; copy.customer.city = 'Ashfield';`",
+            "correct": false,
+            "explanationMarkdown": "`copy.customer` is the original customer object, so this changes `order` too."
+          },
+          {
+            "id": "top-level-only",
+            "textMarkdown": "`{ ...order, city: 'Ashfield' }`",
+            "correct": false,
+            "explanationMarkdown": "This adds an unrelated top-level `city` property and leaves `customer.city` as it was."
+          }
+        ]
+      },
+      "primaryConceptId": "js.immutable-update"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c015",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "filter against map",
+      "conceptIds": [
+        "js.array-filter",
+        "js.array-map"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what each method guarantees about its result.",
+      "lessonId": "v1-l08",
+      "type": "recall",
+      "promptMarkdown": "State what `filter` and `map` each return, and the one guarantee that distinguishes them at a glance.",
+      "answerMarkdown": "`filter` returns a new array of the elements its predicate accepted; its length may be smaller. `map` returns a new array of the callback's results; its length is always identical to the input's. Neither modifies the array it was called on.",
+      "explanationMarkdown": "The length guarantee is the quickest way to notice a misuse: an array of `undefined` values means a `map` was asked to do a `filter`'s job.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.array-filter"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c016",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transferring the rule to sort and reverse",
+      "conceptIds": [
+        "js.mutation",
+        "js.array-map"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply what you know about non-modifying methods to two that behave differently.",
+      "lessonId": "v1-l08",
+      "type": "transfer",
+      "promptMarkdown": "A component receives `orders` as a prop and renders `orders.sort((a, b) => a.total - b.total)`. Rows in a sibling component start appearing in a different order too. Explain why, and what to write instead.",
+      "answerMarkdown": "`sort` sorts in place and returns the same array, so the shared `orders` array has been reordered for everyone holding it. Sort a copy: `[...orders].sort(...)`, or use `orders.toSorted(...)` where it is available.",
+      "explanationMarkdown": "`filter`, `map`, `slice` and `concat` return new arrays; `sort`, `reverse`, `splice`, `push` and `pop` change the array in place. The habit is to copy before calling anything in the second group on data you did not create.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.mutation"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c017",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Why reduce needs a seed",
+      "conceptIds": [
+        "js.array-reduce"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall what changes when the initial value is omitted.",
+      "lessonId": "v1-l09",
+      "type": "recall",
+      "promptMarkdown": "What happens if you call `reduce` without an initial value, and why does that matter for real data?",
+      "answerMarkdown": "The first element becomes the accumulator and the walk starts at the second. On an empty array there is no first element, so it throws a TypeError. It also means the accumulator's type is whatever the elements are, which is rarely what an aggregation wants.",
+      "explanationMarkdown": "Passing `0`, `{}` or `[]` explicitly makes the empty case correct without a special branch — and empty lists are normal, not exceptional.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.array-reduce"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c018",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "A default that eats real values",
+      "conceptIds": [
+        "js.missing-record",
+        "js.collection-choice"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Find the defect in a defaulting expression.",
+      "lessonId": "v1-l09",
+      "type": "debugging",
+      "promptMarkdown": "A stock display reads `const shown = levels[sku] || 'unknown';`. Warehouse staff report that items which are actually out of stock display as 'unknown' rather than as 0. What is wrong and what would you write?",
+      "answerMarkdown": "`||` falls back for every falsy value, and a stock level of `0` is falsy, so a known zero is reported as unknown. Use `levels[sku] ?? 'unknown'`, which falls back only for `null` and `undefined`.",
+      "explanationMarkdown": "The two operators answer different questions: `||` asks 'is this falsy', `??` asks 'is this absent'. Defaults almost always want the second.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "nullish",
+            "textMarkdown": "`||` also replaces a legitimate `0`; use `??`, which only replaces `null` and `undefined`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A known zero is data, not absence."
+          },
+          {
+            "id": "key-missing",
+            "textMarkdown": "The SKU is missing from `levels`, so the lookup is returning `undefined` and the default is behaving correctly.",
+            "correct": false,
+            "explanationMarkdown": "Then the display would be right. The report says these items have a known level of zero."
+          },
+          {
+            "id": "string-keys",
+            "textMarkdown": "Object keys are strings, so a numeric SKU never matches and the default always wins.",
+            "correct": false,
+            "explanationMarkdown": "A real concern in general, but it would make every item display as unknown, not only the out-of-stock ones."
+          }
+        ]
+      },
+      "primaryConceptId": "js.missing-record"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v1-a03",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Records and collections placement check",
+      "conceptIds": [
+        "js.shallow-copy",
+        "js.immutable-update",
+        "js.array-filter",
+        "js.array-map",
+        "js.array-reduce",
+        "js.missing-record",
+        "js.collection-choice"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering chapter 3, using scenarios that do not appear in the lesson exercises.",
+      "chapterId": "v1-ch03",
+      "items": [
+        {
+          "id": "v1-a03-i1",
+          "objectiveIds": [
+            "js.shallow-copy",
+            "js.immutable-update"
+          ],
+          "critical": true,
+          "promptMarkdown": "```js\nconst a = { id: 1, tags: ['new'], meta: { seen: false } };\nconst b = { ...a, id: 2 };\nb.tags.push('urgent');\nb.meta = { seen: true };\n```\n\nAfter this runs, what are `a.tags` and `a.meta.seen`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "tags-changed-meta-not",
+                "textMarkdown": "`a.tags` is `['new', 'urgent']` and `a.meta.seen` is `false`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. `push` writes into the shared array, while assigning a whole new object to `b.meta` only repoints `b`."
+              },
+              {
+                "id": "both-unchanged",
+                "textMarkdown": "`a.tags` is `['new']` and `a.meta.seen` is `false`, because `b` is a copy.",
+                "correct": false,
+                "explanationMarkdown": "The copy is one level deep, so `a.tags` and `b.tags` are the same array and `push` is visible through both."
+              },
+              {
+                "id": "both-changed",
+                "textMarkdown": "`a.tags` is `['new', 'urgent']` and `a.meta.seen` is `true`.",
+                "correct": false,
+                "explanationMarkdown": "Assigning `b.meta = { ... }` replaces the reference held by `b` only; `a.meta` still points at the original object."
+              },
+              {
+                "id": "throws",
+                "textMarkdown": "It throws, because a spread produces a frozen object.",
+                "correct": false,
+                "explanationMarkdown": "A spread produces an ordinary mutable object."
+              }
+            ]
+          },
+          "explanationMarkdown": "Writing *through* a shared reference is visible to everyone holding it; *replacing* a reference is visible only to the record you replaced it on. The two look almost identical on the page, which is why this pair is worth being able to tell apart."
+        },
+        {
+          "id": "v1-a03-i2",
+          "objectiveIds": [
+            "js.array-map",
+            "js.array-filter"
+          ],
+          "critical": true,
+          "promptMarkdown": "`const names = staff.map((person) => { if (person.onShift) return person.name; });` runs over four staff records of whom two are on shift. What is `names`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "four-with-undefined",
+                "textMarkdown": "An array of four entries: the two names, and `undefined` in the two positions where the callback returned nothing.",
+                "correct": true,
+                "explanationMarkdown": "Correct. `map` always produces one entry per input element, and a callback that falls off the end returns `undefined`."
+              },
+              {
+                "id": "two-names",
+                "textMarkdown": "An array of the two names; `map` skips elements whose callback returns nothing.",
+                "correct": false,
+                "explanationMarkdown": "`map` never skips. Selecting is `filter`'s job."
+              },
+              {
+                "id": "empty",
+                "textMarkdown": "An empty array, because the callback has no explicit return for every path.",
+                "correct": false,
+                "explanationMarkdown": "The callback does return a name when `onShift` is true."
+              },
+              {
+                "id": "throws",
+                "textMarkdown": "It throws, because a `map` callback must always return a value.",
+                "correct": false,
+                "explanationMarkdown": "There is no such requirement; the result is simply `undefined` for those elements."
+              }
+            ]
+          },
+          "explanationMarkdown": "The tell-tale array of `undefined` values means a selection was written as a transformation. `staff.filter((p) => p.onShift).map((p) => p.name)` says both things."
+        },
+        {
+          "id": "v1-a03-i3",
+          "objectiveIds": [
+            "js.array-reduce"
+          ],
+          "critical": false,
+          "promptMarkdown": "`const total = lines.reduce((sum, line) => sum + line.amount);` is used to total invoice lines. On which inputs does this misbehave?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "empty-and-single",
+                "textMarkdown": "It throws on an empty array, and on a one-line invoice it returns the line object itself rather than a number.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Without a seed the first element becomes the accumulator, so with one line nothing is ever added and the element is returned unchanged."
+              },
+              {
+                "id": "only-empty",
+                "textMarkdown": "Only on an empty array; every non-empty invoice totals correctly.",
+                "correct": false,
+                "explanationMarkdown": "With two or more lines the first accumulator is an object, so the first addition produces a string or `NaN`, not a total."
+              },
+              {
+                "id": "negative",
+                "textMarkdown": "Only when an amount is negative.",
+                "correct": false,
+                "explanationMarkdown": "Sign has nothing to do with it; the missing initial value does."
+              },
+              {
+                "id": "nothing",
+                "textMarkdown": "Never; `reduce` defaults its accumulator to `0` for numeric callbacks.",
+                "correct": false,
+                "explanationMarkdown": "`reduce` has no way to know what type you are accumulating and never invents a seed."
+              }
+            ]
+          },
+          "explanationMarkdown": "Passing `0` as the second argument fixes the empty case, the single-line case and the type of the accumulator all at once."
+        },
+        {
+          "id": "v1-a03-i4",
+          "objectiveIds": [
+            "js.missing-record"
+          ],
+          "critical": false,
+          "promptMarkdown": "`const driver = drivers.find((d) => d.id === stop.driverId);` and the next line reads `driver.name`. Which statement about this code is accurate?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "undefined-then-throw",
+                "textMarkdown": "If no driver matches, `find` returns `undefined` and the next line throws — so the missing case has to be decided explicitly.",
+                "correct": true,
+                "explanationMarkdown": "Correct, and the decision is a product one: a fallback name, an empty state, or an error worth surfacing."
+              },
+              {
+                "id": "returns-null",
+                "textMarkdown": "`find` returns `null` when nothing matches, so `driver.name` yields `null` harmlessly.",
+                "correct": false,
+                "explanationMarkdown": "`find` returns `undefined`, and reading a property of `undefined` throws either way."
+              },
+              {
+                "id": "returns-empty-array",
+                "textMarkdown": "`find` returns an empty array when nothing matches, so `driver.name` is `undefined`.",
+                "correct": false,
+                "explanationMarkdown": "That describes `filter`. `find` returns a single element or `undefined`."
+              },
+              {
+                "id": "always-safe",
+                "textMarkdown": "It is safe as long as the driver list came from the same server response as the stops.",
+                "correct": false,
+                "explanationMarkdown": "Two lists from one response can still disagree — a deleted driver, a filtered list, a paginated one."
+              }
+            ]
+          },
+          "explanationMarkdown": "Every lookup can miss. Deciding what a miss means, once and visibly, is cheaper than discovering it from a crash on a screen nobody was testing."
+        },
+        {
+          "id": "v1-a03-i5",
+          "objectiveIds": [
+            "js.collection-choice"
+          ],
+          "critical": false,
+          "promptMarkdown": "A page must repeatedly answer 'has this order id already been printed?' for tens of thousands of ids, and never needs them in order. Which collection fits best?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "set",
+                "textMarkdown": "A `Set` of ids, checked with `has`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Membership is the only question, duplicates are meaningless, and `has` states the intent exactly."
+              },
+              {
+                "id": "array-includes",
+                "textMarkdown": "An array of ids, checked with `includes`.",
+                "correct": false,
+                "explanationMarkdown": "`includes` scans from the start each time, and the array also allows the same id to be stored repeatedly."
+              },
+              {
+                "id": "array-sorted",
+                "textMarkdown": "An array kept sorted, so lookups can use a binary search.",
+                "correct": false,
+                "explanationMarkdown": "It works, but it adds ordering machinery to answer a question that has nothing to do with order."
+              },
+              {
+                "id": "object-true",
+                "textMarkdown": "An object mapping each id to `true`.",
+                "correct": false,
+                "explanationMarkdown": "Workable and fast, but it invents a meaningless value for every entry and inherits prototype keys as a hazard. A `Set` expresses membership without either."
+              }
+            ]
+          },
+          "explanationMarkdown": "Pick the structure whose primary operation is the question you actually ask. Here that question is membership, and `Set` is the structure whose whole purpose is membership."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

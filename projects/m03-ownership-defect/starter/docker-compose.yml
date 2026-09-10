@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: m03-ownership-defect-db
+    environment:
+      POSTGRES_USER: ownerdesk
+      POSTGRES_PASSWORD: ownerdesk
+      POSTGRES_DB: ownerdesk
+    ports:
+      - "5442:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ownerdesk"]
+      interval: 5s
+      timeout: 5s
+      retries: 20

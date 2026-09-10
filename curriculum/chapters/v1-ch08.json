@@ -1,0 +1,1498 @@
+{
+  "note": "Chapter 8 — React forms and API data (L22-L24). The runnable tasks are the pure logic behind a form and a data screen: field validation, mapping a server payload into a view model, and choosing which view state to show. Rendering, focus and accessible naming are taught through code-reading, prediction and rubric review because the V1 grader has no DOM.",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch08",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "React forms and API data",
+      "conceptIds": [
+        "react.controlled-forms",
+        "react.validation",
+        "react.submission-state",
+        "html.labels",
+        "react.response-mapping",
+        "react.loading-states",
+        "react.empty-states",
+        "ui.stale-response",
+        "react.stale-data",
+        "react.feature-composition",
+        "a11y.accessible-name",
+        "a11y.focus",
+        "a11y.color-only",
+        "a11y.keyboard-navigation"
+      ],
+      "prerequisiteIds": [
+        "react.props",
+        "react.state-updates"
+      ],
+      "bodyMarkdown": "Chapter 7 built a queue out of data that was already in memory. This chapter connects it to the world: an agent types into a form, the form is checked and submitted, a server answers slowly or not at all, and the screen has to tell the truth about all of it.\n\nThat is a bigger jump than it looks. A form field driven by state has to be wired in both directions or it silently becomes read-only. A submit button that is not disabled while a request is in flight will happily create the same ticket three times. Two searches typed a second apart can come back in the wrong order, so the slower, older answer lands last and overwrites the newer one.\n\nAnd a data screen has more states than most people first count. Not yet asked, loading for the first time, refreshing with old data still on screen, loaded and empty, loaded with results, filtered down to nothing, and failed. \"No tickets found\" shown after a failed request is a lie the interface tells, and it is the kind of defect this chapter is designed to make you notice.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v1-l22",
+        "v1-l23",
+        "v1-l24"
+      ],
+      "assessmentId": "v1-a08",
+      "objectiveIds": [
+        "react.controlled-forms",
+        "react.validation",
+        "react.submission-state",
+        "html.labels",
+        "react.response-mapping",
+        "react.loading-states",
+        "react.empty-states",
+        "ui.stale-response",
+        "react.stale-data",
+        "react.feature-composition",
+        "a11y.accessible-name",
+        "a11y.focus",
+        "a11y.color-only",
+        "a11y.keyboard-navigation"
+      ],
+      "missionIds": [
+        "m01-support-desk-web"
+      ],
+      "sortOrder": 7
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l22",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Controlled forms",
+      "conceptIds": [
+        "react.controlled-forms",
+        "react.validation",
+        "react.submission-state",
+        "html.labels"
+      ],
+      "prerequisiteIds": [
+        "react.state-updates",
+        "react.props"
+      ],
+      "bodyMarkdown": "A controlled input is one whose displayed value comes from React state. That gives you a single source of truth — you can read the form at any moment, prefill it, reset it, or validate it without touching the DOM — but it only works if the loop is closed. `value` flows state into the field; `onChange` flows the user's keystroke back into state. Wire one without the other and the field looks broken: it either refuses to change, or React warns that an uncontrolled input has become controlled.\n\nValidation is a separate question from control. Deciding whether a value is acceptable is plain data work over the form values, which means it can be a pure function that React knows nothing about. Keeping it that way is what lets you check the rules directly, reuse them, and — importantly — run the same rules on the server later, because the browser's are only a courtesy.\n\nSubmission has its own state, and forgetting it is how duplicate records get created. Between the click and the response, the form must know it is busy: disable the submit control, show honest progress, and refuse a second submit. And it must return to a usable state on failure, not stay stuck on \"Saving…\" forever.\n\nFinally, every control needs a label that is actually associated with it. `<label htmlFor=\"subject\">` paired with `<input id=\"subject\">` gives you a name screen readers announce and a click target that focuses the field. A `<div>` of text sitting above an input gives you neither.",
+      "chapterId": "v1-ch08",
+      "sortOrder": 0,
+      "objectives": [
+        "Wire a controlled input in both directions and recognise the symptoms when one direction is missing.",
+        "Express field validation as a pure function over the form values.",
+        "Track submission state so a form cannot be submitted twice and never gets stuck."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "```jsx\nfunction NewTicketForm({ onCreate }) {\n  const [values, setValues] = useState({ subject: '', email: '' });\n  const [errors, setErrors] = useState({});\n  const [submitting, setSubmitting] = useState(false);\n\n  function update(field, value) {\n    setValues((current) => ({ ...current, [field]: value }));\n  }\n\n  async function handleSubmit(event) {\n    event.preventDefault();\n    if (submitting) return;\n\n    const found = validateTicketForm(values); // a pure function, no React inside\n    setErrors(found);\n    if (Object.keys(found).length > 0) return;\n\n    setSubmitting(true);\n    try {\n      await onCreate(values);\n      setValues({ subject: '', email: '' });\n    } finally {\n      setSubmitting(false); // runs on failure too, so the form never sticks\n    }\n  }\n\n  return (\n    <form onSubmit={handleSubmit}>\n      <label htmlFor=\"subject\">Subject</label>\n      <input\n        id=\"subject\"\n        value={values.subject}\n        onChange={(event) => update('subject', event.target.value)}\n        aria-invalid={Boolean(errors.subject)}\n        aria-describedby={errors.subject ? 'subject-error' : undefined}\n      />\n      {errors.subject && <p id=\"subject-error\">{errors.subject}</p>}\n\n      <button type=\"submit\" disabled={submitting}>\n        {submitting ? 'Creating…' : 'Create ticket'}\n      </button>\n    </form>\n  );\n}\n```\n\nThree details are doing the real work. `update` uses the updater form, so two fast keystrokes cannot overwrite each other. `validateTicketForm` is a plain function that takes values and returns messages, so it can be checked on its own. And `setSubmitting(false)` is in a `finally`, which is the difference between a form that recovers from a failed save and one that has to be reloaded.",
+      "commonMistakes": [
+        "Setting `value` without an `onChange`, producing a field that displays state and silently refuses every keystroke.",
+        "Starting state as `useState()` so the value is `undefined`, which makes React treat the field as uncontrolled until the first keystroke and then warn about the switch.",
+        "Forgetting `event.preventDefault()`, so the browser performs a full page navigation and the React handler's work is thrown away.",
+        "Leaving the submit button enabled during the request, so an impatient double-click creates two tickets.",
+        "Setting `submitting` back to false only in the success path, leaving the form stuck on \"Creating…\" after any error.",
+        "Placing label text in a `<div>` or a bare `<label>` with no `htmlFor`, which leaves the input with no accessible name and no click-to-focus."
+      ],
+      "summaryMarkdown": "A controlled field needs `value` and `onChange` together. Keep validation as a pure function over the values, track submission state so the form cannot double-submit or get stuck, and associate every control with a real label.",
+      "exerciseIds": [
+        "v1-e064",
+        "v1-e065",
+        "v1-e066"
+      ],
+      "reviewCardIds": [
+        "v1-c043",
+        "v1-c044"
+      ],
+      "references": [
+        {
+          "label": "React reference: <input>",
+          "url": "https://react.dev/reference/react-dom/components/input"
+        },
+        {
+          "label": "React: Reacting to input with state",
+          "url": "https://react.dev/learn/reacting-to-input-with-state"
+        },
+        {
+          "label": "MDN: The <label> element",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/label"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e064",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Validate the new-ticket form",
+      "conceptIds": [
+        "react.validation",
+        "react.controlled-forms"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Form validation is pure data work. Written as a function of the values alone, it can be checked directly and reused by the server-side rules later.",
+      "lessonId": "v1-l22",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "foundation",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Write `validateTicketForm(values)`, where `values` is `{ subject, email, description }` and every property is a string taken straight from a controlled input.\n\nReturn an object containing a message **only for the fields that fail**, using these exact messages:\n\n- `subject` — after trimming, must not be empty. Message: `Enter a subject`\n- `email` — must match `something@something` with no spaces and exactly one `@`. Message: `Enter a valid email address`\n- `description` — after trimming, must be at least 10 characters. Message: `Describe the problem in at least 10 characters`\n\nWhen every field is acceptable, return `{}`. Do not modify `values`.",
+      "hints": [
+        "The caller decides whether the form is valid by checking whether the returned object has any keys, so a passing field must contribute no key at all — not a key set to `null` or an empty string.",
+        "Trim before you measure. `'   '.length` is 3 but `'   '.trim().length` is 0, and the same difference decides whether a nine-space description counts as ten characters.",
+        "For the email, a regular expression like `/^[^@\\s]+@[^@\\s]+$/` says it directly: one or more non-space, non-`@` characters, a single `@`, then one or more more of the same. Test it against the whole string with anchors so `a b@c` cannot slip through."
+      ],
+      "solution": {
+        "code": "function validateTicketForm(values) {\n  const errors = {};\n  if (values.subject.trim() === '') {\n    errors.subject = 'Enter a subject';\n  }\n  if (!/^[^@\\s]+@[^@\\s]+$/.test(values.email)) {\n    errors.email = 'Enter a valid email address';\n  }\n  if (values.description.trim().length < 10) {\n    errors.description = 'Describe the problem in at least 10 characters';\n  }\n  return errors;\n}",
+        "explanationMarkdown": "The function answers one question — which fields are unacceptable — and answers it entirely from its arguments. That is what makes it testable without a browser and reusable on the server, where the real check has to happen anyway because nothing stops a client from posting whatever it likes.\n\nReturning a map keyed by field name is deliberate. The component can render `errors.subject` next to the subject field without any translation step, and `Object.keys(errors).length === 0` is the whole \"is it valid\" test."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "validateTicketForm",
+        "starterCode": "function validateTicketForm(values) {\n  return {};\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "all-fields-valid",
+            "args": [
+              {
+                "subject": "Printer jam",
+                "email": "ada@wrenly.example",
+                "description": "The tray keeps catching on page three."
+              }
+            ],
+            "expected": {},
+            "hidden": false
+          },
+          {
+            "id": "everything-empty",
+            "args": [
+              {
+                "subject": "",
+                "email": "",
+                "description": ""
+              }
+            ],
+            "expected": {
+              "subject": "Enter a subject",
+              "email": "Enter a valid email address",
+              "description": "Describe the problem in at least 10 characters"
+            },
+            "hidden": false
+          },
+          {
+            "id": "whitespace-only-subject",
+            "args": [
+              {
+                "subject": "     ",
+                "email": "ada@wrenly.example",
+                "description": "The tray keeps catching."
+              }
+            ],
+            "expected": {
+              "subject": "Enter a subject"
+            },
+            "hidden": false
+          },
+          {
+            "id": "description-exactly-ten-is-accepted",
+            "args": [
+              {
+                "subject": "Printer jam",
+                "email": "ada@wrenly.example",
+                "description": "Printer ja"
+              }
+            ],
+            "expected": {},
+            "hidden": false
+          },
+          {
+            "id": "description-nine-is-rejected",
+            "args": [
+              {
+                "subject": "Printer jam",
+                "email": "ada@wrenly.example",
+                "description": "Printer j"
+              }
+            ],
+            "expected": {
+              "description": "Describe the problem in at least 10 characters"
+            },
+            "hidden": false
+          },
+          {
+            "id": "email-without-an-at-sign",
+            "args": [
+              {
+                "subject": "Printer jam",
+                "email": "ada.wrenly.example",
+                "description": "The tray keeps catching."
+              }
+            ],
+            "expected": {
+              "email": "Enter a valid email address"
+            },
+            "hidden": false
+          },
+          {
+            "id": "email-containing-a-space",
+            "args": [
+              {
+                "subject": "Printer jam",
+                "email": "ada @wrenly.example",
+                "description": "The tray keeps catching."
+              }
+            ],
+            "expected": {
+              "email": "Enter a valid email address"
+            },
+            "hidden": true
+          },
+          {
+            "id": "two-fields-fail-together",
+            "args": [
+              {
+                "subject": "",
+                "email": "ada@wrenly.example",
+                "description": "short"
+              }
+            ],
+            "expected": {
+              "subject": "Enter a subject",
+              "description": "Describe the problem in at least 10 characters"
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "react.validation",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e065",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The field that will not accept typing",
+      "conceptIds": [
+        "react.controlled-forms",
+        "html.labels"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Two defects hide in six lines of JSX. Select every statement that is true of this snippet.",
+      "lessonId": "v1-l22",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "foundation",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "An agent reports that the subject box \"is frozen\" — clicking it shows a cursor, but nothing appears when she types. A screen-reader user separately reports that the field is announced only as \"edit text\".\n\n```jsx\nfunction SubjectField({ subject, setSubject }) {\n  return (\n    <div>\n      <label>Subject</label>\n      <input type=\"text\" value={subject} />\n    </div>\n  );\n}\n```\n\nSelect **every** statement that correctly describes this code.",
+      "hints": [
+        "Ask where the character a user types is supposed to go, and what would have to happen for the box to show it.",
+        "A React input given `value` displays exactly what state says and nothing else; the keystroke has to travel back into that state before the value can change.",
+        "Separately, a `<label>` only names a control when it is connected to one — either by wrapping the input, or by `htmlFor` matching the input's `id`. Sitting next to it in the same `<div>` connects nothing."
+      ],
+      "solution": {
+        "modelAnswer": "The input is controlled by `value` but has no `onChange`, so React re-renders it back to the state value after every keystroke and it appears frozen. Separately, the `<label>` is not associated with the input — it needs `htmlFor=\"subject\"` and a matching `id=\"subject\"` — so the field has no accessible name and clicking the label does not focus it.",
+        "explanationMarkdown": "These are the two halves of a working field. `value` plus `onChange` makes the state the single source of truth *and* keeps it up to date; only one of the two is present here, so the field is effectively read-only.\n\nThe label is not cosmetic either. An associated label is what a screen reader announces, what voice control matches against, and what makes the text a click target that focuses the input — which matters most for small controls like checkboxes."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "missing-onchange",
+            "textMarkdown": "The input has `value` but no `onChange`, so every keystroke is immediately overwritten by the state value and the field behaves as read-only.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A controlled input needs the return path: `onChange={(e) => setSubject(e.target.value)}`."
+          },
+          {
+            "id": "label-not-associated",
+            "textMarkdown": "The `<label>` is not associated with the input, so the field has no accessible name and clicking the label does not focus it.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Use `<label htmlFor=\"subject\">` with `<input id=\"subject\">`, or wrap the input inside the label."
+          },
+          {
+            "id": "react-inputs-readonly",
+            "textMarkdown": "React inputs are read-only unless you add the `readOnly={false}` prop, which is missing here.",
+            "correct": false,
+            "explanationMarkdown": "There is no such requirement. `readOnly` defaults to false; the field is stuck because state never changes, not because of a prop."
+          },
+          {
+            "id": "needs-defaultvalue",
+            "textMarkdown": "`value` should be replaced with `defaultValue`, because `value` is only for uncontrolled inputs.",
+            "correct": false,
+            "explanationMarkdown": "It is the other way round: `defaultValue` seeds an *uncontrolled* input. Switching to it would let typing work but abandon the single source of truth this form needs."
+          },
+          {
+            "id": "type-text-redundant",
+            "textMarkdown": "`type=\"text\"` conflicts with a controlled input and must be removed.",
+            "correct": false,
+            "explanationMarkdown": "`type=\"text\"` is the default and is perfectly compatible with a controlled input. It has nothing to do with either symptom."
+          }
+        ]
+      },
+      "primaryConceptId": "react.controlled-forms",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e066",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Stop the form creating three tickets",
+      "conceptIds": [
+        "react.submission-state",
+        "react.validation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A written answer about a defect that only appears under a slow network — the conditions where most duplicate-record bugs are born.",
+      "lessonId": "v1-l22",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Support has found three identical tickets created within two seconds of each other, all from the same agent. The create form does this:\n\n```jsx\nasync function handleSubmit(event) {\n  event.preventDefault();\n  const created = await createTicket(values);\n  onCreated(created);\n}\n```\n\nExplain how the duplicates happen, and describe the state you would add and exactly where you would set and clear it. Then explain why disabling the button is not, on its own, enough — and name one thing the server should do regardless of what the form does.",
+      "hints": [
+        "Play out a slow request: the agent clicks, nothing on screen changes for three seconds, and the agent is not a patient person.",
+        "The form needs to know that a request is in flight. Think about which of the three moments — before the request, after success, after failure — must set or clear that flag.",
+        "Guard at the top of the handler (`if (submitting) return;`) as well as disabling the button, clear the flag in a `finally` so a failure does not leave the form stuck, and have the server accept an idempotency key so a retried request cannot create a second ticket."
+      ],
+      "solution": {
+        "modelAnswer": "Nothing on screen changes while the request is in flight, so the agent clicks again — and each click runs the handler again, because nothing prevents it. I would add a `submitting` state: set it true immediately after validation passes and before calling `createTicket`, and clear it in a `finally` so it is cleared on failure as well as success. The button gets `disabled={submitting}` and the label changes to 'Creating…'. Disabling the button alone is not enough because a form can also be submitted with the Enter key and because the disabled attribute only takes effect after the next render, so the handler needs its own `if (submitting) return;` guard. Regardless of the form, the server should accept an idempotency key so a repeated request returns the ticket that already exists rather than creating another.",
+        "explanationMarkdown": "The mental model worth taking away is that a submit handler is re-entrant: nothing stops it being entered a second time while the first call is still awaiting. The guard inside the handler is the actual fix; the disabled button and the changed label are how the user finds out.\n\nThe `finally` matters as much as the flag. A form that clears `submitting` only on success is one failed request away from being permanently unusable, and users respond to that by reloading and submitting again — creating the very duplicate you were trying to prevent."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Explains that the handler can be entered again while the first request is still awaiting, and that the silent screen invites the second click.",
+          "Adds an explicit submission flag and says it is set before the request is sent, not after it returns.",
+          "Clears the flag in a `finally` (or equivalent) so a failed request leaves the form usable rather than stuck.",
+          "Explains why disabling the button alone is insufficient — Enter-key submission, or the disabled state only applying after a render — and adds a guard inside the handler.",
+          "Names a server-side protection such as an idempotency key or a uniqueness constraint, recognising that the client cannot be trusted to prevent duplicates."
+        ],
+        "modelAnswerMarkdown": "**How the duplicates happen.** `handleSubmit` is `async`, so it returns at the first `await` and the component carries on. Nothing on screen changes, the agent assumes the click missed, and clicks twice more. Each click enters the handler again, and each one sends its own `createTicket`.\n\n**The state to add.**\n\n```jsx\nconst [submitting, setSubmitting] = useState(false);\n\nasync function handleSubmit(event) {\n  event.preventDefault();\n  if (submitting) return;          // the actual guard\n  setSubmitting(true);             // before the request\n  try {\n    onCreated(await createTicket(values));\n  } finally {\n    setSubmitting(false);          // on failure as well as success\n  }\n}\n```\n\nThe button becomes `<button type=\"submit\" disabled={submitting}>{submitting ? 'Creating…' : 'Create ticket'}</button>`.\n\n**Why disabling is not enough.** A form can be submitted with the Enter key without the button being clicked, and `disabled` only applies once React has rendered — a fast double-click can beat it. The `if (submitting) return;` guard is what actually closes the window; the disabled button and label are how the agent learns something is happening.\n\n**Server side.** The client is not a trustworthy guard: retries, flaky networks and refreshed tabs all bypass it. The create endpoint should accept an idempotency key and return the existing ticket for a repeat of the same key, so a duplicate request is harmless by construction."
+      },
+      "primaryConceptId": "react.submission-state",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c043",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What makes an input controlled?",
+      "conceptIds": [
+        "react.controlled-forms"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the two props that close the loop, and the symptom of leaving one out.",
+      "lessonId": "v1-l22",
+      "type": "recall",
+      "promptMarkdown": "Which two props make an input controlled, and what does the field do if only `value` is supplied?",
+      "answerMarkdown": "`value` and `onChange`. With `value` alone the field is effectively read-only: React renders whatever state says, the keystroke never reaches state, and so the next render puts the old text straight back. React also logs a warning telling you to add `onChange` or `readOnly`.",
+      "explanationMarkdown": "The pair is what makes state the single source of truth. `value` pushes state into the DOM; `onChange` pulls the user's edit back into state. Supplying neither gives an uncontrolled input, which is legal but means the current text lives only in the DOM.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "react.controlled-forms"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c044",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Where does the submitting flag get cleared?",
+      "conceptIds": [
+        "react.submission-state"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An objectively checkable card about the placement that decides whether a form recovers from a failure.",
+      "lessonId": "v1-l22",
+      "type": "debugging",
+      "promptMarkdown": "A save handler sets `submitting` to `true` before an `await save(values)`. Where must it be set back to `false`?",
+      "answerMarkdown": "In a `finally` block, so it runs whether the save resolved or rejected. Clearing it only after a successful save leaves the form permanently disabled the first time the network fails.",
+      "explanationMarkdown": "Users respond to a stuck \"Saving…\" button by reloading and trying again — which is exactly the duplicate submission the flag was meant to prevent. Recovery from failure is part of the feature, not an edge case.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "finally",
+            "textMarkdown": "In a `finally` block attached to the `try` around the save.",
+            "correct": true,
+            "explanationMarkdown": "Correct. `finally` runs on both paths, so a rejected save still returns the form to a usable state."
+          },
+          {
+            "id": "after-await",
+            "textMarkdown": "On the line immediately after `await save(values)`.",
+            "correct": false,
+            "explanationMarkdown": "That line is skipped when the save rejects, so the button stays disabled and the form is stuck until a reload."
+          },
+          {
+            "id": "in-catch",
+            "textMarkdown": "Only inside the `catch` block, since success navigates away anyway.",
+            "correct": false,
+            "explanationMarkdown": "Relying on navigation makes the flag correct only by accident. If the success path ever stays on the page — and it usually ends up doing so — the form freezes."
+          },
+          {
+            "id": "in-effect",
+            "textMarkdown": "In a `useEffect` that watches the saved record and resets the flag when it appears.",
+            "correct": false,
+            "explanationMarkdown": "That adds an extra render and a second source of truth, and it never fires at all when the save fails — the case that matters most."
+          }
+        ]
+      },
+      "primaryConceptId": "react.submission-state"
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l23",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Server data",
+      "conceptIds": [
+        "react.response-mapping",
+        "react.loading-states",
+        "react.empty-states",
+        "ui.stale-response",
+        "react.stale-data"
+      ],
+      "prerequisiteIds": [
+        "react.state-updates",
+        "js.async-await"
+      ],
+      "bodyMarkdown": "A server response is not a view model. It arrives in the shape the API found convenient — `snake_case` keys, nested records, nullable fields, status strings meant for a database rather than a human — and the interface needs something else. Doing that translation in one named place, at the boundary, means the rest of the component tree never has to know what the API looks like, and a change of field name is a one-line change rather than a search across twenty files.\n\nThe second half of the job is being honest about which state the screen is in. \"No tickets\" and \"still loading\" and \"the request failed\" are three completely different messages, and collapsing them into one empty list is how an interface ends up cheerfully reporting that a customer has no orders during an outage. Filtering down to nothing is a fourth state again: there *are* tickets, just none matching this search, and the useful thing to offer is a way to clear the filter.\n\nThen there is ordering. Requests do not come back in the order they were sent. Type `pr`, then `printer`, and if the first request happens to be slower its results land second and overwrite the ones the user is actually waiting for. The fix is not to make requests faster; it is to decide, when a response arrives, whether it is still the one you want. Either mark the older request as abandoned in the effect's cleanup, or cancel it outright with an `AbortController`.\n\nFinally, data that was true a minute ago is not a lie you have to hide — but it is a fact worth showing. A screen that keeps the previous list visible while refreshing is nicer than one that flashes a spinner, provided it says so.",
+      "chapterId": "v1-ch08",
+      "sortOrder": 1,
+      "objectives": [
+        "Translate a server payload into a view model at one clear boundary.",
+        "Distinguish loading, empty, no-matches and failed as separate view states.",
+        "Discard a response that a newer request has superseded."
+      ],
+      "estimatedMinutes": 20,
+      "workedExampleMarkdown": "```jsx\nfunction TicketSearch({ query }) {\n  const [state, setState] = useState({ status: 'idle', items: [], error: null });\n\n  useEffect(() => {\n    let current = true; // this run is the one that counts — until cleanup says otherwise\n    setState((s) => ({ ...s, status: 'loading' }));\n\n    searchTickets(query)\n      .then((payload) => {\n        if (!current) return; // a newer query has already been sent; drop this answer\n        setState({ status: 'ready', items: payload.results.map(mapTicketResponse), error: null });\n      })\n      .catch((error) => {\n        if (!current) return;\n        setState({ status: 'error', items: [], error: error.message });\n      });\n\n    return () => {\n      current = false; // runs before the next effect and on unmount\n    };\n  }, [query]);\n\n  const view = selectListView({ ...state, query });\n  return <QueueView view={view} />;\n}\n```\n\nThe `current` flag is the whole stale-response defence, and it is four lines. React runs the cleanup of the previous effect before starting the next one, so by the time a second request is sent the first run has already been marked as no longer wanted — its `.then` still runs, but it returns immediately instead of writing state.\n\nNotice too that `mapTicketResponse` and `selectListView` are both plain functions. All the decision-making is outside the component, which is why both are runnable exercises below.",
+      "commonMistakes": [
+        "Rendering `items.length === 0` as \"No tickets found\" without checking whether the request failed, so an outage is reported as an empty account.",
+        "Passing the raw server payload down through five components, so a rename of `comment_count` becomes a five-file change.",
+        "Setting state from a `.then` without checking whether the effect that started it has been cleaned up, which both overwrites newer data and warns about updating an unmounted component.",
+        "Treating `loading` as a boolean, which cannot express \"refreshing while showing the previous results\" and forces a spinner on every keystroke.",
+        "Assuming responses arrive in the order the requests were sent.",
+        "Reading `payload.assignee.name` without handling `assignee: null`, so one unassigned ticket crashes the whole list."
+      ],
+      "summaryMarkdown": "Map the payload into a view model at the boundary, model loading, empty, no-matches and failed as distinct states, and mark a request as abandoned when a newer one replaces it so the slow answer cannot overwrite the fresh one.",
+      "exerciseIds": [
+        "v1-e067",
+        "v1-e068",
+        "v1-e069"
+      ],
+      "reviewCardIds": [
+        "v1-c045",
+        "v1-c046"
+      ],
+      "references": [
+        {
+          "label": "React: Synchronizing with effects — fetching data",
+          "url": "https://react.dev/learn/synchronizing-with-effects"
+        },
+        {
+          "label": "MDN: AbortController",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+        },
+        {
+          "label": "MDN: Using the Fetch API",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e067",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Map a ticket payload into a view model",
+      "conceptIds": [
+        "react.response-mapping",
+        "js.array-map"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The translation layer between the API's shape and the interface's shape, written as a pure function so the rest of the tree never sees a snake_case key.",
+      "lessonId": "v1-l23",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 16,
+      "promptMarkdown": "The Wrenly API returns tickets like this:\n\n```json\n{ \"id\": \"T-1\", \"subject\": \"Printer jam\", \"status\": \"open\",\n  \"assignee\": { \"name\": \"Ada\" }, \"created_at\": \"2031-04-02T09:00:00Z\", \"comment_count\": 3 }\n```\n\nWrite `mapTicketResponse(payload)` returning exactly these seven properties:\n\n- `id` — copied across\n- `subject` — copied across\n- `statusLabel` — `open` becomes `Open`, `pending_customer` becomes `Waiting on customer`, `resolved` becomes `Resolved`, and **any other value** becomes `Unknown`\n- `assigneeName` — `assignee.name`, or `Unassigned` when `assignee` is `null` or absent\n- `createdAt` — the value of `created_at`\n- `commentCount` — `comment_count`, or `0` when it is absent\n- `hasComments` — `true` only when `commentCount` is greater than zero\n\nDo not modify `payload`.",
+      "hints": [
+        "Two of these fields must survive data the API is allowed to send but the mock example does not show: a null assignee and a missing comment count. Decide what each one becomes before you write anything.",
+        "A lookup object maps the three known statuses to their labels in one place, and makes the fallback a single `?? 'Unknown'` rather than a chain of `else if`.",
+        "Guard the nested read: `payload.assignee ? payload.assignee.name : 'Unassigned'` (or optional chaining with `??`) is what stops one unassigned ticket throwing and blanking the entire list."
+      ],
+      "solution": {
+        "code": "function mapTicketResponse(payload) {\n  const labels = {\n    open: 'Open',\n    pending_customer: 'Waiting on customer',\n    resolved: 'Resolved',\n  };\n  const commentCount = payload.comment_count ?? 0;\n  return {\n    id: payload.id,\n    subject: payload.subject,\n    statusLabel: labels[payload.status] ?? 'Unknown',\n    assigneeName: payload.assignee ? payload.assignee.name : 'Unassigned',\n    createdAt: payload.created_at,\n    commentCount: commentCount,\n    hasComments: commentCount > 0,\n  };\n}",
+        "explanationMarkdown": "This function is the only place in the application that knows the API uses `snake_case`, that `assignee` is nullable, and that `pending_customer` is what the product calls \"waiting on customer\". Every component downstream works with a stable shape, so a field rename in the API is a one-line change here.\n\nThe fallbacks are the interesting part. `Unknown` for an unrecognised status means a status added by a future API version renders as a harmless word rather than crashing or displaying a raw database token, and `commentCount` defaulting to `0` keeps `hasComments` a real boolean instead of `undefined`."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "mapTicketResponse",
+        "starterCode": "function mapTicketResponse(payload) {\n  return {\n    id: payload.id,\n    subject: payload.subject,\n    statusLabel: payload.status,\n    assigneeName: payload.assignee.name,\n    createdAt: payload.created_at,\n    commentCount: payload.comment_count,\n    hasComments: true,\n  };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "fully-populated-open-ticket",
+            "args": [
+              {
+                "id": "T-1",
+                "subject": "Printer jam",
+                "status": "open",
+                "assignee": {
+                  "name": "Ada"
+                },
+                "created_at": "2031-04-02T09:00:00Z",
+                "comment_count": 3
+              }
+            ],
+            "expected": {
+              "id": "T-1",
+              "subject": "Printer jam",
+              "statusLabel": "Open",
+              "assigneeName": "Ada",
+              "createdAt": "2031-04-02T09:00:00Z",
+              "commentCount": 3,
+              "hasComments": true
+            },
+            "hidden": false
+          },
+          {
+            "id": "null-assignee-becomes-unassigned",
+            "args": [
+              {
+                "id": "T-2",
+                "subject": "Login loop",
+                "status": "resolved",
+                "assignee": null,
+                "created_at": "2031-04-03T09:00:00Z",
+                "comment_count": 1
+              }
+            ],
+            "expected": {
+              "id": "T-2",
+              "subject": "Login loop",
+              "statusLabel": "Resolved",
+              "assigneeName": "Unassigned",
+              "createdAt": "2031-04-03T09:00:00Z",
+              "commentCount": 1,
+              "hasComments": true
+            },
+            "hidden": false
+          },
+          {
+            "id": "missing-comment-count-defaults-to-zero",
+            "args": [
+              {
+                "id": "T-3",
+                "subject": "Card declined",
+                "status": "pending_customer",
+                "assignee": {
+                  "name": "Bo"
+                },
+                "created_at": "2031-04-04T09:00:00Z"
+              }
+            ],
+            "expected": {
+              "id": "T-3",
+              "subject": "Card declined",
+              "statusLabel": "Waiting on customer",
+              "assigneeName": "Bo",
+              "createdAt": "2031-04-04T09:00:00Z",
+              "commentCount": 0,
+              "hasComments": false
+            },
+            "hidden": false
+          },
+          {
+            "id": "zero-comments-is-not-has-comments",
+            "args": [
+              {
+                "id": "T-4",
+                "subject": "Slow search",
+                "status": "open",
+                "assignee": {
+                  "name": "Ada"
+                },
+                "created_at": "2031-04-05T09:00:00Z",
+                "comment_count": 0
+              }
+            ],
+            "expected": {
+              "id": "T-4",
+              "subject": "Slow search",
+              "statusLabel": "Open",
+              "assigneeName": "Ada",
+              "createdAt": "2031-04-05T09:00:00Z",
+              "commentCount": 0,
+              "hasComments": false
+            },
+            "hidden": false
+          },
+          {
+            "id": "unrecognised-status-becomes-unknown",
+            "args": [
+              {
+                "id": "T-5",
+                "subject": "Escalated billing dispute",
+                "status": "escalated_to_finance",
+                "assignee": {
+                  "name": "Bo"
+                },
+                "created_at": "2031-04-06T09:00:00Z",
+                "comment_count": 7
+              }
+            ],
+            "expected": {
+              "id": "T-5",
+              "subject": "Escalated billing dispute",
+              "statusLabel": "Unknown",
+              "assigneeName": "Bo",
+              "createdAt": "2031-04-06T09:00:00Z",
+              "commentCount": 7,
+              "hasComments": true
+            },
+            "hidden": false
+          },
+          {
+            "id": "assignee-property-absent-entirely",
+            "args": [
+              {
+                "id": "T-6",
+                "subject": "Export fails",
+                "status": "open",
+                "created_at": "2031-04-07T09:00:00Z",
+                "comment_count": 2
+              }
+            ],
+            "expected": {
+              "id": "T-6",
+              "subject": "Export fails",
+              "statusLabel": "Open",
+              "assigneeName": "Unassigned",
+              "createdAt": "2031-04-07T09:00:00Z",
+              "commentCount": 2,
+              "hasComments": true
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "react.response-mapping",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e068",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Predict which search result wins",
+      "conceptIds": [
+        "ui.stale-response",
+        "react.stale-data",
+        "js.async-await"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The stale-response defect stripped of React, so the ordering is the only thing left to reason about.",
+      "lessonId": "v1-l23",
+      "sortOrder": 1,
+      "type": "predict-output",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "This models a search box where the agent types one query, then quickly replaces it with another. `search` resolves after the given delay.\n\n```js\nfunction search(term, delayMs) {\n  return new Promise((resolve) => {\n    setTimeout(() => resolve(term.toUpperCase()), delayMs);\n  });\n}\n\nlet shown = 'none';\n\nasync function run(term, delayMs) {\n  const result = await search(term, delayMs);\n  shown = result;\n  console.log(shown);\n}\n\nrun('printer', 40); // typed first, server is slow for this one\nrun('refund', 10);  // typed second, server answers quickly\n```\n\nWrite every line the console prints, in order.",
+      "hints": [
+        "Neither call is awaited by the code that starts them, so both requests are in flight at the same time; the timers decide who finishes first.",
+        "A promise resolves when its own timer fires, not in the order the promises were created. Compare 40 ms against 10 ms.",
+        "The 10 ms request finishes first and sets `shown` to `REFUND`; 30 ms later the older 40 ms request finishes and overwrites it with `PRINTER`, which is the result the agent no longer wants."
+      ],
+      "solution": {
+        "modelAnswer": "REFUND\nPRINTER",
+        "explanationMarkdown": "The second search finishes first and is displayed, and then the *older* request lands and replaces it. The agent sees results for a query they have already abandoned, and nothing in the code is wrong in the ordinary sense — every line does exactly what it says.\n\nThis is why arrival order can never be trusted as a proxy for recency. The repair is to record which request is the current one — a token, a counter, or the `let current = true` flag cleaned up by an effect — and to drop any response that does not match, or to cancel the earlier request with an `AbortController` so it never resolves at all."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": {
+          "trim": true,
+          "collapseWhitespace": true,
+          "caseSensitive": true
+        },
+        "expected": "REFUND\nPRINTER",
+        "acceptedAlternatives": [
+          "REFUND PRINTER"
+        ]
+      },
+      "primaryConceptId": "ui.stale-response",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e069",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose the view state for the queue",
+      "conceptIds": [
+        "react.loading-states",
+        "react.empty-states",
+        "react.response-mapping"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The decision \"what should this screen be showing right now\" pulled out of the component, where it can be checked case by case.",
+      "lessonId": "v1-l23",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "stretch",
+      "estimatedMinutes": 18,
+      "promptMarkdown": "Write `selectListView(state)`. `state` is `{ status, items, error, query }` where `status` is one of `idle`, `loading`, `error`, `ready`.\n\nReturn exactly one of these objects, checking the rules in this order:\n\n1. `status` is `error` → `{ view: 'error', message: state.error }`\n2. `status` is `loading` **and** `items` is not empty → `{ view: 'ready', items: state.items, refreshing: true }` (keep the previous results on screen while refreshing)\n3. `status` is `idle` or `loading` → `{ view: 'loading' }`\n4. `status` is `ready`, `items` is empty and the trimmed `query` is not empty → `{ view: 'no-matches', query: state.query }`\n5. `status` is `ready` and `items` is empty → `{ view: 'empty' }`\n6. otherwise → `{ view: 'ready', items: state.items, refreshing: false }`\n\nDo not modify `state`.",
+      "hints": [
+        "Rule 1 comes first for a reason: a failed request must never be reported as an empty account, even though `items` happens to be empty in both situations.",
+        "Rules 2 and 3 both concern `loading`; the only thing separating them is whether there is anything already on screen worth keeping.",
+        "For rule 4, compare `state.query.trim()` against the empty string — a query of three spaces should count as no query, so the screen says `empty` rather than `no-matches`."
+      ],
+      "solution": {
+        "code": "function selectListView(state) {\n  if (state.status === 'error') {\n    return { view: 'error', message: state.error };\n  }\n  if (state.status === 'loading' && state.items.length > 0) {\n    return { view: 'ready', items: state.items, refreshing: true };\n  }\n  if (state.status === 'idle' || state.status === 'loading') {\n    return { view: 'loading' };\n  }\n  if (state.items.length === 0) {\n    if (state.query.trim() === '') {\n      return { view: 'empty' };\n    }\n    return { view: 'no-matches', query: state.query };\n  }\n  return { view: 'ready', items: state.items, refreshing: false };\n}",
+        "explanationMarkdown": "Six branches sounds like a lot until you notice that each one produces a genuinely different screen, and that collapsing any two of them produces a message that is untrue in some situation. The one that catches people is the error branch: `items` is empty on failure too, so any check that asks \"is the list empty?\" before asking \"did it fail?\" will show the wrong thing during an outage.\n\nReturning a small tagged object rather than a set of booleans means the component renders one branch and cannot accidentally show a spinner and an empty state at the same time — the states are mutually exclusive by construction."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "selectListView",
+        "starterCode": "function selectListView(state) {\n  return { view: 'ready', items: state.items, refreshing: false };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "idle-is-loading",
+            "args": [
+              {
+                "status": "idle",
+                "items": [],
+                "error": null,
+                "query": ""
+              }
+            ],
+            "expected": {
+              "view": "loading"
+            },
+            "hidden": false
+          },
+          {
+            "id": "first-load-shows-loading",
+            "args": [
+              {
+                "status": "loading",
+                "items": [],
+                "error": null,
+                "query": ""
+              }
+            ],
+            "expected": {
+              "view": "loading"
+            },
+            "hidden": false
+          },
+          {
+            "id": "refresh-keeps-previous-results",
+            "args": [
+              {
+                "status": "loading",
+                "items": [
+                  {
+                    "id": "T-1",
+                    "subject": "Printer jam"
+                  }
+                ],
+                "error": null,
+                "query": ""
+              }
+            ],
+            "expected": {
+              "view": "ready",
+              "items": [
+                {
+                  "id": "T-1",
+                  "subject": "Printer jam"
+                }
+              ],
+              "refreshing": true
+            },
+            "hidden": false
+          },
+          {
+            "id": "failure-is-never-reported-as-empty",
+            "args": [
+              {
+                "status": "error",
+                "items": [],
+                "error": "Wrenly API is unreachable",
+                "query": ""
+              }
+            ],
+            "expected": {
+              "view": "error",
+              "message": "Wrenly API is unreachable"
+            },
+            "hidden": false
+          },
+          {
+            "id": "loaded-and-genuinely-empty",
+            "args": [
+              {
+                "status": "ready",
+                "items": [],
+                "error": null,
+                "query": ""
+              }
+            ],
+            "expected": {
+              "view": "empty"
+            },
+            "hidden": false
+          },
+          {
+            "id": "filtered-down-to-nothing",
+            "args": [
+              {
+                "status": "ready",
+                "items": [],
+                "error": null,
+                "query": "refund"
+              }
+            ],
+            "expected": {
+              "view": "no-matches",
+              "query": "refund"
+            },
+            "hidden": false
+          },
+          {
+            "id": "loaded-with-results",
+            "args": [
+              {
+                "status": "ready",
+                "items": [
+                  {
+                    "id": "T-1",
+                    "subject": "Printer jam"
+                  }
+                ],
+                "error": null,
+                "query": ""
+              }
+            ],
+            "expected": {
+              "view": "ready",
+              "items": [
+                {
+                  "id": "T-1",
+                  "subject": "Printer jam"
+                }
+              ],
+              "refreshing": false
+            },
+            "hidden": false
+          },
+          {
+            "id": "whitespace-query-counts-as-no-query",
+            "args": [
+              {
+                "status": "ready",
+                "items": [],
+                "error": null,
+                "query": "   "
+              }
+            ],
+            "expected": {
+              "view": "empty"
+            },
+            "hidden": true
+          },
+          {
+            "id": "error-wins-even-with-items-present",
+            "args": [
+              {
+                "status": "error",
+                "items": [
+                  {
+                    "id": "T-1",
+                    "subject": "Printer jam"
+                  }
+                ],
+                "error": "Request timed out",
+                "query": "printer"
+              }
+            ],
+            "expected": {
+              "view": "error",
+              "message": "Request timed out"
+            },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "react.loading-states",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c045",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The four states of a data screen",
+      "conceptIds": [
+        "react.loading-states",
+        "react.empty-states"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the states an empty list can actually represent.",
+      "lessonId": "v1-l23",
+      "type": "recall",
+      "promptMarkdown": "A list on screen is empty. Name the four different situations that can produce that, and say what the interface should show for each.",
+      "answerMarkdown": "**Loading** — the request has not answered yet; show a spinner or skeleton. **Loaded and genuinely empty** — there is nothing to show; explain what would put something here (\"No tickets yet — create one\"). **Filtered to nothing** — there is data but none matches; say so and offer to clear the filter. **Failed** — the request errored; say what went wrong and offer a retry, and never claim the list is empty.",
+      "explanationMarkdown": "A single `items.length === 0` check cannot tell these apart, which is why an outage so often shows up to users as \"you have no orders\". Modelling the states explicitly — as a status field rather than loose booleans — makes the wrong combinations unrepresentable.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "react.empty-states"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c046",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer the stale-response fix to an autosave",
+      "conceptIds": [
+        "ui.stale-response",
+        "react.stale-data"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the ordering rule to writes rather than reads.",
+      "lessonId": "v1-l23",
+      "type": "transfer",
+      "promptMarkdown": "A ticket editor autosaves on every pause in typing and then sets the ticket state from whatever the save endpoint returns. An agent makes two edits in quick succession, and the field reverts to the first edit a second after the second one. Explain the mechanism and give a fix.",
+      "answerMarkdown": "Two saves are in flight. The second finishes first, then the first one's response arrives and its returned record — which contains the older text — is written into state, reverting the field. Track the latest request (a counter incremented per save, or the effect's `current` flag) and ignore any response that is not from it; better still, do not adopt the response body as state at all when the local value is newer.",
+      "explanationMarkdown": "The stale-response defect is not specific to search. Any code that writes a response into state has to ask whether that response is still the one it wants, because network ordering is never a guarantee. Writes make it worse than reads: here the stale answer silently discards the user's newer work.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ui.stale-response"
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l24",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Accessible feature composition",
+      "conceptIds": [
+        "react.feature-composition",
+        "a11y.accessible-name",
+        "a11y.focus",
+        "a11y.color-only",
+        "a11y.keyboard-navigation"
+      ],
+      "prerequisiteIds": [
+        "react.props",
+        "react.components"
+      ],
+      "bodyMarkdown": "Composing a feature is the act of deciding which component renders which state, and making sure the combinations that should be impossible actually are. The most common composition bug in this course's experience is an ordering mistake: a chain of early returns that checks `items.length === 0` before it checks whether the request failed, so an outage is displayed as an empty queue and the error branch below is unreachable code.\n\nAccessibility is part of that composition rather than a pass over it afterwards. Four things carry most of the weight at this level.\n\nAn **accessible name**: every control has to announce what it does. An icon-only button contains no text, so it needs `aria-label` — or visually hidden text — or a screen-reader user hears only \"button\".\n\n**Keyboard reach**: a `<div onClick>` is invisible to the Tab key and does not respond to Enter or Space. A `<button>` gets all of that for free, which is why the fix is almost always to use the right element rather than to add three ARIA attributes.\n\n**Not colour alone**: a red dot for *breached* and a green dot for *on track* carries the whole meaning in hue. Add the word, an icon shape, or both, so the badge still works in greyscale and for the substantial number of people who do not distinguish those two colours.\n\n**Focus**: when a submit fails, focus should move to the summary or the first invalid field. When a dialog opens, focus moves into it, is trapped there, and returns to the trigger on close. Without that, a keyboard user is left where they were, wondering why nothing happened.",
+      "chapterId": "v1-ch08",
+      "sortOrder": 2,
+      "objectives": [
+        "Order a feature's view states so no branch is unreachable and no state lies to the user.",
+        "Give every control an accessible name and full keyboard operation.",
+        "Move focus deliberately after an action that changes what is on screen."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "```jsx\nfunction QueueView({ view, onRetry, onClearFilter }) {\n  // Failure first: an empty list during an outage must not read as 'no tickets'.\n  if (view.view === 'error') {\n    return <ErrorPanel message={view.message} onRetry={onRetry} />;\n  }\n  if (view.view === 'loading') return <QueueSkeleton />;\n  if (view.view === 'no-matches') {\n    return <NoMatches query={view.query} onClearFilter={onClearFilter} />;\n  }\n  if (view.view === 'empty') return <EmptyQueue />;\n\n  return (\n    <ul>\n      {view.items.map((ticket) => (\n        <li key={ticket.id}>\n          {ticket.subject}\n          {/* status carries a word, not just a colour */}\n          <span className={`badge badge--${ticket.slaState}`}>\n            {ticket.slaState === 'breached' ? 'SLA breached' : 'On track'}\n          </span>\n          {/* a real button, with a name that says which ticket */}\n          <button type=\"button\" aria-label={`Resolve ${ticket.subject}`} onClick={...}>\n            <CheckIcon aria-hidden=\"true\" />\n          </button>\n        </li>\n      ))}\n    </ul>\n  );\n}\n```\n\nThe branch order is the design. Because `selectListView` already collapsed the state into one tag, this component cannot render a spinner and an empty state together, and there is no combination of flags that reaches the wrong branch.\n\nIn the row, `aria-hidden=\"true\"` on the icon and `aria-label` on the button are a pair: the decorative graphic is hidden from the accessibility tree and the button supplies the name instead — and that name includes the subject, so a screen-reader user hearing twenty \"Resolve\" buttons can tell them apart.",
+      "commonMistakes": [
+        "Checking `items.length === 0` before checking for an error, which shows \"No tickets\" during an outage and leaves the error branch unreachable.",
+        "Using `<div onClick>` for something clickable, which cannot be reached by Tab and does not respond to Enter or Space.",
+        "Shipping an icon-only button with no `aria-label`, so it is announced as just \"button\".",
+        "Giving twenty rows the same button label, so the announcement gives no way to tell which ticket a control belongs to.",
+        "Signalling status with colour alone, so the badge is meaningless in greyscale or to a user with a colour vision deficiency.",
+        "Rendering a validation summary without moving focus to it, so a keyboard or screen-reader user gets no indication that the submit failed.",
+        "Adding `tabIndex={0}` and `role=\"button\"` to a `<div>` instead of using a `<button>`, which then also needs manual Enter and Space handling that is usually forgotten."
+      ],
+      "summaryMarkdown": "Order the view states so failure is checked before emptiness and no branch is unreachable. Give every control a name and keyboard operation by using the right element, never carry meaning in colour alone, and move focus deliberately when the screen changes.",
+      "exerciseIds": [
+        "v1-e070",
+        "v1-e071",
+        "v1-e072"
+      ],
+      "reviewCardIds": [
+        "v1-c047",
+        "v1-c048"
+      ],
+      "references": [
+        {
+          "label": "WAI-ARIA Authoring Practices: Providing accessible names and descriptions",
+          "url": "https://www.w3.org/WAI/ARIA/apg/practices/names-and-descriptions/"
+        },
+        {
+          "label": "MDN: Keyboard-navigable JavaScript widgets",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/ARIA_Techniques/Keyboard-navigable_JavaScript_widgets"
+        },
+        {
+          "label": "WCAG: Understanding Use of Color",
+          "url": "https://www.w3.org/WAI/WCAG21/Understanding/use-of-color.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e070",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Audit a ticket row for accessibility defects",
+      "conceptIds": [
+        "a11y.accessible-name",
+        "a11y.color-only",
+        "a11y.keyboard-navigation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A row that looks perfectly fine on screen and is close to unusable without a mouse or without colour vision. Find every real defect and reject the plausible-sounding false ones.",
+      "lessonId": "v1-l24",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "```jsx\nfunction TicketRow({ ticket, onOpen, onResolve }) {\n  return (\n    <li>\n      <div onClick={() => onOpen(ticket.id)}>{ticket.subject}</div>\n\n      <span\n        className=\"dot\"\n        style={{ background: ticket.slaBreached ? 'red' : 'green' }}\n      />\n\n      <button type=\"button\" onClick={() => onResolve(ticket.id)}>\n        <CheckIcon />\n      </button>\n    </li>\n  );\n}\n```\n\nThe row renders correctly and the mouse interactions all work. Select **every** statement that identifies a genuine accessibility defect here.",
+      "hints": [
+        "Try the row with the keyboard only: press Tab repeatedly and then Enter. Which of the three things can you reach, and which can you operate?",
+        "Then try it in greyscale, and then with your eyes closed and a screen reader: what does the dot tell you, and what does the second control announce itself as?",
+        "The three defects are: a `<div>` used as a clickable control (not focusable, no Enter/Space), a status conveyed by hue alone with no text or shape, and an icon-only button with no accessible name — it needs `aria-label={`Resolve ${ticket.subject}`}` with `aria-hidden` on the icon."
+      ],
+      "solution": {
+        "modelAnswer": "The clickable `<div>` cannot be reached by Tab and does not respond to Enter or Space — it should be a `<button>`. The SLA dot carries its meaning only in colour, so it needs text or a distinguishing shape as well. The resolve button contains only an icon and therefore has no accessible name; it needs an `aria-label` that also identifies the ticket, with `aria-hidden=\"true\"` on the icon.",
+        "explanationMarkdown": "All three defects share a cause: the visual result was treated as the whole result. The mouse user's experience is complete, so nothing looks wrong, and each missing piece is only visible when you change how you are perceiving or operating the page.\n\nThe repairs are also all small. Two of them are just choosing the right element, and the third is one attribute. It is the checking that takes effort, not the fixing — which is why Tab-through, greyscale and a screen-reader pass belong in the definition of done."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "multiple",
+        "options": [
+          {
+            "id": "div-not-focusable",
+            "textMarkdown": "The subject is a `<div onClick>`, so it cannot be reached with Tab and does not respond to Enter or Space. It should be a `<button>`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Native interactive elements bring focusability, keyboard activation and the right role for free; `tabIndex` plus `role` plus manual key handling is the fragile way to reimburse that."
+          },
+          {
+            "id": "colour-only-dot",
+            "textMarkdown": "The SLA state is conveyed by colour alone, so it means nothing in greyscale or to a user with a colour vision deficiency.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Add text (`SLA breached` / `On track`), or a distinguishable shape, so hue is reinforcement rather than the only channel."
+          },
+          {
+            "id": "icon-button-unnamed",
+            "textMarkdown": "The resolve button contains only an icon and no text, so it has no accessible name and is announced as just \"button\".",
+            "correct": true,
+            "explanationMarkdown": "Correct. `aria-label={`Resolve ${ticket.subject}`}` names it and distinguishes it from the other nineteen resolve buttons; the icon takes `aria-hidden=\"true\"`."
+          },
+          {
+            "id": "li-needs-role",
+            "textMarkdown": "The `<li>` needs `role=\"listitem\"` added explicitly, because React does not apply implicit ARIA roles.",
+            "correct": false,
+            "explanationMarkdown": "React renders real HTML, and `<li>` already has that implicit role. Restating a native role adds noise and occasionally breaks the parent-child relationship."
+          },
+          {
+            "id": "needs-tabindex-on-li",
+            "textMarkdown": "The `<li>` should have `tabIndex={0}` so keyboard users can reach the row.",
+            "correct": false,
+            "explanationMarkdown": "Making non-interactive containers focusable adds stops that do nothing when activated. Focus belongs on the controls, which is exactly what turning the div into a button achieves."
+          }
+        ]
+      },
+      "primaryConceptId": "a11y.accessible-name",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e071",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Decide where focus goes after a failed submit",
+      "conceptIds": [
+        "a11y.focus",
+        "a11y.keyboard-navigation",
+        "react.feature-composition"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A short design answer. There is more than one defensible choice; you are judged on whether your reasoning accounts for what a keyboard and screen-reader user actually experiences.",
+      "lessonId": "v1-l24",
+      "sortOrder": 1,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "The new-ticket form validates on submit. When something is wrong it renders a summary above the form (\"2 problems with this ticket\") plus a message under each bad field. Focus currently stays on the submit button, which for a long form is often below the fold of what a screen magnifier shows.\n\nAn agent using a screen reader reports that pressing *Create ticket* \"does nothing at all\".\n\nExplain why the current behaviour produces that report, then say where you would move focus and how you would implement it. Cover what should happen when the submit **succeeds** as well, and mention one thing you would do so the error text is associated with the field rather than merely near it.",
+      "hints": [
+        "A screen reader announces the element that has focus and, separately, regions marked as live. If neither changes, nothing is announced — even though the page visibly changed.",
+        "Think about the shortest route from 'submit failed' to 'fixing the first problem'. Whatever you focus should let the user read the problem and then reach the field quickly.",
+        "Move focus to the error summary (give it `tabIndex={-1}` and call `.focus()` in the handler after rendering it), make each summary entry a link to `#field-id`, and connect the field to its message with `aria-describedby` plus `aria-invalid`. On success, move focus to the new ticket's heading or a confirmation region so the outcome is announced too."
+      ],
+      "solution": {
+        "modelAnswer": "Focus never moved and no live region changed, so the screen reader had nothing to announce — the visual summary appeared but was never spoken, which reads as 'nothing happened'. I would move focus to the error summary: render it, give it tabIndex={-1} so it can receive programmatic focus without becoming a tab stop, and call focus() on it after the state update. Each entry in the summary is a link to the field's id so the user can jump straight there. Each field gets aria-invalid={true} and aria-describedby pointing at its message element, so the message is read as part of the field rather than as loose nearby text. On success I would move focus to the heading of the created ticket, or to a confirmation region, so the outcome is announced rather than assumed.",
+        "explanationMarkdown": "The general rule is that when an action changes what matters on the page, focus should follow the change. Sighted mouse users get this for free because their eyes move; keyboard and screen-reader users only get it if you do it deliberately.\n\n`tabIndex={-1}` is the specific tool worth remembering: it makes an element focusable by script without inserting it into the Tab order, which is exactly what a summary, a dialog or a newly revealed panel needs. And `aria-describedby` is what turns \"there is red text somewhere below\" into a message the field itself carries."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Explains that neither focus nor a live region changed, so a screen reader had nothing to announce even though the page visibly changed.",
+          "Names a specific destination for focus after a failed submit — the error summary or the first invalid field — and gives a reason for the choice.",
+          "Describes the implementation, including making the target programmatically focusable with `tabIndex={-1}` and calling focus after the errors render.",
+          "Says what happens on success as well, moving focus to a confirmation or the created record rather than leaving it on the button.",
+          "Associates each message with its field using `aria-describedby` (and `aria-invalid`) rather than relying on visual proximity."
+        ],
+        "modelAnswerMarkdown": "**Why it reads as \"nothing happened\".** A screen reader announces what receives focus, and separately anything in a live region. The click left focus on the submit button and the summary was rendered as ordinary content, so nothing was announced. Visually the page changed; through the screen reader it did not.\n\n**Where focus goes on failure.** To the error summary. It is one place, it states how many problems there are, and it can list them as links to each field, so the user goes from \"submit failed\" to \"fixing the first field\" in one key press.\n\n```jsx\nconst summaryRef = useRef(null);\n// after setErrors(found) has rendered:\nsummaryRef.current?.focus();\n\n<div ref={summaryRef} tabIndex={-1} role=\"alert\">\n  <h2>2 problems with this ticket</h2>\n  <ul><li><a href=\"#subject\">Enter a subject</a></li>…</ul>\n</div>\n```\n\n`tabIndex={-1}` makes it focusable by script without adding a permanent tab stop.\n\n**Per-field association.** `<input id=\"subject\" aria-invalid={true} aria-describedby=\"subject-error\">` with `<p id=\"subject-error\">Enter a subject</p>`. The message is then read as part of the field, and \"invalid\" is announced with it.\n\n**On success.** Do not leave focus on a button that has now disappeared or been disabled. Move it to the heading of the created ticket, or to a confirmation region, so the result is announced rather than inferred."
+      },
+      "primaryConceptId": "a11y.focus",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e072",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "The unreachable error branch",
+      "conceptIds": [
+        "react.feature-composition",
+        "react.empty-states",
+        "react.loading-states"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Four early returns in a sensible-looking order. One of them can never run, and users find out during the worst possible half hour.",
+      "lessonId": "v1-l24",
+      "sortOrder": 2,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "During a thirty-minute API outage, every Wrenly agent saw the cheerful message \"No tickets in your queue — enjoy the quiet!\". The retry button was never shown.\n\n```jsx\nfunction Queue() {\n  const { tickets, loading, error } = useTickets();\n\n  if (loading) return <QueueSkeleton />;\n  if (tickets.length === 0) return <EmptyQueue />;\n  if (error) return <ErrorPanel error={error} onRetry={refetch} />;\n\n  return <TicketList tickets={tickets} />;\n}\n```\n\nWhat is the defect?",
+      "hints": [
+        "Write down what `tickets`, `loading` and `error` each hold at the moment the request fails, then walk the four returns in order with those values.",
+        "On failure there are no tickets to show, so `tickets` is `[]` — and that condition is tested before `error` is.",
+        "The empty check matches during a failure, so `EmptyQueue` returns and the `error` branch below it is unreachable code. Failure has to be checked before emptiness."
+      ],
+      "solution": {
+        "modelAnswer": "When the request fails, `tickets` is an empty array, so `tickets.length === 0` matches and returns `EmptyQueue` before the `error` check is ever reached. The `error` branch is unreachable. Test for failure first, then loading, then the empty cases.",
+        "explanationMarkdown": "The mistake is ordering, not logic: every individual condition is correct, and the file reads naturally top to bottom. What is missing is the observation that failure and emptiness produce the same `tickets` value, so whichever is tested first wins.\n\nThe structural fix is to stop deriving the view from three independent variables at the point of rendering. Collapse the state into a single tag first — the job `selectListView` does — so the branches are mutually exclusive by construction and no ordering accident can hide one of them."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "empty-shadows-error",
+            "textMarkdown": "A failed request also leaves `tickets` empty, so the `tickets.length === 0` branch matches first and the `error` branch below it can never run. Check for failure before emptiness.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Failure and emptiness are indistinguishable by list length, so ordering decides which message users get during an outage."
+          },
+          {
+            "id": "loading-never-false",
+            "textMarkdown": "`loading` never becomes `false` after a failure, so the component is stuck on `QueueSkeleton`.",
+            "correct": false,
+            "explanationMarkdown": "Agents reported seeing the empty message, not a skeleton, so loading clearly did finish. A hook that left `loading` true forever would be a separate bug."
+          },
+          {
+            "id": "needs-error-boundary",
+            "textMarkdown": "A thrown error cannot be handled with an `if`; the component needs an error boundary around it.",
+            "correct": false,
+            "explanationMarkdown": "The hook returns an `error` value rather than throwing, so an ordinary branch is the right tool. Error boundaries catch errors thrown during rendering."
+          },
+          {
+            "id": "retry-not-wired",
+            "textMarkdown": "`onRetry={refetch}` refers to a function that is not in scope, so React silently skipped the `ErrorPanel`.",
+            "correct": false,
+            "explanationMarkdown": "An undefined identifier would throw a `ReferenceError` when that line ran, not skip the branch. In fact the line never ran at all."
+          }
+        ]
+      },
+      "primaryConceptId": "react.feature-composition",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c047",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What gives a control its accessible name?",
+      "conceptIds": [
+        "a11y.accessible-name"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall where the announced name of a control comes from, in priority order.",
+      "lessonId": "v1-l24",
+      "type": "recall",
+      "promptMarkdown": "Where does a button's accessible name come from, and what is the name of a `<button>` whose only child is an SVG icon?",
+      "answerMarkdown": "It comes, in order of precedence, from `aria-labelledby`, then `aria-label`, then the element's own text content (including visually hidden text), then attributes like `title` as a last resort. A button containing only an icon has **no** name at all — it is announced as just \"button\" — until you add `aria-label` or visually hidden text, with `aria-hidden=\"true\"` on the decorative icon.",
+      "explanationMarkdown": "Names also need to be distinguishing, not just present. Twenty rows of \"Resolve\" tell a screen-reader user nothing about which ticket they are resolving, so include the subject: `aria-label={`Resolve ${ticket.subject}`}`. Voice-control users match spoken words against these names too.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "a11y.accessible-name"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c048",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which branch order is safe?",
+      "conceptIds": [
+        "react.feature-composition",
+        "react.empty-states"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An objectively checkable card on ordering the states of a data screen.",
+      "lessonId": "v1-l24",
+      "type": "code-reading",
+      "promptMarkdown": "A component branches on `loading`, `error` and `items.length`. Which order of checks never shows a message that is untrue?",
+      "answerMarkdown": "Check `error` first, then `loading`, then the empty cases, and render the list last. Failure and emptiness both leave `items` empty, so whichever of the two is tested first wins — and the wrong winner tells users their queue is empty during an outage.",
+      "explanationMarkdown": "Better still, collapse the three variables into one tagged state before rendering. Then the branches are mutually exclusive by construction and no future edit can reintroduce the ordering bug.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "error-loading-empty",
+            "textMarkdown": "`error` → `loading` → empty → list",
+            "correct": true,
+            "explanationMarkdown": "Correct. Failure is checked before anything that an empty `items` array could also satisfy, so no branch is shadowed."
+          },
+          {
+            "id": "loading-empty-error",
+            "textMarkdown": "`loading` → empty → `error` → list",
+            "correct": false,
+            "explanationMarkdown": "This is the outage bug: a failed request leaves `items` empty, so the empty branch matches and the error branch is unreachable."
+          },
+          {
+            "id": "empty-first",
+            "textMarkdown": "empty → `loading` → `error` → list",
+            "correct": false,
+            "explanationMarkdown": "Worse again: before the first response arrives `items` is also empty, so the screen shows \"nothing here\" instead of a loading state."
+          },
+          {
+            "id": "list-first",
+            "textMarkdown": "list → `error` → `loading` → empty",
+            "correct": false,
+            "explanationMarkdown": "Rendering the list first means the other three branches only run when the list is somehow not rendered, which is never — every other state is unreachable."
+          }
+        ]
+      },
+      "primaryConceptId": "react.feature-composition"
+    },
+    {
+      "kind": "assessment",
+      "id": "v1-a08",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "React forms and API data placement check",
+      "conceptIds": [
+        "react.controlled-forms",
+        "react.submission-state",
+        "ui.stale-response",
+        "react.empty-states",
+        "a11y.accessible-name",
+        "react.response-mapping"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering controlled forms, server data and accessible composition. Two are critical and must both be answered correctly.",
+      "chapterId": "v1-ch08",
+      "items": [
+        {
+          "id": "v1-a08-i1",
+          "objectiveIds": [
+            "react.controlled-forms"
+          ],
+          "critical": true,
+          "promptMarkdown": "A component renders `<input value={city} onChange={handleChange} />` where `handleChange` is `(e) => setCity(e.target.value.trim())`. An agent types `New York` and cannot get a space between the two words. Why?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "trim-on-every-keystroke",
+                "textMarkdown": "Every keystroke is trimmed before it is stored, so the trailing space after `New` is removed and the controlled input immediately re-renders without it.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Trimming belongs at submit or validation time, not on every change — the field's value is the state, so anything you strip is stripped in front of the user."
+              },
+              {
+                "id": "space-not-event",
+                "textMarkdown": "The space key does not fire a `change` event in React, so `handleChange` never runs for it.",
+                "correct": false,
+                "explanationMarkdown": "React's `onChange` fires on every input, including the space key. If it did not, no character would appear."
+              },
+              {
+                "id": "needs-onkeydown",
+                "textMarkdown": "Spaces require an `onKeyDown` handler with `event.preventDefault()` removed; `onChange` cannot see whitespace.",
+                "correct": false,
+                "explanationMarkdown": "There is no such limitation. `onChange` receives the full current value of the field, whitespace included."
+              },
+              {
+                "id": "value-must-be-defaultvalue",
+                "textMarkdown": "A controlled input cannot hold whitespace; the component must switch to `defaultValue`.",
+                "correct": false,
+                "explanationMarkdown": "Controlled inputs hold whatever the state holds. Switching to `defaultValue` would mask the bug by giving up the single source of truth."
+              }
+            ]
+          },
+          "explanationMarkdown": "In a controlled input the state *is* the displayed value, so any transformation in the change handler is applied live, in front of the user. Normalise on submit instead."
+        },
+        {
+          "id": "v1-a08-i2",
+          "objectiveIds": [
+            "ui.stale-response"
+          ],
+          "critical": true,
+          "promptMarkdown": "A filter panel fires a request on every change. Three requests are in flight; they return in the order 3rd, 1st, 2nd. Which approach guarantees the panel ends up showing the results for the third request?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "track-latest",
+                "textMarkdown": "Record which request is the current one — a counter or a per-run flag cleared in the effect's cleanup — and ignore any response that is not from it.",
+                "correct": true,
+                "explanationMarkdown": "Correct. This makes recency explicit rather than inferring it from arrival order, which is the only thing that actually holds."
+              },
+              {
+                "id": "sort-by-timestamp",
+                "textMarkdown": "Attach a timestamp to each response and render whichever has the newest one.",
+                "correct": false,
+                "explanationMarkdown": "Closer, but it requires keeping every response and trusting clocks. The panel also briefly displays results the user has already moved past."
+              },
+              {
+                "id": "await-in-sequence",
+                "textMarkdown": "Await each request before sending the next, so responses can only arrive in order.",
+                "correct": false,
+                "explanationMarkdown": "It does fix ordering, at the price of making the panel as slow as the sum of every request. The user waits for answers to filters they already abandoned."
+              },
+              {
+                "id": "debounce-only",
+                "textMarkdown": "Debounce the filter by 500 ms so only one request is ever in flight.",
+                "correct": false,
+                "explanationMarkdown": "Debouncing reduces how often the race happens; it does not remove it. Two requests can still overlap whenever one is slower than the debounce window."
+              }
+            ]
+          },
+          "explanationMarkdown": "Network ordering is never a guarantee. Something has to record which request is still wanted, and everything else must be discarded or cancelled."
+        },
+        {
+          "id": "v1-a08-i3",
+          "objectiveIds": [
+            "react.empty-states",
+            "react.loading-states"
+          ],
+          "critical": false,
+          "promptMarkdown": "A dashboard shows \"You have no invoices\" whenever `invoices.length === 0`. During a database incident, customers with hundreds of invoices saw that message. What is the smallest correct change?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "distinguish-failure",
+                "textMarkdown": "Model the request outcome explicitly and check for failure before checking the length, so a failed load renders an error with a retry rather than an empty state.",
+                "correct": true,
+                "explanationMarkdown": "Correct. An empty array means \"I have no data\", which is true both when there is none and when the fetch failed; only an explicit status can tell them apart."
+              },
+              {
+                "id": "retry-silently",
+                "textMarkdown": "Retry the request three times automatically before rendering anything.",
+                "correct": false,
+                "explanationMarkdown": "Retries help with transient blips but cannot help during a thirty-minute incident — and the fourth attempt still renders the same false message."
+              },
+              {
+                "id": "cache-last-good",
+                "textMarkdown": "Cache the last successful response and show it whenever the new one is empty.",
+                "correct": false,
+                "explanationMarkdown": "That replaces a false 'none' with stale figures presented as current, which is arguably worse for invoices. Showing cached data is only safe when it is labelled as such."
+              },
+              {
+                "id": "reword-message",
+                "textMarkdown": "Change the wording to \"No invoices found\", which is accurate either way.",
+                "correct": false,
+                "explanationMarkdown": "It is still read as \"you have none\", and it still offers no retry. Rewording hides the defect rather than fixing it."
+              }
+            ]
+          },
+          "explanationMarkdown": "An empty collection cannot distinguish \"nothing exists\" from \"the request failed\". The request outcome has to be part of the state the view branches on."
+        },
+        {
+          "id": "v1-a08-i4",
+          "objectiveIds": [
+            "a11y.accessible-name",
+            "a11y.keyboard-navigation"
+          ],
+          "critical": false,
+          "promptMarkdown": "A designer supplies a close control for a dialog: a `<span>` containing a × glyph, styled as a circle, with an `onClick` handler. Which change list is correct and minimal?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "use-button-with-label",
+                "textMarkdown": "Make it `<button type=\"button\" aria-label=\"Close dialog\">` with the glyph marked `aria-hidden=\"true\"`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The button brings focusability, Enter/Space activation and the right role; the label supplies a name, since × is not one."
+              },
+              {
+                "id": "tabindex-and-role",
+                "textMarkdown": "Keep the `<span>` and add `tabIndex={0}`, `role=\"button\"` and `aria-label=\"Close dialog\"`.",
+                "correct": false,
+                "explanationMarkdown": "This is reachable and named, but it still does nothing on Enter or Space until you write those key handlers yourself — which is precisely what `<button>` gives you free."
+              },
+              {
+                "id": "title-attribute",
+                "textMarkdown": "Keep the `<span>` and add `title=\"Close dialog\"` so hovering explains it.",
+                "correct": false,
+                "explanationMarkdown": "`title` is a last-resort name source, is not shown on touch or keyboard focus, and does nothing about the control being unreachable and unoperable."
+              },
+              {
+                "id": "alt-text",
+                "textMarkdown": "Add `alt=\"Close dialog\"` to the `<span>`.",
+                "correct": false,
+                "explanationMarkdown": "`alt` applies to `<img>`, `<area>` and `<input type=\"image\">`. On a `<span>` it is ignored entirely."
+              }
+            ]
+          },
+          "explanationMarkdown": "Choosing the correct native element solves role, focus and keyboard activation at once. ARIA is for describing things HTML cannot express, not for rebuilding what it already provides."
+        },
+        {
+          "id": "v1-a08-i5",
+          "objectiveIds": [
+            "react.response-mapping"
+          ],
+          "critical": false,
+          "promptMarkdown": "An API adds a new `status` value, `merged`, that the interface has never seen. The mapping function currently reads `statusLabel: LABELS[payload.status]`. What does the interface show, and what is the better mapping?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "undefined-then-fallback",
+                "textMarkdown": "The lookup yields `undefined`, so the badge renders blank; add an explicit fallback such as `?? 'Unknown'` so an unrecognised status still renders something meaningful.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A missing key gives `undefined`, which React renders as nothing at all — a silently blank badge is worse than an honest \"Unknown\"."
+              },
+              {
+                "id": "throws",
+                "textMarkdown": "Reading a missing key throws a `TypeError`, so the whole list fails to render; wrap the mapping in a `try`/`catch`.",
+                "correct": false,
+                "explanationMarkdown": "Reading an absent property of an existing object yields `undefined` rather than throwing. It would only throw if `LABELS` itself were undefined."
+              },
+              {
+                "id": "shows-raw",
+                "textMarkdown": "React falls back to rendering the raw `merged` string, which is acceptable until a translation is added.",
+                "correct": false,
+                "explanationMarkdown": "There is no such fallback. The expression evaluates to `undefined` and React renders nothing."
+              },
+              {
+                "id": "typescript-prevents",
+                "textMarkdown": "A TypeScript union on `status` prevents this at compile time, so no runtime fallback is needed.",
+                "correct": false,
+                "explanationMarkdown": "The type describes what you expected, not what the server sent. Data arriving at runtime is exactly the case types cannot check."
+              }
+            ]
+          },
+          "explanationMarkdown": "A boundary mapper is where unexpected data should be made harmless. Give every lookup an explicit fallback, because the API will eventually send a value you have not seen."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

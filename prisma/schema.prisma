@@ -1,0 +1,444 @@
+// DevPractice platform database schema.
+// Learning-project databases are SEPARATE from this database (spec 5.2).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LessonStatus {
+  not_started
+  in_progress
+  completed
+  skipped
+}
+
+enum Assistance {
+  none
+  hints
+  solution_viewed
+}
+
+enum GradingOrigin {
+  server_objective
+  browser_automated
+  self_reported
+}
+
+enum AttemptOutcome {
+  passed
+  failed
+  needs_self_assessment
+}
+
+enum ReleaseState {
+  draft
+  published
+  superseded
+  invalid
+}
+
+enum RevealKind {
+  hint
+  solution
+}
+
+enum ReviewRating {
+  again
+  hard
+  good
+  easy
+}
+
+enum MissionStatus {
+  not_started
+  in_progress
+  completed
+}
+
+enum ContentKind {
+  track
+  chapter
+  lesson
+  exercise
+  review_card
+  assessment
+  mission
+}
+
+model User {
+  id                    String   @id @default(uuid())
+  normalizedEmail       String   @unique
+  displayEmail          String
+  passwordHash          String
+  timezone              String   @default("UTC")
+  theme                 String   @default("system")
+  preferencesRevision   Int      @default(1)
+  activeReleaseId       String?
+  activeReleaseRevision Int      @default(0)
+  createdAt             DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(6)
+
+  activeRelease     ContentRelease?    @relation("ActiveRelease", fields: [activeReleaseId], references: [id])
+  sessions          Session[]
+  attempts          Attempt[]
+  reveals           RevealEvent[]
+  lessonProgress    LessonProgress[]
+  chapterPlacements ChapterPlacement[]
+  placementAttempts PlacementAttempt[]
+  drafts            ExerciseDraft[]
+  reviewStates      ReviewState[]
+  reviewEvents      ReviewEvent[]
+  notes             Note[]
+  bookmarks         Bookmark[]
+  missionProgress   MissionProgress[]
+  xpAwards          XpAward[]
+  activity          ActivityEvent[]
+  receipts          MutationReceipt[]
+  releases          ContentRelease[]   @relation("ReleaseOwner")
+}
+
+model Session {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  csrfSecret String
+  createdAt  DateTime  @default(now()) @db.Timestamptz(6)
+  lastSeenAt DateTime  @default(now()) @db.Timestamptz(6)
+  expiresAt  DateTime  @db.Timestamptz(6)
+  revokedAt  DateTime? @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model ContentItem {
+  id        String      @id
+  kind      ContentKind
+  createdAt DateTime    @default(now()) @db.Timestamptz(6)
+
+  versions  ContentVersion[]
+  notes     Note[]
+  bookmarks Bookmark[]
+  activity  ActivityEvent[]
+}
+
+model ContentVersion {
+  id               String      @id @default(uuid())
+  itemId           String
+  version          Int
+  masteryRevision  Int         @default(1)
+  kind             ContentKind
+  parentId         String?
+  sortOrder        Int         @default(0)
+  primaryConceptId String?
+  title            String
+  payload          Json
+  checksum         String
+  createdAt        DateTime    @default(now()) @db.Timestamptz(6)
+
+  item         ContentItem        @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  releaseItems ReleaseItem[]
+  attempts     Attempt[]
+  placements   PlacementAttempt[]
+  reviewEvents ReviewEvent[]
+  drafts       ExerciseDraft[]
+
+  @@unique([itemId, version])
+  @@index([kind, parentId, sortOrder])
+}
+
+model ContentRelease {
+  id                String       @id @default(uuid())
+  packageId         String
+  packageVersion    String
+  ownerId           String
+  checksum          String
+  state             ReleaseState @default(draft)
+  title             String
+  baseReleaseId     String?
+  validationSummary Json
+  changeSummary     Json?
+  createdAt         DateTime     @default(now()) @db.Timestamptz(6)
+  publishedAt       DateTime?    @db.Timestamptz(6)
+
+  owner       User          @relation("ReleaseOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  items       ReleaseItem[]
+  activeUsers User[]        @relation("ActiveRelease")
+
+  @@unique([ownerId, packageId, packageVersion])
+  @@index([ownerId, state, createdAt])
+}
+
+model ReleaseItem {
+  releaseId String
+  itemId    String
+  versionId String
+  kind      ContentKind
+  parentId  String?
+  sortOrder Int     @default(0)
+
+  release ContentRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  version ContentVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@id([releaseId, itemId])
+  @@index([releaseId, kind, parentId, sortOrder])
+}
+
+model Concept {
+  id          String @id
+  title       String
+  description String
+}
+
+model Attempt {
+  id                String         @id @default(uuid())
+  userId            String
+  clientEventId     String
+  exerciseVersionId String
+  exerciseId        String
+  masteryRevision   Int
+  sourceSnapshot    String?
+  answer            Json?
+  outcome           AttemptOutcome
+  gradingOrigin     GradingOrigin
+  assistance        Assistance
+  result            Json
+  createdAt         DateTime       @default(now()) @db.Timestamptz(6)
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exerciseVersion ContentVersion @relation(fields: [exerciseVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientEventId])
+  @@index([userId, exerciseVersionId, createdAt])
+  @@index([userId, exerciseId, createdAt])
+}
+
+model RevealEvent {
+  id              String     @id @default(uuid())
+  userId          String
+  itemId          String
+  masteryRevision Int
+  revealKind      RevealKind
+  hintIndex       Int?
+  clientEventId   String
+  createdAt       DateTime   @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientEventId])
+  @@index([userId, itemId, masteryRevision])
+}
+
+model LessonProgress {
+  userId      String
+  lessonId    String
+  status      LessonStatus @default(not_started)
+  startedAt   DateTime?    @db.Timestamptz(6)
+  completedAt DateTime?    @db.Timestamptz(6)
+  version     Int          @default(1)
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, lessonId])
+  @@index([userId, status])
+}
+
+model ChapterPlacement {
+  userId      String
+  chapterId   String
+  placedOut   Boolean   @default(false)
+  qualifiedAt DateTime? @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, chapterId])
+}
+
+model PlacementAttempt {
+  id                  String   @id @default(uuid())
+  userId              String
+  chapterId           String
+  assessmentVersionId String
+  clientEventId       String
+  submittedAnswers    Json
+  score               Int
+  qualified           Boolean
+  practiceOnly        Boolean  @default(false)
+  createdAt           DateTime @default(now()) @db.Timestamptz(6)
+
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assessmentVersion ContentVersion @relation(fields: [assessmentVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientEventId])
+  @@index([userId, chapterId, createdAt])
+}
+
+model ExerciseDraft {
+  id               String   @id @default(uuid())
+  userId           String
+  exerciseId       String
+  contentVersionId String
+  source           String
+  revision         Int      @default(1)
+  createdAt        DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(6)
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version   ContentVersion  @relation(fields: [contentVersionId], references: [id], onDelete: Cascade)
+  snapshots DraftSnapshot[]
+
+  @@unique([userId, exerciseId])
+}
+
+model DraftSnapshot {
+  id           String   @id @default(uuid())
+  draftId      String
+  source       String
+  baseRevision Int
+  reason       String
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  draft ExerciseDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([draftId, createdAt])
+}
+
+model ReviewState {
+  userId         String
+  cardId         String
+  step           Int       @default(0)
+  dueAt          DateTime  @db.Timestamptz(6)
+  lastReviewedAt DateTime? @db.Timestamptz(6)
+  revision       Int       @default(1)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, cardId])
+  @@index([userId, dueAt])
+}
+
+model ReviewEvent {
+  id            String        @id @default(uuid())
+  userId        String
+  cardId        String
+  cardVersionId String
+  clientEventId String
+  rating        ReviewRating
+  correctness   Boolean?
+  gradingOrigin GradingOrigin
+  fromRevision  Int
+  createdAt     DateTime      @default(now()) @db.Timestamptz(6)
+
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardVersion ContentVersion @relation(fields: [cardVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientEventId])
+  @@index([userId, cardId, createdAt])
+}
+
+model Note {
+  id            String    @id @default(uuid())
+  userId        String
+  contentItemId String?
+  title         String
+  body          String
+  revision      Int       @default(1)
+  deletedAt     DateTime? @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item ContentItem? @relation(fields: [contentItemId], references: [id])
+
+  @@index([userId, updatedAt])
+}
+
+model Bookmark {
+  userId        String
+  contentItemId String
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item ContentItem @relation(fields: [contentItemId], references: [id])
+
+  @@id([userId, contentItemId])
+}
+
+model MissionProgress {
+  userId        String
+  missionId     String
+  checklist     Json          @default("{}")
+  status        MissionStatus @default(not_started)
+  repositoryUrl String?
+  commitHash    String?
+  report        Json?
+  revision      Int           @default(1)
+  createdAt     DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime      @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, missionId])
+  @@index([userId, status])
+}
+
+model XpAward {
+  id        String   @id @default(uuid())
+  userId    String
+  awardKey  String
+  amount    Int
+  reason    String
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, awardKey])
+  @@index([userId, createdAt])
+}
+
+model ActivityEvent {
+  id              String   @id @default(uuid())
+  userId          String
+  kind            String
+  contentItemId   String?
+  relatedRecordId String?
+  detail          Json?
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item ContentItem? @relation(fields: [contentItemId], references: [id])
+
+  @@index([userId, createdAt, id])
+}
+
+model MutationReceipt {
+  userId        String
+  clientEventId String
+  operation     String
+  requestHash   String
+  response      Json
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, clientEventId])
+  @@index([createdAt])
+}
+
+model LoginAttempt {
+  id              String   @id @default(uuid())
+  normalizedEmail String
+  sourceAddress   String
+  succeeded       Boolean
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([normalizedEmail, sourceAddress, createdAt])
+}

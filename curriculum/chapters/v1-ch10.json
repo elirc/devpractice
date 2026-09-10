@@ -1,0 +1,1258 @@
+{
+  "note": "Chapter 10 — Relational persistence (L28 data modelling, L29 queries and pagination, L30 migrations and transactions). SQL is assessed through reading, prediction, schema judgement and rubric explanation; the browser runner has no database, so the only runnable task is the pure pagination-cursor function in L29. prerequisiteIds carry CONCEPT ids (the validator resolves them against concepts.json), not lesson ids.",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch10",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Relational persistence",
+      "conceptIds": [
+        "sql.keys",
+        "sql.relationships",
+        "sql.uniqueness",
+        "sql.select",
+        "sql.ordering",
+        "sql.pagination",
+        "sql.duplicates",
+        "sql.migrations",
+        "sql.transactions",
+        "sql.partial-writes"
+      ],
+      "prerequisiteIds": [
+        "node.route-boundaries",
+        "node.runtime-validation"
+      ],
+      "bodyMarkdown": "Fernwood Field Services books engineers onto jobs. Until now the data lived in a JavaScript array that vanished when the server restarted; from here it lives in PostgreSQL, and that changes what correctness means.\n\nA relational database is not just a place to put objects. It is a component that can *refuse* bad data. A foreign key can make an orphaned booking impossible. A unique constraint can make a second active membership impossible. Neither rule depends on every code path remembering to check, which is exactly why they survive a rushed Friday change.\n\nThe chapter has three movements. First, shape the tables so the invariants you care about are enforced by the database rather than hoped for by the application. Second, read from them predictably: a query with no total order may return rows in any sequence, and pagination built on an untied order will quietly skip and repeat rows. Third, change them safely: migrations run in order and must be reversible or deliberately forward-only, and a multi-step write that is not wrapped in a transaction can stop halfway and leave a booking that exists but was never paid for.\n\nThe running example throughout is the Fernwood booking schema: crews, jobs, and the parts consumed on each job.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v1-l28",
+        "v1-l29",
+        "v1-l30"
+      ],
+      "assessmentId": "v1-a10",
+      "objectiveIds": [
+        "sql.keys",
+        "sql.relationships",
+        "sql.uniqueness",
+        "sql.select",
+        "sql.ordering",
+        "sql.pagination",
+        "sql.duplicates",
+        "sql.migrations",
+        "sql.transactions",
+        "sql.partial-writes"
+      ],
+      "missionIds": [
+        "m02-support-desk-api"
+      ],
+      "sortOrder": 9
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l28",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Data modelling the database can defend",
+      "conceptIds": [
+        "sql.keys",
+        "sql.relationships",
+        "sql.uniqueness"
+      ],
+      "prerequisiteIds": [
+        "node.runtime-validation"
+      ],
+      "bodyMarkdown": "Every table needs an answer to one question: what makes a row *this* row and not another? That answer is the **primary key**. In the Fernwood schema a job has an `id`, and no two jobs share it. The key is not decoration — it is what an update, a delete and a foreign key all point at.\n\nA **foreign key** is the second half of the idea. `jobs.crew_id REFERENCES crews (id)` tells PostgreSQL that a job's crew must exist. Without that constraint the column is just a number that happens to look like a crew id, and nothing stops a job pointing at crew 42 after crew 42 was deleted. That row is an **orphan**: it reads fine, joins to nothing, and produces a job whose crew name is blank on the schedule board.\n\nTwo details decide whether a foreign key actually protects you.\n\nThe first is **nullability**. `crew_id integer REFERENCES crews (id)` permits `NULL`, and `NULL` satisfies the constraint. If an unassigned job is a real state, that is correct. If every job must have a crew, the column needs `NOT NULL` as well — the reference alone does not require a value, only that any value present exists.\n\nThe second is the **delete rule**. The default is `ON DELETE NO ACTION`, which refuses to delete a crew that still has jobs. `ON DELETE CASCADE` deletes the jobs with the crew. `ON DELETE SET NULL` keeps the jobs and unassigns them. All three are defensible; only one is right for a given table, and the default is the one that never silently loses data.\n\n**Relationships** fall out of where the key lives. One crew to many jobs: the key goes on the many side, as `jobs.crew_id`. Many jobs to many parts: neither table can hold the key, so a third table — `job_parts (job_id, part_id, quantity)` — carries one row per pairing. The join table is not overhead; it is the only place a per-pairing fact like `quantity` can live.\n\nFinally, a **unique constraint** is how you hand the database a rule the application cannot keep. Two concurrent requests can both check `SELECT ... WHERE code = 'FW-9'`, both see nothing, and both insert. Only a unique index stops the second one. The hard part is picking the right columns: unique on `(code)` is a different rule from unique on `(depot_id, code)`, and unique on a text column is case-sensitive, so `fw-9` and `FW-9` are two different values unless you say otherwise.",
+      "chapterId": "v1-ch10",
+      "sortOrder": 0,
+      "objectives": [
+        "Choose primary and foreign keys that make orphaned rows impossible.",
+        "Model one-to-many and many-to-many relationships with the key on the correct side.",
+        "Pick the columns a unique constraint must cover so the database enforces the real rule."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "The Fernwood booking schema, with every constraint doing a job:\n\n```sql\nCREATE TABLE crews (\n  id         bigserial PRIMARY KEY,\n  depot_id   bigint NOT NULL REFERENCES depots (id),\n  code       text   NOT NULL,\n  UNIQUE (depot_id, code)          -- codes are reused across depots, not within one\n);\n\nCREATE TABLE jobs (\n  id            bigserial PRIMARY KEY,\n  crew_id       bigint REFERENCES crews (id) ON DELETE SET NULL,  -- nullable on purpose\n  scheduled_for timestamptz NOT NULL,\n  status        text NOT NULL\n);\n\nCREATE TABLE job_parts (\n  job_id   bigint NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,\n  part_id  bigint NOT NULL REFERENCES parts (id),\n  quantity integer NOT NULL CHECK (quantity > 0),\n  PRIMARY KEY (job_id, part_id)    -- a part appears at most once per job\n);\n```\n\nRead the deliberate decisions:\n\n- `jobs.crew_id` is nullable because an unbooked job is a real state at Fernwood, and `ON DELETE SET NULL` turns a departing crew's jobs into unassigned work rather than deleting the customer's booking.\n- `job_parts.job_id` is `NOT NULL` and cascades: a parts line has no meaning without its job, so deleting the job should take the lines with it.\n- `job_parts` uses a **composite primary key** of the two foreign keys. That single line is what stops the same part being added to a job twice as two rows instead of one row with `quantity = 2`.\n- `UNIQUE (depot_id, code)` encodes the actual rule. `UNIQUE (code)` would be stricter than the business — Fernwood genuinely reuses `A1` at every depot — and no unique constraint at all would let one depot end up with two crews called `A1`.",
+      "commonMistakes": [
+        "Storing `crew_id` as a plain integer with no REFERENCES clause, so nothing stops a job pointing at a crew that no longer exists.",
+        "Assuming a foreign key implies NOT NULL; a NULL always satisfies a reference, so an 'every job has a crew' rule needs both.",
+        "Reaching for ON DELETE CASCADE everywhere because it makes the delete succeed, and quietly destroying rows a customer still needs.",
+        "Enforcing uniqueness with a SELECT-then-INSERT in the handler, which two concurrent requests both pass before either writes.",
+        "Adding a second row to a join table instead of a quantity column, so 'two of part P' becomes two identical pairings.",
+        "Choosing a natural key like an email address as the primary key, then discovering the value has to change."
+      ],
+      "summaryMarkdown": "A primary key identifies a row; a foreign key makes a reference real. NULL always satisfies a foreign key, so require it separately when the relationship is mandatory. The key lives on the many side of a one-to-many, and in a join table for a many-to-many — which is also the only place a per-pairing fact can live. Unique constraints are for rules the application cannot enforce under concurrency; the work is choosing the exact column set the rule covers.",
+      "exerciseIds": [
+        "v1-e082",
+        "v1-e083",
+        "v1-e084"
+      ],
+      "reviewCardIds": [
+        "v1-c055",
+        "v1-c056"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: Constraints (primary, foreign, unique, check)",
+          "url": "https://www.postgresql.org/docs/current/ddl-constraints.html"
+        },
+        {
+          "label": "PostgreSQL: CREATE TABLE",
+          "url": "https://www.postgresql.org/docs/current/sql-createtable.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e082",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the schema that still allows orphan jobs",
+      "conceptIds": [
+        "sql.keys",
+        "sql.relationships"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Decide which single schema change makes the reported state impossible rather than merely unlikely.",
+      "lessonId": "v1-l28",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "Fernwood's schedule board shows three jobs with an empty crew column. Support confirms those crews were deleted last month. The table is:\n\n```sql\nCREATE TABLE jobs (\n  id            bigserial PRIMARY KEY,\n  crew_id       bigint NOT NULL,\n  scheduled_for timestamptz NOT NULL\n);\n```\n\nThe application does check that the crew exists before inserting a job. Which change makes an orphaned `crew_id` impossible?",
+      "hints": [
+        "The application check runs before the insert. Ask what happens to already-inserted rows when a crew is deleted *afterwards*.",
+        "Nothing in this table tells PostgreSQL that `crew_id` means a row in `crews`. It is currently just a number.",
+        "Add `REFERENCES crews (id)` to the column. The database then refuses any insert naming a missing crew, and refuses to delete a crew that jobs still point at."
+      ],
+      "solution": {
+        "modelAnswer": "Declare crew_id as a foreign key: `crew_id bigint NOT NULL REFERENCES crews (id)`.",
+        "explanationMarkdown": "The application's pre-insert check is a snapshot of a moment. It cannot stop a crew being deleted an hour later, and it cannot stop a second code path — a data fix, an import script, a different service — from inserting without checking. `REFERENCES crews (id)` moves the rule into the database, where it is enforced on every write from every source, and where deleting a referenced crew is refused rather than silently orphaning its jobs."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "foreign-key",
+            "textMarkdown": "Declare the column as `crew_id bigint NOT NULL REFERENCES crews (id)`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The reference is checked on insert, on update, and on any attempt to delete the parent crew, from every client of the database."
+          },
+          {
+            "id": "index",
+            "textMarkdown": "Add `CREATE INDEX ON jobs (crew_id);` so lookups of the crew always succeed.",
+            "correct": false,
+            "explanationMarkdown": "An index changes how fast rows are found, never which rows are allowed to exist. An orphaned row is simply found faster."
+          },
+          {
+            "id": "not-null",
+            "textMarkdown": "The column is already `NOT NULL`, so the fix is to also make it `UNIQUE`.",
+            "correct": false,
+            "explanationMarkdown": "`NOT NULL` only demands *some* number, and `UNIQUE` would additionally forbid a crew having two jobs — a rule Fernwood does not want. Neither says the number must name an existing crew."
+          },
+          {
+            "id": "recheck-in-app",
+            "textMarkdown": "Re-run the application's crew-exists check inside the schedule-board query and hide jobs that fail it.",
+            "correct": false,
+            "explanationMarkdown": "That hides the symptom on one screen. The orphaned rows still exist, still appear in exports and reports, and the next screen has to remember the same workaround."
+          }
+        ]
+      },
+      "primaryConceptId": "sql.keys",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e083",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the duplicate crew codes a unique index did not stop",
+      "conceptIds": [
+        "sql.uniqueness",
+        "sql.duplicates"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read a constraint and a set of rows, and explain why the constraint accepted data the business calls a duplicate.",
+      "lessonId": "v1-l28",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "Fernwood's rule is: **within one depot, a crew code is used once.** The table declares\n\n```sql\nCREATE TABLE crews (\n  id       bigserial PRIMARY KEY,\n  depot_id bigint NOT NULL REFERENCES depots (id),\n  code     text   NOT NULL,\n  UNIQUE (depot_id, code)\n);\n```\n\nDespatch reports two crews at depot 4 that both answer to `A1`. The rows are:\n\n| id | depot_id | code |\n| --- | --- | --- |\n| 11 | 4 | `A1` |\n| 12 | 4 | `a1` |\n| 13 | 9 | `A1` |\n\nWhy did the unique constraint permit rows 11 and 12?",
+      "hints": [
+        "Row 13 is genuinely fine — it is at a different depot. Concentrate on what differs between rows 11 and 12.",
+        "A unique constraint compares the stored values exactly. For a `text` column in PostgreSQL, `A1` and `a1` are two different values.",
+        "The constraint is doing what it was told; the rule was written as if text comparison ignored case. Enforce it with a case-insensitive expression index such as `UNIQUE (depot_id, lower(code))`, and normalise the code before storing it."
+      ],
+      "solution": {
+        "modelAnswer": "Text comparison is case-sensitive, so ('4','A1') and ('4','a1') are distinct tuples. The constraint is correct as written; the rule intended case-insensitive uniqueness, which needs a unique index on `(depot_id, lower(code))` plus normalisation on write.",
+        "explanationMarkdown": "A unique constraint enforces exactly the tuple you named, compared with the column's own equality rules. PostgreSQL `text` equality is case-sensitive, so `A1` and `a1` differ and both are accepted. Row 13 shows the composite key working as designed: the same code at another depot is legal.\n\nThe fix is to make the stored form and the constraint agree. `CREATE UNIQUE INDEX ON crews (depot_id, lower(code));` enforces the intended rule; normalising the code to upper case on write keeps what despatch sees consistent with what is compared. Deduplicating the existing rows has to happen first, because the index cannot be created while a violation exists."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "case-sensitive",
+            "textMarkdown": "`A1` and `a1` are different text values, so the pair `(4, 'a1')` does not collide with `(4, 'A1')`.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The constraint compares stored values exactly; case-insensitive uniqueness has to be spelled out, for example as a unique index on `(depot_id, lower(code))`."
+          },
+          {
+            "id": "composite-broken",
+            "textMarkdown": "A composite `UNIQUE (depot_id, code)` only checks the first column, so `code` is not constrained at all.",
+            "correct": false,
+            "explanationMarkdown": "A composite unique constraint applies to the whole tuple. If it only checked `depot_id`, depot 4 could hold just one crew — which the table clearly permits."
+          },
+          {
+            "id": "needs-primary-key",
+            "textMarkdown": "Uniqueness is only enforced by a PRIMARY KEY, so `UNIQUE` is advisory.",
+            "correct": false,
+            "explanationMarkdown": "`UNIQUE` is enforced by a real index, exactly like a primary key. The difference is that a table has one primary key and may have many unique constraints, and that unique columns may be nullable."
+          },
+          {
+            "id": "row-13",
+            "textMarkdown": "Row 13 broke the constraint, and rows 11 and 12 are the collateral damage.",
+            "correct": false,
+            "explanationMarkdown": "Row 13 is at depot 9, so its tuple is `(9, 'A1')` and collides with nothing. It is the clearest evidence the composite key is behaving correctly."
+          }
+        ]
+      },
+      "primaryConceptId": "sql.uniqueness",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e084",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Model parts consumed on a job",
+      "conceptIds": [
+        "sql.relationships",
+        "sql.keys"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Argue for a table design in prose. The rubric is shown after you answer.",
+      "lessonId": "v1-l28",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "A colleague proposes recording the parts used on a Fernwood job by adding a `part_ids text` column to `jobs`, holding a comma-separated list such as `'17,17,23'`.\n\nExplain what this design cannot do, and describe the tables and keys you would use instead. Be specific about where quantity lives and what stops the same part being listed twice as two separate rows.",
+      "hints": [
+        "Start from a question the schedule board will certainly be asked: which jobs used part 23 last month, and how many in total?",
+        "A comma-separated column cannot be referenced by a foreign key, cannot be indexed usefully for that question, and holds no room for a per-pairing fact such as a quantity.",
+        "Propose a join table `job_parts (job_id, part_id, quantity)` with both columns as foreign keys, a composite primary key on `(job_id, part_id)` to make a repeated pairing impossible, and `CHECK (quantity > 0)` so a zero-quantity line cannot be stored."
+      ],
+      "solution": {
+        "modelAnswer": "The text column stores identifiers the database cannot check: no foreign key can point into the middle of a string, so a deleted part leaves a dangling '23' behind. It also cannot answer aggregate questions without parsing, and it has nowhere to record how many of a part were used — the proposal fakes quantity by repeating the id, which means the same fact is stored twice. I would add a join table `job_parts (job_id bigint NOT NULL REFERENCES jobs (id) ON DELETE CASCADE, part_id bigint NOT NULL REFERENCES parts (id), quantity integer NOT NULL CHECK (quantity > 0), PRIMARY KEY (job_id, part_id))`. Quantity lives on the pairing because it is a fact about this part on this job, not about the part or the job alone. The composite primary key makes a duplicated pairing impossible, so 'two of part 17' can only be expressed as one row with quantity 2.",
+        "explanationMarkdown": "The core idea is that a many-to-many relationship needs its own table, and that the table is where facts about the *pairing* live. Once `job_parts` exists, three things become possible that the string column could never support: a foreign key stops a job referring to a part that does not exist, an index on `part_id` answers 'which jobs used this part' directly, and `SUM(quantity)` answers 'how many' without any parsing. The composite primary key is doing the same work a unique constraint does elsewhere — it makes the invariant a database rule rather than a convention the next contributor must remember."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Names at least one thing the comma-separated column cannot do: no foreign key into a string, no useful index, no place for quantity, or parsing required for every query.",
+          "Proposes a join table keyed on both sides, with job_id and part_id as real foreign keys.",
+          "Places quantity on the join table and explains that it is a fact about the pairing rather than about either row alone.",
+          "States what prevents a repeated pairing — a composite primary key or unique constraint on (job_id, part_id) — rather than relying on application code.",
+          "Chooses a delete rule deliberately and can justify it, for example cascading parts lines with their job."
+        ],
+        "modelAnswerMarkdown": "A comma-separated `part_ids` column stores references the database cannot verify: a foreign key cannot point into the middle of a string, so deleting part 23 leaves the text `'17,17,23'` intact and wrong. Every question about parts then needs string parsing, and an index on the column cannot answer 'which jobs used part 23'. Worst of all there is nowhere to put quantity, so the design encodes 'two of part 17' by repeating the id — the same fact recorded twice, with nothing preventing the two copies from disagreeing after an edit.\n\nI would model it as a join table:\n\n```sql\nCREATE TABLE job_parts (\n  job_id   bigint NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,\n  part_id  bigint NOT NULL REFERENCES parts (id),\n  quantity integer NOT NULL CHECK (quantity > 0),\n  PRIMARY KEY (job_id, part_id)\n);\n```\n\nQuantity belongs here because it describes this part *on this job*. The composite primary key makes a second row for the same pairing impossible, so quantity is the only way to express repetition. `ON DELETE CASCADE` on `job_id` is right because a parts line has no meaning without its job; `part_id` deliberately has no cascade, so a part still used by historical jobs cannot be deleted out from under them."
+      },
+      "primaryConceptId": "sql.relationships",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c055",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Does a foreign key require a value?",
+      "conceptIds": [
+        "sql.keys"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the interaction between a reference and nullability.",
+      "lessonId": "v1-l28",
+      "type": "recall",
+      "promptMarkdown": "A column is declared `crew_id bigint REFERENCES crews (id)`. Which values does PostgreSQL accept, and what does that mean for a rule like 'every job has a crew'?",
+      "answerMarkdown": "It accepts any id that exists in `crews`, **and** it accepts `NULL`. A NULL always satisfies a foreign key. Making the relationship mandatory needs `NOT NULL` in addition to the reference.",
+      "explanationMarkdown": "The reference constrains what a *present* value may be; it never demands that a value be present. Mandatory relationships are therefore two declarations, not one, and forgetting the second is how 'unassigned' rows appear in a table that was supposed to have none.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "sql.keys"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c056",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Spot the uniqueness rule the code cannot keep",
+      "conceptIds": [
+        "sql.uniqueness"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the concurrency argument to a familiar handler shape.",
+      "lessonId": "v1-l28",
+      "type": "debugging",
+      "promptMarkdown": "A handler runs `SELECT id FROM crews WHERE depot_id = $1 AND code = $2`, and inserts only when the query returns nothing. Duplicates still appear roughly once a month. What is the defect?",
+      "answerMarkdown": "Two requests can run the SELECT before either runs the INSERT. Both see no row and both insert. Only a unique index on `(depot_id, code)` can reject the second write; the handler should then catch the unique-violation error and report it as a conflict.",
+      "explanationMarkdown": "Check-then-act across two statements is not atomic. The gap between them is small, which is precisely why the bug is rare enough to survive testing and frequent enough to matter in production.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "race",
+            "textMarkdown": "Two concurrent requests both pass the SELECT before either INSERT lands.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The check and the write are separate statements, so the result of the check is already stale when the write happens."
+          },
+          {
+            "id": "index-missing",
+            "textMarkdown": "The SELECT is missing an index, so it sometimes returns the wrong rows.",
+            "correct": false,
+            "explanationMarkdown": "A missing index makes a query slow, never wrong. The SELECT returns a correct answer for the moment it ran."
+          },
+          {
+            "id": "case",
+            "textMarkdown": "The parameters were passed in the wrong order.",
+            "correct": false,
+            "explanationMarkdown": "That would make the check fail constantly and duplicates appear on every request, not once a month."
+          },
+          {
+            "id": "transaction-alone",
+            "textMarkdown": "Wrapping the SELECT and INSERT in a transaction at the default isolation level removes the problem.",
+            "correct": false,
+            "explanationMarkdown": "A common trap. At READ COMMITTED both transactions still see no row and both insert; the write has to be rejected by a unique index or serialised with an explicit lock."
+          }
+        ]
+      },
+      "primaryConceptId": "sql.uniqueness"
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l29",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Queries and pagination that never lie",
+      "conceptIds": [
+        "sql.select",
+        "sql.ordering",
+        "sql.pagination",
+        "sql.duplicates"
+      ],
+      "prerequisiteIds": [
+        "sql.keys"
+      ],
+      "bodyMarkdown": "A `SELECT` answers a question about rows. Being able to *predict* its answer — before running it — is the skill that stops a bad query reaching production.\n\nThree parts do the work. `WHERE` decides which rows. The select list decides which columns. `ORDER BY` decides the sequence. It is tempting to treat the third as cosmetic, but it is not: **without an `ORDER BY` the database is free to return rows in any order at all**, and it will happily change that order between two runs of the same query when the plan changes.\n\nThe subtler trap is a *partial* order. `ORDER BY scheduled_for` on a table where twelve jobs share a timestamp gives you a defined order for the distinct timestamps and an arbitrary one within each tie. Everything looks stable in development, where there are three rows, and shuffles in production, where there are three thousand.\n\nThat is exactly what breaks offset pagination. `LIMIT 20 OFFSET 20` asks the database to compute the ordered result and skip twenty rows. If the tie-break shuffles between the request for page one and the request for page two, some rows appear on both pages and some appear on neither. Nothing errors. The user simply never sees job `J-4471`.\n\nThe cure is a **total order**: add a tie-break the database can always decide, normally the primary key. `ORDER BY scheduled_for, id` has no ties, so every page boundary is stable.\n\nOffset pagination has a second problem a tie-break does not fix. Offsets are positional, so a row inserted before the current position shifts everything down and the next page repeats a row you already saw. **Keyset pagination** avoids that by remembering the last row you actually returned and asking for rows *after* it — `WHERE (scheduled_for, id) > ($1, $2) ORDER BY scheduled_for, id LIMIT 20`. The cursor names a position in the data rather than a count of rows, so concurrent inserts cannot slide it.\n\nOne last habit: check every query against the boring cases. What does it return when the table is empty? What does a `JOIN` to a many-side table do to your row count — and is that `SUM` now double-counting because each job appears once per parts line?",
+      "chapterId": "v1-ch10",
+      "sortOrder": 1,
+      "objectives": [
+        "Predict exactly which rows and columns a SELECT returns, including NULL comparisons.",
+        "Explain why an untied ORDER BY makes offset pagination skip and repeat rows.",
+        "Build a keyset cursor whose position survives concurrent inserts."
+      ],
+      "estimatedMinutes": 18,
+      "workedExampleMarkdown": "Two pagination queries over the same data. The `jobs` table holds four rows that share the timestamp `2026-03-02 08:00`.\n\n**Offset, untied — the broken version:**\n\n```sql\n-- page 1\nSELECT id, scheduled_for FROM jobs ORDER BY scheduled_for LIMIT 2 OFFSET 0;\n-- page 2\nSELECT id, scheduled_for FROM jobs ORDER BY scheduled_for LIMIT 2 OFFSET 2;\n```\n\nAmong the tied rows the database may return `J-1, J-2` on the first call and `J-2, J-1` on a later one. Page 1 shows `J-1, J-2`; page 2 then skips to positions 3 and 4 of a *re-shuffled* list and can show `J-1` again while `J-3` is never shown. The client sees a duplicate and a hole.\n\n**Keyset, totally ordered — the version that holds:**\n\n```sql\n-- page 1\nSELECT id, scheduled_for FROM jobs\n ORDER BY scheduled_for, id\n LIMIT 2;\n\n-- page 2: pass the last row of page 1 back as the cursor\nSELECT id, scheduled_for FROM jobs\n WHERE (scheduled_for, id) > ($1, $2)\n ORDER BY scheduled_for, id\n LIMIT 2;\n```\n\n`ORDER BY scheduled_for, id` has no ties, because `id` is unique. The row comparison `(scheduled_for, id) > ($1, $2)` means *strictly after that exact row in that exact order*, which is why the cursor must carry both columns: comparing `scheduled_for` alone would re-show every row that shares the boundary timestamp.\n\nThe strictness matters too. `>=` would return the cursor row again at the top of every page — the single most common keyset bug.",
+      "commonMistakes": [
+        "Leaving out ORDER BY and assuming rows arrive in insertion order because they did during development.",
+        "Ordering by a column with ties and treating the resulting page boundaries as stable.",
+        "Using >= instead of > in a keyset cursor, so the last row of each page reappears as the first row of the next.",
+        "Putting only the sort column in the cursor and losing every row that shares the boundary value.",
+        "Forgetting that `status <> 'cancelled'` excludes rows where status is NULL, because a comparison with NULL is unknown rather than true.",
+        "Reading a SUM from a query that joined to a many-side table, and reporting a total inflated by the number of joined rows."
+      ],
+      "summaryMarkdown": "A query has no order unless you give it one, and a partial order is not an order. Add the primary key as a tie-break to get a total order, then paginate by remembering the last row returned rather than by counting rows to skip. Use a strict `>` so the cursor row is not repeated, and carry every sort column in the cursor. Always check the empty case, the ties case, and what a join did to your row count.",
+      "exerciseIds": [
+        "v1-e085",
+        "v1-e086",
+        "v1-e087"
+      ],
+      "reviewCardIds": [
+        "v1-c057",
+        "v1-c058"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: LIMIT and OFFSET",
+          "url": "https://www.postgresql.org/docs/current/queries-limit.html"
+        },
+        {
+          "label": "PostgreSQL: Row constructor comparison",
+          "url": "https://www.postgresql.org/docs/current/functions-comparisons.html"
+        },
+        {
+          "label": "PostgreSQL: Comparison functions and NULL",
+          "url": "https://www.postgresql.org/docs/current/functions-comparison.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e085",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Predict the rows a filtered, offset query returns",
+      "conceptIds": [
+        "sql.select",
+        "sql.ordering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Work the query by hand against the printed table and write down the exact result.",
+      "lessonId": "v1-l29",
+      "sortOrder": 0,
+      "type": "predict-output",
+      "difficulty": "core",
+      "estimatedMinutes": 8,
+      "promptMarkdown": "The `jobs` table contains exactly these rows:\n\n| id | crew_id | scheduled_for | status |\n| --- | --- | --- | --- |\n| j-01 | 3 | 2026-03-01 09:00 | booked |\n| j-02 | 7 | 2026-03-01 10:00 | booked |\n| j-03 | 3 | 2026-03-02 08:00 | booked |\n| j-04 | 3 | 2026-03-02 13:00 | cancelled |\n| j-05 | 3 | 2026-03-03 07:00 | done |\n| j-06 | 7 | 2026-03-03 09:00 | done |\n| j-07 | 3 | 2026-03-01 06:00 | *NULL* |\n\nWhat does this query return?\n\n```sql\nSELECT id\n  FROM jobs\n WHERE crew_id = 3\n   AND status <> 'cancelled'\n ORDER BY scheduled_for\n LIMIT 2 OFFSET 1;\n```\n\nAnswer with the ids in the order returned, separated by commas — for example `j-09, j-10`.",
+      "hints": [
+        "Apply the two WHERE conditions first, then sort what survives, then skip and take.",
+        "`status <> 'cancelled'` is a comparison, and a comparison against NULL evaluates to unknown — which WHERE treats as not true.",
+        "Crew 3 rows that pass both conditions are j-01, j-03 and j-05 (j-04 is cancelled, j-07 has a NULL status). Sorted by scheduled_for that is j-01, j-03, j-05; OFFSET 1 drops j-01 and LIMIT 2 takes the next two."
+      ],
+      "solution": {
+        "modelAnswer": "j-03, j-05",
+        "explanationMarkdown": "Filtering on `crew_id = 3` leaves j-01, j-03, j-04, j-05 and j-07. `status <> 'cancelled'` removes j-04, and it also removes **j-07**: `NULL <> 'cancelled'` is unknown, not true, so `WHERE` rejects the row. Sorting the remaining j-01 (03-01 09:00), j-03 (03-02 08:00) and j-05 (03-03 07:00) by `scheduled_for` keeps them in that order. `OFFSET 1` discards j-01 and `LIMIT 2` returns j-03 and j-05.\n\nIf you answered `j-01, j-03`, you included j-07 — the NULL trap. If you want NULL statuses to count as not cancelled, write `status IS DISTINCT FROM 'cancelled'`."
+      },
+      "grading": {
+        "kind": "predict-output",
+        "normalization": {
+          "trim": true,
+          "collapseWhitespace": true,
+          "caseSensitive": false
+        },
+        "expected": "j-03, j-05",
+        "acceptedAlternatives": [
+          "j-03,j-05",
+          "j-03 j-05"
+        ]
+      },
+      "primaryConceptId": "sql.select",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e086",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the page that repeats one job and hides another",
+      "conceptIds": [
+        "sql.pagination",
+        "sql.ordering",
+        "sql.duplicates"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read a working pagination query and name the property it is missing.",
+      "lessonId": "v1-l29",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "Fernwood's schedule board pages through jobs with:\n\n```sql\nSELECT id, scheduled_for\n  FROM jobs\n WHERE depot_id = $1\n ORDER BY scheduled_for\n LIMIT 20 OFFSET $2;\n```\n\nThe overnight import gives every job created by the same batch an identical `scheduled_for`. A despatcher reports that job `j-4471` appeared on both page 3 and page 4, and that a colleague never saw `j-4468` at all. The query runs without error and returns 20 rows every time.\n\nWhat property is missing, and what makes it a *pagination* failure rather than a display glitch?",
+      "hints": [
+        "Both symptoms — one row twice, one row never — point at the boundary between two pages, not at the rows themselves.",
+        "`ORDER BY scheduled_for` fully determines the order only when the values are distinct. Among rows sharing a timestamp the database may return any sequence, and it need not choose the same sequence twice.",
+        "Page 3 and page 4 are two separate queries. If the tie order differs between them, `OFFSET 60` lands in a differently-shuffled list than `OFFSET 40` did. Add the primary key as a tie-break — `ORDER BY scheduled_for, id` — so the order is total, then move to a keyset cursor so concurrent inserts cannot shift the offsets either."
+      ],
+      "solution": {
+        "modelAnswer": "The ORDER BY is partial, not total: rows sharing a scheduled_for have no defined relative order, so consecutive page queries can see different sequences and the OFFSET boundary lands in a different place. Fix by ordering on (scheduled_for, id), and prefer a keyset cursor over OFFSET.",
+        "explanationMarkdown": "Each page is an independent query. With `ORDER BY scheduled_for` the tied rows are in an unspecified order, and the database is under no obligation to pick the same one for the page-3 query and the page-4 query. When the sequence differs, the row at position 60 in the second run may be one that was already at position 39 in the first — so it appears twice — while another row slides past the boundary and is never returned.\n\nThis is a data-loss defect, not a rendering one: the missing row is absent from the response the client received, so no amount of front-end work can recover it. `ORDER BY scheduled_for, id` makes the order total because `id` is unique, which removes the shuffle. It does not remove the *other* offset problem — a row inserted earlier in the order shifts every later position — so the durable fix is a keyset cursor: `WHERE (scheduled_for, id) > ($1, $2) ORDER BY scheduled_for, id LIMIT 20`."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "partial-order",
+            "textMarkdown": "The order is partial: tied `scheduled_for` values have no defined sequence, so the page-3 and page-4 queries can order the ties differently and the OFFSET boundary moves.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A tie-break on the primary key makes the order total, and a keyset cursor additionally survives inserts that shift positions."
+          },
+          {
+            "id": "limit-too-big",
+            "textMarkdown": "`LIMIT 20` is larger than the number of distinct timestamps, so the query overruns into the next page.",
+            "correct": false,
+            "explanationMarkdown": "LIMIT counts rows, not distinct values, and it never reads past the rows it returns. Twenty rows is exactly what was asked for."
+          },
+          {
+            "id": "cache",
+            "textMarkdown": "The client cached page 3 and re-rendered it as page 4.",
+            "correct": false,
+            "explanationMarkdown": "A cache could explain a duplicate, but not `j-4468` being absent from every page. Both symptoms together point at the server's ordering."
+          },
+          {
+            "id": "index-needed",
+            "textMarkdown": "There is no index on `scheduled_for`, so the sort is non-deterministic.",
+            "correct": false,
+            "explanationMarkdown": "An index affects speed and plan choice, not correctness. A sort without an index still sorts; what is undefined here is the order *within equal values*, with or without an index."
+          }
+        ]
+      },
+      "primaryConceptId": "sql.pagination",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e087",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Build the keyset cursor step",
+      "conceptIds": [
+        "sql.pagination",
+        "sql.ordering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The database part of keyset pagination is a WHERE clause. The part your code owns is deciding where the next page starts — that is pure logic, and it is what you write here.",
+      "lessonId": "v1-l29",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Implement `nextPage(rows, afterId, size)`.\n\n`rows` is an already totally-ordered array of job records, each `{ id }`, exactly as the database would return them for `ORDER BY scheduled_for, id`. It stands in for the table so you can reason about the cursor without a database.\n\nReturn an array of the **ids** of the next `size` rows that come *strictly after* the row whose `id` equals `afterId`, in the same order.\n\nRules:\n\n- When `afterId` is `null`, start at the beginning.\n- When `afterId` names no row in `rows`, the cursor is stale: return an empty array.\n- Return fewer than `size` ids when fewer remain; never pad.\n- When `size` is `0` or negative, return an empty array.\n- Do not modify `rows`.",
+      "hints": [
+        "Two separate decisions: where does the page start, and how many ids do you take from there?",
+        "Finding the cursor row gives you its index. The page starts at the index *after* it — that offset by one is the whole difference between a correct cursor and one that repeats a row on every page.",
+        "Scan for the index where `rows[i].id === afterId`; if you never find it, return `[]`. Otherwise start at `found + 1` (or at `0` when `afterId` is null) and collect ids while you still have rows and have collected fewer than `size`."
+      ],
+      "solution": {
+        "code": "function nextPage(rows, afterId, size) {\n  if (size <= 0) return [];\n  let start = 0;\n  if (afterId !== null && afterId !== undefined) {\n    let found = -1;\n    for (let i = 0; i < rows.length; i += 1) {\n      if (rows[i].id === afterId) {\n        found = i;\n        break;\n      }\n    }\n    if (found === -1) return [];\n    start = found + 1;\n  }\n  const ids = [];\n  for (let i = start; i < rows.length && ids.length < size; i += 1) {\n    ids.push(rows[i].id);\n  }\n  return ids;\n}",
+        "explanationMarkdown": "The cursor names a **row**, not a position, which is the whole point of keyset pagination: inserting a job earlier in the order does not move where the next page begins.\n\nThree details carry the correctness. Starting at `found + 1` is the code equivalent of a strict `>` in SQL; starting at `found` would return the cursor row again at the top of every page. Returning `[]` for an unknown cursor mirrors what the database does when the row a client remembered has since been deleted — an empty page is honest, whereas silently restarting from the beginning would make the client loop forever. And collecting into a fresh array rather than splicing `rows` leaves the caller's data intact, which matters because the same array is often reused for a second query."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "nextPage",
+        "starterCode": "function nextPage(rows, afterId, size) {\n  const ids = [];\n  // Decide where the page starts, then collect up to `size` ids.\n  return ids;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-table",
+            "args": [
+              [],
+              null,
+              2
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "first-page",
+            "args": [
+              [
+                {
+                  "id": "a"
+                },
+                {
+                  "id": "b"
+                },
+                {
+                  "id": "c"
+                },
+                {
+                  "id": "d"
+                },
+                {
+                  "id": "e"
+                }
+              ],
+              null,
+              2
+            ],
+            "expected": [
+              "a",
+              "b"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "middle-page-excludes-cursor-row",
+            "args": [
+              [
+                {
+                  "id": "a"
+                },
+                {
+                  "id": "b"
+                },
+                {
+                  "id": "c"
+                },
+                {
+                  "id": "d"
+                },
+                {
+                  "id": "e"
+                }
+              ],
+              "b",
+              2
+            ],
+            "expected": [
+              "c",
+              "d"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "final-short-page",
+            "args": [
+              [
+                {
+                  "id": "a"
+                },
+                {
+                  "id": "b"
+                },
+                {
+                  "id": "c"
+                },
+                {
+                  "id": "d"
+                },
+                {
+                  "id": "e"
+                }
+              ],
+              "d",
+              2
+            ],
+            "expected": [
+              "e"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "past-the-last-row",
+            "args": [
+              [
+                {
+                  "id": "a"
+                },
+                {
+                  "id": "b"
+                },
+                {
+                  "id": "c"
+                }
+              ],
+              "c",
+              2
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "stale-cursor",
+            "args": [
+              [
+                {
+                  "id": "a"
+                },
+                {
+                  "id": "b"
+                },
+                {
+                  "id": "c"
+                }
+              ],
+              "zz",
+              2
+            ],
+            "expected": [],
+            "hidden": true
+          },
+          {
+            "id": "zero-size",
+            "args": [
+              [
+                {
+                  "id": "a"
+                },
+                {
+                  "id": "b"
+                }
+              ],
+              null,
+              0
+            ],
+            "expected": [],
+            "hidden": true
+          },
+          {
+            "id": "size-larger-than-remainder",
+            "args": [
+              [
+                {
+                  "id": "a"
+                },
+                {
+                  "id": "b"
+                },
+                {
+                  "id": "c"
+                }
+              ],
+              "a",
+              10
+            ],
+            "expected": [
+              "b",
+              "c"
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "sql.pagination",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c057",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What order does a query without ORDER BY have?",
+      "conceptIds": [
+        "sql.ordering"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the guarantee a SELECT makes about sequence.",
+      "lessonId": "v1-l29",
+      "type": "recall",
+      "promptMarkdown": "What ordering guarantee does `SELECT * FROM jobs;` give you, and what does `ORDER BY scheduled_for` guarantee when several rows share a timestamp?",
+      "answerMarkdown": "None, and none within the ties. Without `ORDER BY` the rows may arrive in any order, and it may change between runs. `ORDER BY scheduled_for` fixes the order *between* distinct timestamps only; rows sharing a value remain in an unspecified order. A total order needs a unique tie-break such as `ORDER BY scheduled_for, id`.",
+      "explanationMarkdown": "Insertion order is an accident of the current plan and storage layout, not a promise. This is the guarantee whose absence pagination quietly depends on.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "sql.ordering"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c058",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Read the keyset cursor comparison",
+      "conceptIds": [
+        "sql.pagination"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read a cursor clause and predict its defect.",
+      "lessonId": "v1-l29",
+      "type": "code-reading",
+      "promptMarkdown": "A page query reads `WHERE (scheduled_for, id) >= ($1, $2) ORDER BY scheduled_for, id LIMIT 20`, where `$1` and `$2` are the sort values of the last row of the previous page. What will the client see?",
+      "answerMarkdown": "The last row of the previous page appears again as the first row of every subsequent page. `>=` includes the cursor row itself; keyset pagination needs a strict `>`.",
+      "explanationMarkdown": "It is a one-character bug with an obvious symptom, which is why it is worth recognising instantly: exactly one duplicated row per page boundary, always the same row, always at the top.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "repeats-cursor",
+            "textMarkdown": "Each page begins with the last row of the previous page.",
+            "correct": true,
+            "explanationMarkdown": "Correct. `>=` matches the cursor row itself, so it is returned again; the strict `>` excludes it."
+          },
+          {
+            "id": "skips-row",
+            "textMarkdown": "Each page skips one row at the boundary.",
+            "correct": false,
+            "explanationMarkdown": "That is the symptom of the opposite mistake — advancing the cursor past a row you never returned. `>=` is too inclusive, not too exclusive."
+          },
+          {
+            "id": "no-effect",
+            "textMarkdown": "Nothing, because the ORDER BY re-sorts the rows anyway.",
+            "correct": false,
+            "explanationMarkdown": "ORDER BY decides sequence; the WHERE clause decides membership. Sorting cannot remove a row the filter admitted."
+          },
+          {
+            "id": "errors",
+            "textMarkdown": "PostgreSQL rejects `>=` on a row constructor.",
+            "correct": false,
+            "explanationMarkdown": "Row constructors support the full set of comparisons. The query is valid, which is exactly why the defect is silent."
+          }
+        ]
+      },
+      "primaryConceptId": "sql.pagination"
+    },
+    {
+      "kind": "lesson",
+      "id": "v1-l30",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Migrations and transactions",
+      "conceptIds": [
+        "sql.migrations",
+        "sql.transactions",
+        "sql.partial-writes"
+      ],
+      "prerequisiteIds": [
+        "sql.keys"
+      ],
+      "bodyMarkdown": "Two different kinds of change need protecting. A **migration** changes the shape of the schema; a **transaction** protects a change to the data. Both exist because a change that stops halfway is worse than a change that never started.\n\nA migration is an ordered, named, recorded step. The database keeps a table of which migrations have run, so applying them again is a no-op and a fresh environment can be rebuilt from an empty database by replaying them in order. That ordering is why you never edit a migration that has already run anywhere but your own machine: the copy in production already ran the old bytes, so editing the file makes two environments that claim the same version and disagree about what it means.\n\n**Reversibility** is the property worth arguing about. `ALTER TABLE jobs ADD COLUMN notes text;` is trivially reversible — dropping the column returns the old shape. `ALTER TABLE jobs DROP COLUMN notes;` is not: the down step can restore the column but not one word of what was in it. Some migrations are honestly forward-only, and the right move is to say so and plan the recovery differently, not to write a `down` that pretends.\n\nOne migration deserves its own warning: adding a `NOT NULL` column to a populated table. `ADD COLUMN priority text NOT NULL` fails immediately, because the existing rows would violate it. The safe shape is three steps across three deploys — add the column nullable, backfill it, then add the constraint — so that at no point is there a version of the application running against a schema it cannot cope with.\n\n**Transactions** are the data-side answer. Booking a Fernwood job is three writes: insert the job, insert its parts lines, decrement stock. Outside a transaction those are three independent successes-or-failures, and a crash between the second and third leaves a job that consumed parts the stock table still thinks are on the shelf. Inside `BEGIN ... COMMIT` they are one unit: either all three are visible or none are.\n\nTwo rules make transactions actually work. Keep them **short** — every row you touch stays locked until commit, so an HTTP call inside a transaction can block other writers for as long as the remote service takes to answer. And **roll back on any error**: a `catch` that logs and carries on to `COMMIT` is a partial write with extra steps.",
+      "chapterId": "v1-ch10",
+      "sortOrder": 2,
+      "objectives": [
+        "Sequence a schema change as ordered migrations and say honestly whether it is reversible.",
+        "Wrap a multi-statement write in a transaction and roll back on any failure.",
+        "Describe the inconsistent state a partial write leaves behind."
+      ],
+      "estimatedMinutes": 17,
+      "workedExampleMarkdown": "**A three-write booking, unprotected and protected.**\n\nUnprotected — three separate round trips:\n\n```js\nconst job = await db.query('INSERT INTO jobs (crew_id, scheduled_for) VALUES ($1, $2) RETURNING id', [crewId, when]);\nawait db.query('INSERT INTO job_parts (job_id, part_id, quantity) VALUES ($1, $2, $3)', [job.rows[0].id, partId, qty]);\nawait db.query('UPDATE parts SET on_hand = on_hand - $1 WHERE id = $2', [qty, partId]);\n```\n\nIf the third statement fails — a constraint, a dropped connection, a redeploy — the job and its parts line are already committed and permanently visible. Stock is now wrong, and no error reaches the customer, who has a confirmed booking.\n\nProtected — one unit of work on one connection:\n\n```js\nconst client = await pool.connect();\ntry {\n  await client.query('BEGIN');\n  const { rows } = await client.query(\n    'INSERT INTO jobs (crew_id, scheduled_for) VALUES ($1, $2) RETURNING id', [crewId, when]);\n  await client.query(\n    'INSERT INTO job_parts (job_id, part_id, quantity) VALUES ($1, $2, $3)', [rows[0].id, partId, qty]);\n  await client.query(\n    'UPDATE parts SET on_hand = on_hand - $1 WHERE id = $2 AND on_hand >= $1', [qty, partId]);\n  await client.query('COMMIT');\n} catch (error) {\n  await client.query('ROLLBACK');\n  throw error;\n} finally {\n  client.release();\n}\n```\n\nFour things are deliberate. Every statement runs on the **same** `client`, because a transaction belongs to a connection and a statement sent on a different pooled connection is simply outside it. The `catch` rolls back and **rethrows**, so the caller learns the booking did not happen. The `finally` releases the connection whichever way it went. And `AND on_hand >= $1` lets the database refuse to drive stock negative, rather than trusting a value the handler read a moment earlier.\n\n**The matching migration, sequenced for a live deploy.** Adding a mandatory `priority` to a populated `jobs` table:\n\n```sql\n-- 0007_add_job_priority.up.sql\nALTER TABLE jobs ADD COLUMN priority text;                      -- nullable: every running version still works\n\n-- 0008_backfill_job_priority.up.sql\nUPDATE jobs SET priority = 'standard' WHERE priority IS NULL;\n\n-- 0009_require_job_priority.up.sql\nALTER TABLE jobs ALTER COLUMN priority SET NOT NULL;            -- only after every row has a value\n```\n\nSteps 7 and 9 are cleanly reversible. Step 8 is not: its `down` cannot know which rows were already `'standard'` before the backfill ran, so the honest note in the migration is that it is forward-only.",
+      "commonMistakes": [
+        "Editing a migration that has already run in another environment instead of adding a new one, so two databases claim the same version and differ.",
+        "Running the statements of a transaction on a pooled connection per statement, so BEGIN applies to a connection that never sees the writes.",
+        "Catching an error inside the transaction, logging it, and continuing to COMMIT — which commits exactly the half that succeeded.",
+        "Adding a NOT NULL column to a populated table in one step and being surprised the migration fails on existing rows.",
+        "Writing a down migration for a DROP COLUMN that recreates the column and calling the data recoverable.",
+        "Holding a transaction open across an HTTP call, so every other writer waits on locked rows for the length of a remote timeout.",
+        "Decrementing stock from a value read before the transaction, so two concurrent bookings both subtract from the same starting number."
+      ],
+      "summaryMarkdown": "Migrations are ordered, recorded and never edited after they have run elsewhere; some are honestly forward-only and should say so. A mandatory column arrives in three steps — add nullable, backfill, constrain — so no running version meets a schema it cannot handle. Transactions turn several writes into one outcome, but only when every statement uses the same connection and every error rolls back and rethrows. A partial write is silent: the customer sees success and the data disagrees with itself.",
+      "exerciseIds": [
+        "v1-e088",
+        "v1-e089",
+        "v1-e090"
+      ],
+      "reviewCardIds": [
+        "v1-c059",
+        "v1-c060"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: Transactions",
+          "url": "https://www.postgresql.org/docs/current/tutorial-transactions.html"
+        },
+        {
+          "label": "PostgreSQL: ALTER TABLE",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html"
+        },
+        {
+          "label": "PostgreSQL: Transaction isolation",
+          "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e088",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose the migration that can honestly be reversed",
+      "conceptIds": [
+        "sql.migrations"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Judge four candidate migrations on whether a down step restores the previous state.",
+      "lessonId": "v1-l30",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "A migration is **reversible** when running its down step returns the database to the state it was in before the up step — schema *and* data.\n\nWhich of these Fernwood migrations is genuinely reversible?",
+      "hints": [
+        "Ask what information the up step destroys. A down step can only rebuild what still exists somewhere.",
+        "Recreating a structure is easy; recreating the values that were inside it is usually impossible.",
+        "Adding a nullable column is the only one here that throws nothing away: dropping it again leaves exactly the rows and values that were there before."
+      ],
+      "solution": {
+        "modelAnswer": "`ALTER TABLE jobs ADD COLUMN notes text;` — dropping the column restores the previous schema, and no pre-existing data was changed or lost.",
+        "explanationMarkdown": "Reversibility is about information, not about whether you can write a down script. Adding a nullable column adds a place for data without touching what was there, so removing it is a true inverse. Dropping a column, rewriting values in place, and merging two tables all destroy information the down step would have to invent. The professional move for those is to mark the migration forward-only, and to rely on a backup or a shadow column for recovery instead of a fictional down step."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "add-nullable",
+            "textMarkdown": "`ALTER TABLE jobs ADD COLUMN notes text;`",
+            "correct": true,
+            "explanationMarkdown": "Correct. Nothing existing is modified, so `DROP COLUMN notes` is a genuine inverse."
+          },
+          {
+            "id": "drop-column",
+            "textMarkdown": "`ALTER TABLE jobs DROP COLUMN legacy_ref;` with a down step that adds `legacy_ref` back.",
+            "correct": false,
+            "explanationMarkdown": "The down step restores an empty column. Every value that was in it is gone, so the database is not in its previous state — this is a forward-only migration wearing a disguise."
+          },
+          {
+            "id": "normalise-values",
+            "textMarkdown": "`UPDATE jobs SET status = lower(status);` with a down step that upper-cases them again.",
+            "correct": false,
+            "explanationMarkdown": "The down step cannot tell which rows were already lower case, so it corrupts the ones that were. Rewriting values in place loses the distinction the inverse would need."
+          },
+          {
+            "id": "merge-tables",
+            "textMarkdown": "Copying `archive_jobs` into `jobs` and dropping `archive_jobs`, with a down step that recreates the archive table.",
+            "correct": false,
+            "explanationMarkdown": "Once the rows are merged, nothing records which of them came from the archive, so the down step cannot split them back apart."
+          }
+        ]
+      },
+      "primaryConceptId": "sql.migrations",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e089",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Find the partial write in the booking handler",
+      "conceptIds": [
+        "sql.transactions",
+        "sql.partial-writes"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read a handler that already says BEGIN and COMMIT, and find why it still commits half a booking.",
+      "lessonId": "v1-l30",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Fernwood books a job, records its parts and decrements stock. Occasionally a job exists with parts lines while stock was never reduced.\n\n```js\nasync function bookJob(pool, input) {\n  const client = await pool.connect();\n  try {\n    await client.query('BEGIN');\n\n    const created = await client.query(\n      'INSERT INTO jobs (crew_id, scheduled_for) VALUES ($1, $2) RETURNING id',\n      [input.crewId, input.scheduledFor],\n    );\n    const jobId = created.rows[0].id;\n\n    await client.query(\n      'INSERT INTO job_parts (job_id, part_id, quantity) VALUES ($1, $2, $3)',\n      [jobId, input.partId, input.quantity],\n    );\n\n    try {\n      await client.query(\n        'UPDATE parts SET on_hand = on_hand - $1 WHERE id = $2',\n        [input.quantity, input.partId],\n      );\n    } catch (stockError) {\n      logger.warn('stock update failed', { jobId });\n    }\n\n    await client.query('COMMIT');\n    return { jobId };\n  } finally {\n    client.release();\n  }\n}\n```\n\nThe transaction is real and every statement uses the same client. Which single change stops the inconsistent state?",
+      "hints": [
+        "The reported state is a committed job with parts lines and untouched stock. Trace which statements were still able to commit when the stock update failed.",
+        "The inner `catch` swallows the failure, so control reaches `COMMIT` with only two of the three writes applied. A transaction only helps if a failure prevents the commit.",
+        "Remove the inner catch, and add an outer `catch` that runs `ROLLBACK` and rethrows. Then a stock failure discards the job and the parts line as well, and the caller learns the booking did not happen."
+      ],
+      "solution": {
+        "modelAnswer": "The inner try/catch turns a fatal error into a warning, so COMMIT still runs and the first two writes are made permanent. Let the error propagate and add a catch that issues ROLLBACK and rethrows.",
+        "explanationMarkdown": "`BEGIN` and `COMMIT` do not decide anything on their own — the code decides, by choosing whether to reach the `COMMIT`. Here the inner `catch` logs and returns control to the happy path, so the transaction commits exactly the half that succeeded. That is a textbook partial write: the customer receives `{ jobId }` and a confirmed booking, while the stock table still shows parts that have been consumed.\n\nThere is a second consequence worth noticing. In PostgreSQL a failed statement aborts the transaction, so every subsequent statement on that connection errors with *current transaction is aborted* until a rollback. Swallowing the first error therefore does not even reliably reach a successful commit; it produces a confusing second error far from its cause.\n\nThe fix is structural:\n\n```js\n  } catch (error) {\n    await client.query('ROLLBACK');\n    throw error;\n  } finally {\n    client.release();\n  }\n```\n\nRethrowing matters as much as rolling back. A rollback that returns success would leave the client believing in a booking that no longer exists."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "remove-inner-catch",
+            "textMarkdown": "Remove the inner `catch` and add an outer `catch` that runs `ROLLBACK` and rethrows the error.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A failed write must prevent the COMMIT and must be reported; otherwise the transaction commits only the part that worked."
+          },
+          {
+            "id": "reorder",
+            "textMarkdown": "Move the stock `UPDATE` to the top so it runs before the inserts.",
+            "correct": false,
+            "explanationMarkdown": "Reordering only changes which half survives. With the catch still swallowing the error you would get reduced stock and no job — equally inconsistent, and harder to spot."
+          },
+          {
+            "id": "log-error",
+            "textMarkdown": "Change `logger.warn` to `logger.error` and include the stock error so the problem is visible in the dashboards.",
+            "correct": false,
+            "explanationMarkdown": "Better diagnostics do not undo a committed write. The data is still wrong; you will simply read about it afterwards."
+          },
+          {
+            "id": "retry",
+            "textMarkdown": "Retry the stock `UPDATE` three times inside the same catch before continuing.",
+            "correct": false,
+            "explanationMarkdown": "After a failed statement the PostgreSQL transaction is already aborted, so every retry fails the same way — and if the failure is a constraint violation, retrying was never going to help."
+          }
+        ]
+      },
+      "primaryConceptId": "sql.transactions",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "v1-e090",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Sequence a mandatory column across three deploys",
+      "conceptIds": [
+        "sql.migrations",
+        "sql.partial-writes"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Explain a migration plan in prose, including what each step protects and which parts cannot be undone.",
+      "lessonId": "v1-l30",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Fernwood's `jobs` table has 400,000 rows and must gain a mandatory `priority` column. A colleague opens a pull request containing one migration:\n\n```sql\nALTER TABLE jobs ADD COLUMN priority text NOT NULL DEFAULT 'standard';\nALTER TABLE jobs ALTER COLUMN priority DROP DEFAULT;\n```\n\ndeployed together with application code that reads and writes `priority`.\n\nExplain what can go wrong with a single-step change like this during a rolling deploy where old and new application versions run at the same time, describe the step sequence you would use instead, and say which of your steps is not reversible.",
+      "hints": [
+        "During a rolling deploy there is a window where the old application version and the new schema are both live. Ask what each running version assumes about the column.",
+        "The old version inserts jobs without mentioning `priority`. That works only while a default exists or the column is nullable — dropping the default in the same deploy closes that door while old instances are still serving traffic.",
+        "Use three deploys: add the column nullable; deploy code that always writes it and backfill the existing rows; only then set NOT NULL. The backfill is the forward-only step, because its down cannot tell which rows already held the value it wrote."
+      ],
+      "solution": {
+        "modelAnswer": "During a rolling deploy both versions run at once. The migration adds the column and immediately drops the default, so any old instance still inserting a job without a priority hits a NOT NULL violation and starts returning errors until it is replaced. Adding a NOT NULL column also rewrites or at least validates 400,000 rows while holding a lock on the table, which can stall writes. I would split it: (1) ADD COLUMN priority text — nullable, no default, safe for every running version; (2) deploy application code that always writes priority, then backfill the existing NULLs in batches; (3) once no NULLs remain, ALTER COLUMN priority SET NOT NULL. Steps 1 and 3 are reversible. The backfill in step 2 is forward-only: its down step cannot distinguish rows that already had a value from rows it filled in, so undoing it would overwrite real data.",
+        "explanationMarkdown": "The idea being tested is that a migration and a deploy are two moving parts, and during a rolling release the schema must be compatible with *both* the version leaving and the version arriving. A schema change that is only compatible with the new code turns a routine deploy into an outage for the length of the rollout.\n\nThe three-step shape — expand, migrate, contract — is the standard answer. Expand adds something optional that nobody is required to use; migrate moves the data and the code onto it; contract finally enforces the rule once nothing can violate it. Each step is separately deployable and separately revertible, which is what makes a bad release recoverable at all.\n\nThe honest note about the backfill matters too. Calling a data migration reversible when it is not is how a rollback deletes real values, so writing it down as forward-only — with a plan that relies on a backup rather than a down script — is part of the work."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Identifies that old and new application versions run simultaneously during a rolling deploy, and that the old version inserts rows without a priority.",
+          "Explains why dropping the default in the same migration breaks those in-flight inserts, or why the constraint fails against existing rows.",
+          "Proposes an ordered expand-migrate-contract sequence: nullable column, backfill plus code that writes it, then SET NOT NULL.",
+          "Notes an operational cost of the single-step version on a large table, such as the lock held while every row is validated or rewritten.",
+          "Names the backfill as the forward-only step and justifies why its down step cannot restore the previous data."
+        ],
+        "modelAnswerMarkdown": "A rolling deploy runs the old and new application versions side by side for minutes. The proposed migration lands the column, immediately drops its default, and only then are the new instances rolled out — so every insert from a still-running old instance omits `priority` and violates `NOT NULL`. Bookings fail for the length of the rollout. On 400,000 rows there is a second cost: the table is locked while the new constraint is validated, so writers queue behind it.\n\nI would sequence it as three deploys.\n\n1. `ALTER TABLE jobs ADD COLUMN priority text;` — nullable, no default. Every running version, old and new, can still insert.\n2. Deploy application code that always supplies `priority`, then backfill in batches: `UPDATE jobs SET priority = 'standard' WHERE priority IS NULL` over bounded id ranges, so no single statement locks the whole table.\n3. Once `SELECT count(*) FROM jobs WHERE priority IS NULL` is zero, `ALTER TABLE jobs ALTER COLUMN priority SET NOT NULL;`.\n\nSteps 1 and 3 are reversible — drop the column, drop the constraint. The backfill is not. Its down step would have to know which rows already read `'standard'` before it ran, and that information no longer exists, so I would record it as forward-only and rely on a point-in-time backup if it ever has to be undone."
+      },
+      "primaryConceptId": "sql.partial-writes",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c059",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does a transaction actually promise?",
+      "conceptIds": [
+        "sql.transactions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the guarantee and the condition attached to it.",
+      "lessonId": "v1-l30",
+      "type": "recall",
+      "promptMarkdown": "What does wrapping three writes in `BEGIN ... COMMIT` guarantee, and what must the surrounding code do for that guarantee to hold?",
+      "answerMarkdown": "It guarantees that the three writes become visible together or not at all. For that to hold, every statement must run on the **same** connection, and any error must lead to `ROLLBACK` instead of `COMMIT` — a caught-and-ignored error that still reaches the commit makes exactly half the change permanent.",
+      "explanationMarkdown": "The database supplies atomicity; the application supplies the decision to commit. Almost every real partial-write bug is a commit that should never have been reached.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "sql.transactions"
+    },
+    {
+      "kind": "review_card",
+      "id": "v1-c060",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Apply the migration ordering rule",
+      "conceptIds": [
+        "sql.migrations",
+        "sql.partial-writes"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the ordering rule to a scenario about an already-released migration.",
+      "lessonId": "v1-l30",
+      "type": "transfer",
+      "promptMarkdown": "Migration `0012` shipped to production last week with a typo in a column name. A teammate proposes editing `0012` and redeploying. What goes wrong, and what should happen instead?",
+      "answerMarkdown": "Production has already recorded `0012` as applied, so the edited file will never run there; only fresh environments would get the corrected version, leaving two databases that both claim to be at `0012` while their schemas differ. Instead, add a new migration `0013` that renames the column, and leave `0012` as the historical record of what actually ran.",
+      "explanationMarkdown": "The migration table records *that* a version ran, never *what* it contained. Treating applied migrations as immutable history is what keeps every environment reconstructible from an empty database.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "sql.migrations"
+    },
+    {
+      "kind": "assessment",
+      "id": "v1-a10",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Relational persistence placement check",
+      "conceptIds": [
+        "sql.keys",
+        "sql.uniqueness",
+        "sql.ordering",
+        "sql.pagination",
+        "sql.transactions",
+        "sql.migrations"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering chapter 10. Answer from reasoning about the schema and the queries; no hints are shown until you submit.",
+      "chapterId": "v1-ch10",
+      "items": [
+        {
+          "id": "v1-a10-i1",
+          "objectiveIds": [
+            "sql.keys",
+            "sql.relationships"
+          ],
+          "critical": true,
+          "promptMarkdown": "A `deliveries` table has `route_id bigint REFERENCES routes (id)`. An operator deletes route 12, which four deliveries still reference. No `ON DELETE` clause was specified. What happens?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "refused",
+                "textMarkdown": "The delete is refused with a foreign-key violation, and route 12 remains.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The default is NO ACTION, which refuses to leave the referencing rows dangling."
+              },
+              {
+                "id": "cascade",
+                "textMarkdown": "The route and its four deliveries are deleted together.",
+                "correct": false,
+                "explanationMarkdown": "That is `ON DELETE CASCADE`, which has to be requested explicitly. It is never the default, precisely because it destroys rows the operator did not name."
+              },
+              {
+                "id": "null",
+                "textMarkdown": "The route is deleted and the four `route_id` values become NULL.",
+                "correct": false,
+                "explanationMarkdown": "That is `ON DELETE SET NULL`, also opt-in. It is a reasonable choice when an unassigned delivery is a valid state, but it is not what happens by default."
+              },
+              {
+                "id": "orphan",
+                "textMarkdown": "The route is deleted and the deliveries keep pointing at the missing id.",
+                "correct": false,
+                "explanationMarkdown": "That is the outcome the foreign key exists to prevent. It is what happens when there is no foreign key at all."
+              }
+            ]
+          },
+          "explanationMarkdown": "The default delete rule is the conservative one: it protects the referencing rows by refusing the delete, and it forces you to state your intent when you want something else."
+        },
+        {
+          "id": "v1-a10-i2",
+          "objectiveIds": [
+            "sql.ordering",
+            "sql.pagination"
+          ],
+          "critical": true,
+          "promptMarkdown": "A report pages through 5,000 invoices with `ORDER BY issued_on LIMIT 50 OFFSET $1`. Many invoices share an `issued_on` date, and new invoices are inserted throughout the day. Which statement is accurate?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "two-problems",
+                "textMarkdown": "Two separate defects are present: ties have no defined order between page queries, and inserts shift the positions that OFFSET counts.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A tie-break fixes the first; only a keyset cursor fixes the second, because offsets are positions rather than places in the data."
+              },
+              {
+                "id": "ties-only",
+                "textMarkdown": "Adding `, id` to the ORDER BY makes the pagination fully correct.",
+                "correct": false,
+                "explanationMarkdown": "It removes the tie shuffle, which is real progress, but an invoice inserted earlier in the order still pushes every later row down one position between page requests."
+              },
+              {
+                "id": "fine",
+                "textMarkdown": "The query is correct; pagination only breaks when rows are deleted.",
+                "correct": false,
+                "explanationMarkdown": "Inserts are enough on their own. A row added before the current offset shifts everything after it, so the next page repeats a row you have already seen."
+              },
+              {
+                "id": "limit-cost",
+                "textMarkdown": "The only issue is performance, because large OFFSET values make the database read and discard rows.",
+                "correct": false,
+                "explanationMarkdown": "That cost is real, but it is not the only issue here — the report can also show a row twice and omit another entirely, which is a correctness failure."
+              }
+            ]
+          },
+          "explanationMarkdown": "Untied ordering and positional offsets are independent defects that produce the same visible symptom, so fixing one and declaring victory is a common and expensive mistake."
+        },
+        {
+          "id": "v1-a10-i3",
+          "objectiveIds": [
+            "sql.transactions",
+            "sql.partial-writes"
+          ],
+          "critical": false,
+          "promptMarkdown": "A handler opens a transaction with `pool.query('BEGIN')`, then performs two inserts with `pool.query(...)`, then `pool.query('COMMIT')`, using a connection pool of ten connections. What is the most likely behaviour?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "different-connections",
+                "textMarkdown": "Each statement may run on a different pooled connection, so the inserts are not inside the transaction that BEGIN opened.",
+                "correct": true,
+                "explanationMarkdown": "Correct. A transaction is a property of one connection; a transaction spanning several connections needs an explicitly checked-out client."
+              },
+              {
+                "id": "works",
+                "textMarkdown": "It works correctly, because the pool routes all statements from one handler to one connection.",
+                "correct": false,
+                "explanationMarkdown": "Pools hand out whichever connection is free per query. Nothing ties a sequence of `pool.query` calls together."
+              },
+              {
+                "id": "syntax-error",
+                "textMarkdown": "PostgreSQL rejects BEGIN sent through a pool.",
+                "correct": false,
+                "explanationMarkdown": "The statement is perfectly valid, which is why this bug is silent: the BEGIN succeeds on some connection and is later rolled back when that connection is reused or released."
+              },
+              {
+                "id": "deadlock",
+                "textMarkdown": "The handler deadlocks, because the second insert waits for the first transaction's locks.",
+                "correct": false,
+                "explanationMarkdown": "A deadlock is possible in principle if the statements contend for the same rows, but the ordinary outcome is much quieter: writes that were never protected at all."
+              }
+            ]
+          },
+          "explanationMarkdown": "Transactional guarantees are scoped to a connection. Using the pool's convenience method loses that scope while still appearing to work in every test that runs one request at a time."
+        },
+        {
+          "id": "v1-a10-i4",
+          "objectiveIds": [
+            "sql.uniqueness"
+          ],
+          "critical": false,
+          "promptMarkdown": "A `subscriptions` table should allow an account to hold at most one **active** subscription while keeping every cancelled one for history. Which constraint expresses that rule?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "partial-index",
+                "textMarkdown": "`CREATE UNIQUE INDEX ON subscriptions (account_id) WHERE status = 'active';`",
+                "correct": true,
+                "explanationMarkdown": "Correct. A partial unique index constrains only the rows that match the predicate, so cancelled rows may repeat freely."
+              },
+              {
+                "id": "unique-account",
+                "textMarkdown": "`UNIQUE (account_id)`",
+                "correct": false,
+                "explanationMarkdown": "That permits one subscription per account ever, so the first cancellation makes it impossible to subscribe again."
+              },
+              {
+                "id": "unique-pair",
+                "textMarkdown": "`UNIQUE (account_id, status)`",
+                "correct": false,
+                "explanationMarkdown": "Close, and a common first attempt, but it also allows only one *cancelled* row per account, which destroys the history the requirement asks you to keep."
+              },
+              {
+                "id": "check",
+                "textMarkdown": "`CHECK (status = 'active')`",
+                "correct": false,
+                "explanationMarkdown": "A CHECK examines one row at a time, so it can never express a rule about how many other rows exist. It would also forbid storing cancelled subscriptions at all."
+              }
+            ]
+          },
+          "explanationMarkdown": "Uniqueness rules are often conditional. A partial unique index is the tool for 'at most one row matching this predicate', and reaching for a wider composite key instead is the usual wrong turn."
+        },
+        {
+          "id": "v1-a10-i5",
+          "objectiveIds": [
+            "sql.migrations"
+          ],
+          "critical": false,
+          "promptMarkdown": "A team keeps migrations in a folder and applies them by filename order, recording each applied name in a `schema_migrations` table. Which practice does that arrangement make unsafe?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "editing-applied",
+                "textMarkdown": "Editing the contents of a migration file that has already been applied in another environment.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The table records the name, not the contents, so the edited version never runs where the old one already did, and two environments diverge while claiming the same version."
+              },
+              {
+                "id": "adding-new",
+                "textMarkdown": "Adding a new migration with a higher number than every applied one.",
+                "correct": false,
+                "explanationMarkdown": "That is exactly what the arrangement is designed for, and it is the correct way to fix a mistake in an applied migration."
+              },
+              {
+                "id": "reapplying",
+                "textMarkdown": "Running the migration command twice in a row on the same database.",
+                "correct": false,
+                "explanationMarkdown": "The recorded names make the second run a no-op. Being safe to re-run is the reason the table exists."
+              },
+              {
+                "id": "empty-db",
+                "textMarkdown": "Rebuilding a developer database by replaying every migration from empty.",
+                "correct": false,
+                "explanationMarkdown": "Also a designed-for case — provided nobody has edited history, replaying in order reproduces the current schema."
+              }
+            ]
+          },
+          "explanationMarkdown": "Applied migrations are history. The tracking table proves that a named step ran, and it cannot notice that the bytes behind the name have since changed."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

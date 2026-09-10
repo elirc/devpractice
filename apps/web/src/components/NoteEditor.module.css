@@ -1,0 +1,30 @@
+.wrap { margin-top: var(--space-4); }
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.label { font-weight: 600; }
+
+.textarea {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  resize: vertical;
+  min-height: 120px;
+}
+
+.textarea:disabled { opacity: 0.6; }
+
+.error {
+  color: var(--danger);
+  font-size: 0.88rem;
+  margin: var(--space-2) 0 0;
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@devpractice/runner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts",
+    "./node": "./src/node-runner.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "libs:generate": "node --experimental-strip-types scripts/generate-lib-bundle.ts",
+    "build": "echo \"runner: source-only package\""
+  },
+  "dependencies": {
+    "@devpractice/contracts": "workspace:*",
+    "quickjs-emscripten": "0.31.0",
+    "quickjs-emscripten-core": "0.31.0",
+    "@jitl/quickjs-wasmfile-release-sync": "0.31.0",
+    "typescript": "5.6.3"
+  },
+  "devDependencies": {
+    "vitest": "2.1.8",
+    "@types/node": "22.9.0"
+  }
+}

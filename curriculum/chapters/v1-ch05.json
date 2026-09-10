@@ -1,0 +1,1207 @@
+{
+  "note": "V1 chapter 5 — TypeScript (lessons L13-L15, exercises e037-e045, cards c025-c030, assessment a05). The four runnable tasks declare language: typescript, so the semantic type-check gate runs before execution and a type error is itself a graded failure. Every starter compiles and returns something wrong, so the learner never has to fight the compiler to see a red case.",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "TypeScript",
+      "conceptIds": [
+        "ts.types",
+        "ts.nullability",
+        "ts.optional-access",
+        "ts.unions",
+        "ts.narrowing",
+        "ts.exhaustiveness",
+        "ts.unsafe-cast",
+        "ts.interfaces",
+        "ts.structural-typing",
+        "ts.generics-constraint",
+        "ts.compile-vs-runtime"
+      ],
+      "prerequisiteIds": [
+        "js.functions",
+        "js.object-access"
+      ],
+      "bodyMarkdown": "TypeScript is a checker, not a runtime. It reads your source, decides whether the operations you wrote are consistent with the shapes you declared, and then erases every one of those annotations before the code runs. Nothing you write here defends you at runtime.\n\nThat one fact explains most of what this chapter teaches. It is why absent values have to be modelled rather than assumed. It is why a discriminated union plus a narrowing check is so much stronger than a comment saying which field is present. It is why `as` is dangerous: it changes the compiler's mind without changing a single byte of data. And it is why the boundary where untrusted data enters your program still needs a real runtime check, no matter how precisely you have typed it.\n\nThe payoff is that a whole class of defect stops being a production incident and becomes a red squiggle: a new case added to a union, a field that might be missing, a helper called with the wrong shape.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v1-l13",
+        "v1-l14",
+        "v1-l15"
+      ],
+      "assessmentId": "v1-a05",
+      "objectiveIds": [
+        "ts.types",
+        "ts.nullability",
+        "ts.optional-access",
+        "ts.unions",
+        "ts.narrowing",
+        "ts.exhaustiveness",
+        "ts.unsafe-cast",
+        "ts.interfaces",
+        "ts.structural-typing",
+        "ts.generics-constraint",
+        "ts.compile-vs-runtime"
+      ],
+      "missionIds": [],
+      "sortOrder": 4
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l13",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Types and nullability",
+      "conceptIds": [
+        "ts.types",
+        "ts.nullability",
+        "ts.optional-access",
+        "ts.compile-vs-runtime"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An annotation is a claim you are asking the compiler to check. `const total: number = readTotal()` says \"I believe this is a number\", and if `readTotal` says otherwise the build fails. That is the entire deal, and it is worth being precise about what falls outside it.\n\nUnder `strictNullChecks`, `string` genuinely means a string — never `null`, never `undefined`. If a value might be absent you must say so: `string | null`, or `email?: string` which means the property may be missing entirely. This is the single most valuable thing strict mode buys you, because it forces the absent case into the open at the point of use instead of into a crash later.\n\nThere are three ways to deal with a possibly-absent value, and they are not interchangeable. **Check it** — `if (customer.email)` or `typeof customer.email === 'string'` — and the compiler narrows the type inside the branch. **Reach past it** with `?.`, which yields `undefined` instead of throwing. **Supply a default** with `??`, which fills in only for `null` and `undefined`. Note the difference between `??` and `||`: `||` also replaces `0`, `''` and `false`, which is how a legitimate zero quietly turns into a fallback.\n\nAnd then there is `any`, which is not a type but an off switch. A value typed `any` accepts every operation without complaint, and it spreads: everything you read from it is `any` too. `unknown` is the honest alternative — it holds anything, and forces you to narrow before you use it.\n\nFinally, remember what the compiler cannot do. Declaring `const user: User = await response.json()` does not check anything. `json()` returns `any`, the annotation is erased, and if the server sent something else you will find out at runtime. Typed boundaries still need runtime validation.",
+      "chapterId": "v1-ch05",
+      "sortOrder": 0,
+      "objectives": [
+        "Model a possibly-absent value in the type instead of assuming it is present.",
+        "Choose between a check, optional access and a default deliberately.",
+        "Explain why an annotation on incoming data checks nothing at runtime."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "Marrow & Co store a customer whose contact details are genuinely optional.\n\n```ts\ninterface Customer {\n  name: string;\n  email?: string | null;   // may be missing, and may be stored as null\n  postcode: string | null; // always present as a key, sometimes empty\n}\n\nfunction greeting(customer: Customer): string {\n  // customer.email.trim()            // compile error: possibly undefined\n  const email = customer.email?.trim();          // string | undefined\n  if (email !== undefined && email.length > 0) {\n    return `${customer.name} <${email}>`;\n  }\n  return customer.name;\n}\n```\n\nThe compiler refuses the first line, and that refusal is the feature. `?.` gets you past the absence, but notice it does not *resolve* it — you still have `string | undefined` and still have to decide what an empty result means.\n\nNow the boundary case:\n\n```ts\nasync function loadCustomer(id: string): Promise<Customer> {\n  const response = await api.get(`/customers/${id}`);\n  return response.json() as Customer;   // checks nothing whatsoever\n}\n```\n\nEvery caller now believes it has a `Customer`. If the service returns `{ name: null }`, the crash happens somewhere far away, in code the compiler declared safe.",
+      "commonMistakes": [
+        "Using `||` for a default, so a real `0`, `''` or `false` is silently replaced by the fallback.",
+        "Sprinkling `?.` along a whole chain so the code cannot crash but also cannot tell you which link was missing.",
+        "Annotating parsed JSON as a known shape and treating that as validation.",
+        "Reaching for `any` to make an error disappear, which removes checking from every value derived from it.",
+        "Reading `email?: string` as \"defaults to empty string\" rather than \"the property may not be there at all\"."
+      ],
+      "summaryMarkdown": "Say in the type when a value may be absent, then handle it deliberately — check, `?.`, or `??`, never `||` for a default that could legitimately be falsy. And remember the annotations vanish before the code runs, so data arriving from outside still needs a real check.",
+      "exerciseIds": [
+        "v1-e037",
+        "v1-e038",
+        "v1-e039"
+      ],
+      "reviewCardIds": [
+        "v1-c025",
+        "v1-c026"
+      ],
+      "references": [
+        {
+          "label": "TypeScript handbook: Everyday types",
+          "url": "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html"
+        },
+        {
+          "label": "TypeScript: strictNullChecks",
+          "url": "https://www.typescriptlang.org/tsconfig/#strictNullChecks"
+        },
+        {
+          "label": "MDN: Nullish coalescing operator (??)",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Nullish_coalescing"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e037",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Pick a usable contact line from optional fields",
+      "conceptIds": [
+        "ts.nullability",
+        "ts.optional-access",
+        "ts.types"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A small function where the interesting work is entirely in deciding what counts as present.",
+      "lessonId": "v1-l13",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "foundation",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Marrow & Co print one contact line per customer.\n\n```ts\ninterface Customer {\n  name: string;\n  email?: string | null;\n  phone?: string | null;\n}\n```\n\nWrite `contactLine(customer: Customer): string`. Return the email if it is a non-empty string; otherwise the phone if it is a non-empty string; otherwise the exact text `no contact on file`.\n\nAn empty string is **not** a usable contact, so it must fall through to the next option — a field the import job wrote as `\"\"` is just as absent as one that was never set.",
+      "hints": [
+        "Missing and empty are two different states here, and the type only tells you about the first one.",
+        "`??` only fills in for `null` and `undefined`, so it will happily hand you back an empty string. You need a length check as well.",
+        "Test each field with `typeof value === 'string' && value.length > 0`, returning as soon as one qualifies; the final `return` handles the case where neither did."
+      ],
+      "solution": {
+        "code": "interface Customer {\n  name: string;\n  email?: string | null;\n  phone?: string | null;\n}\n\nfunction contactLine(customer: Customer): string {\n  if (typeof customer.email === 'string' && customer.email.length > 0) {\n    return customer.email;\n  }\n  if (typeof customer.phone === 'string' && customer.phone.length > 0) {\n    return customer.phone;\n  }\n  return 'no contact on file';\n}",
+        "explanationMarkdown": "The type system can tell you a value might be absent; it cannot tell you what your business considers usable. Here three different runtime states — the property missing, an explicit `null`, and an empty string — all mean the same thing to the reader of a printed contact line, and only two of them are visible in the type. That gap is normal, and it is why a nullability check and a validity check are separate steps. The `typeof` guard also does the compiler's work for it: inside the branch, the value has narrowed from `string | null | undefined` to `string`, so reading `.length` is checked rather than hoped for."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "typescript",
+        "entrypoint": "contactLine",
+        "starterCode": "interface Customer {\n  name: string;\n  email?: string | null;\n  phone?: string | null;\n}\n\nfunction contactLine(customer: Customer): string {\n  return customer.email ?? 'no contact on file';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "email-preferred",
+            "args": [{ "name": "Rowan", "email": "rowan@marrow.example", "phone": "0400 000 111" }],
+            "expected": "rowan@marrow.example",
+            "hidden": false
+          },
+          {
+            "id": "null-email-falls-back-to-phone",
+            "args": [{ "name": "Rowan", "email": null, "phone": "0400 222 333" }],
+            "expected": "0400 222 333",
+            "hidden": false
+          },
+          {
+            "id": "no-fields-at-all",
+            "args": [{ "name": "Rowan" }],
+            "expected": "no contact on file",
+            "hidden": false
+          },
+          {
+            "id": "empty-email-is-not-a-contact",
+            "args": [{ "name": "Rowan", "email": "", "phone": "0400 444 555" }],
+            "expected": "0400 444 555",
+            "hidden": false
+          },
+          {
+            "id": "both-empty-strings",
+            "args": [{ "name": "Rowan", "email": "", "phone": "" }],
+            "expected": "no contact on file",
+            "hidden": true
+          },
+          {
+            "id": "phone-only-email-null",
+            "args": [{ "name": "Ash", "email": null, "phone": "0400 666 777" }],
+            "expected": "0400 666 777",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ts.nullability",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e038",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a crash in code the compiler declared safe",
+      "conceptIds": [
+        "ts.compile-vs-runtime",
+        "ts.types"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A production error in a fully typed function, with a green build behind it.",
+      "lessonId": "v1-l13",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "The Marrow & Co dashboard throws `TypeError: Cannot read properties of null (reading 'toFixed')` in production. The build is green and `strict` is on.\n\n```ts\ninterface Order {\n  id: string;\n  totalCents: number;\n}\n\nasync function loadOrder(id: string): Promise<Order> {\n  const response = await client.get(`/orders/${id}`);\n  return response.json() as Order;\n}\n\nasync function renderTotal(id: string): Promise<string> {\n  const order = await loadOrder(id);\n  return (order.totalCents / 100).toFixed(2);\n}\n```\n\nWhy did the type checker not prevent this?",
+      "hints": [
+        "Ask which of these lines the compiler actually verified, and against what evidence.",
+        "`response.json()` produces `any`, and the `as Order` assertion tells the compiler to stop asking questions — no data is inspected at that point.",
+        "The service returned `totalCents: null`; the annotation was erased before the code ran, so the only real defence is validating the parsed body against the shape at that boundary before it is treated as an `Order`."
+      ],
+      "solution": {
+        "modelAnswer": "The `as Order` assertion is an instruction to the compiler, not a check on the data. `response.json()` is typed `any`, the assertion silences any doubt, and all annotations are erased before execution — so a body containing `totalCents: null` flows through unchecked and fails at the first arithmetic. The fix is to validate the parsed body at the boundary (a schema check or explicit field checks) and only then treat it as an `Order`.",
+        "explanationMarkdown": "The compiler checks the consistency of your source against the shapes you declared. It cannot check a value it has never seen, and everything crossing a network boundary is in that category. An assertion is the point at which you take responsibility for a claim the compiler cannot verify, which makes every `as` at an I/O boundary a place where a runtime check should be instead. The crash landing in `renderTotal` rather than in `loadOrder` is the usual pattern: the lie is introduced at the boundary and detected wherever the value is first genuinely used."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "assertion-checks-nothing",
+            "textMarkdown": "`response.json()` is `any` and `as Order` asserts a shape without inspecting the data; annotations are erased before runtime, so nothing ever checked the body.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The boundary needs a runtime validation step; the assertion only changes what the compiler believes."
+          },
+          {
+            "id": "strict-not-enough",
+            "textMarkdown": "`strict` was not sufficient — `totalCents` should have been declared `number | null` and then the error would have been caught.",
+            "correct": false,
+            "explanationMarkdown": "Widening the type would force a null check in `renderTotal`, which helps, but the assertion would still let any other malformed body through unchecked. The boundary is the real problem."
+          },
+          {
+            "id": "await-missing",
+            "textMarkdown": "`response.json()` is not awaited, so an unresolved promise is asserted to be an `Order`.",
+            "correct": false,
+            "explanationMarkdown": "A promise would fail the arithmetic differently and `order.totalCents` would be `undefined`, not `null`. The reported error names `null` specifically."
+          },
+          {
+            "id": "division-error",
+            "textMarkdown": "Dividing by `100` converts the value to a float that `toFixed` cannot handle when the numerator is large.",
+            "correct": false,
+            "explanationMarkdown": "`toFixed` works on any number, large or small. The error message says the value being read was `null`, so the failure is before the arithmetic could matter."
+          }
+        ]
+      },
+      "primaryConceptId": "ts.compile-vs-runtime",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e039",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain the cost of optional chaining everywhere",
+      "conceptIds": [
+        "ts.optional-access",
+        "ts.nullability"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Argue about a habit rather than a single line: when reaching past absence stops being defensive and starts being evasive.",
+      "lessonId": "v1-l13",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "A teammate's response to every \"possibly undefined\" error from the compiler is to add a `?.`:\n\n```ts\nconst suburb = order?.delivery?.address?.suburb ?? 'unknown';\n```\n\nThe build goes green and the page stops crashing. Explain what this costs, when the pattern is genuinely appropriate, and what you would do instead for the case where a missing address means the order cannot be delivered at all.",
+      "hints": [
+        "Notice what information the reader of `unknown` on the page has, and what the person on support has, when this line produces it.",
+        "`?.` converts a crash into an indistinguishable default: four different missing links all produce the same output, and a genuine data defect looks exactly like a customer who chose not to give an address.",
+        "Keep `?.` where absence is expected and harmless, and where it is not, check the one link that is genuinely optional and treat a missing address as an explicit, reported state — a typed result or an error — rather than a string."
+      ],
+      "solution": {
+        "modelAnswer": "The chain makes four distinct situations indistinguishable: no order, no delivery, no address, no suburb. All of them render `unknown`, so a real data defect looks identical to a legitimately blank field, and nobody can tell from the output which link was missing. It also hides the modelling question — if an order always has a delivery, the type should say so, and the `?.` is papering over a type that is looser than reality. Optional chaining is right where absence is genuinely expected and the default is genuinely correct, for example an optional middle name. Where a missing address means the order cannot be delivered, I would check for it explicitly, return a typed result such as a status of `missing_address`, and render a specific message with the order id logged, rather than silently continuing with `unknown`.",
+        "explanationMarkdown": "The real objection is not to the operator, which is a good one, but to using it as a way of not deciding. Every `?.` is an assertion that this absence is acceptable and that the fallback is meaningful. When that is true it is precise and readable. When it is not, it converts a loud failure into a quiet wrong answer, which is strictly worse — a crash at least tells you where it happened. The secondary point is about the types themselves: if a field can never really be missing, tighten the type and let one check at the boundary carry the whole program."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Identifies that a long chain collapses several distinct causes into one indistinguishable result, so a data defect and a legitimate blank look the same.",
+          "Notes that the pattern hides the modelling question — the type may be looser than reality, and the correct fix might be to tighten it.",
+          "Gives a case where `?.` is genuinely appropriate, showing this is not a blanket prohibition.",
+          "Proposes a concrete alternative for the undeliverable-order case: an explicit check plus a reported state, error or typed result, rather than a silent default."
+        ],
+        "modelAnswerMarkdown": "The chain answers four different questions with one word. Missing order, missing delivery, missing address and missing suburb all print `unknown`, so support cannot tell a broken import from a customer who left the field blank, and the page carries on as though nothing is wrong. It also dodges the modelling question: if every order has a delivery, `delivery` should not be optional, and one check at the boundary would replace all of these. I would keep `?.` for absences that are expected and harmless — an optional second address line, say. For an order that cannot be delivered without an address, I would check explicitly, return something like `{ status: 'missing_address', orderId }`, show a specific message that tells the operator what to do, and log the order id so the bad records can be found."
+      },
+      "primaryConceptId": "ts.optional-access",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c025",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "?? against || for defaults",
+      "conceptIds": [
+        "ts.nullability"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the exact difference between the two default operators and the defect the wrong one causes.",
+      "lessonId": "v1-l13",
+      "type": "recall",
+      "promptMarkdown": "What is the difference between `a ?? b` and `a || b`, and which values make the choice matter?",
+      "answerMarkdown": "`??` uses `b` only when `a` is `null` or `undefined`. `||` uses `b` whenever `a` is falsy, which also covers `0`, `''`, `false`, `NaN` and `-0`. The choice matters whenever a legitimate falsy value is possible — a quantity of `0`, an empty note, a `false` opt-in.",
+      "explanationMarkdown": "Almost every \"the setting reverts to the default\" bug is this. A user turns something off, the value is `false`, and `||` helpfully turns it back on. Reach for `??` unless you specifically intend every falsy value to be replaced.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ts.nullability"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c026",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What survives to runtime",
+      "conceptIds": [
+        "ts.compile-vs-runtime",
+        "ts.types"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Decide which of a set of typing constructs has any effect once the program is executing.",
+      "lessonId": "v1-l13",
+      "type": "debugging",
+      "promptMarkdown": "A service starts returning `\"12.50\"` where the type says `totalCents: number`, and arithmetic across the app goes wrong. Which of the following would have caught it before the bad value spread?",
+      "answerMarkdown": "Only a runtime check on the parsed body — a schema validation, or explicit `typeof` checks at the point the response is parsed. Interfaces, type aliases, generic parameters and `as` assertions are all erased and check nothing at runtime.",
+      "explanationMarkdown": "Everything TypeScript adds is gone by the time the value arrives. The rule of thumb: types describe what you believe about data your program produced, validation establishes what is true about data it received.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "runtime-validation",
+            "textMarkdown": "Validating the parsed body at the point of parsing, before it is treated as the declared shape.",
+            "correct": true,
+            "explanationMarkdown": "Correct. It is the only option on this list that inspects an actual value at the moment it enters the program."
+          },
+          {
+            "id": "stricter-interface",
+            "textMarkdown": "Declaring the interface more precisely, for example `totalCents: number & { __cents: true }`.",
+            "correct": false,
+            "explanationMarkdown": "A more elaborate compile-time type still describes a belief. It is erased before the string ever arrives."
+          },
+          {
+            "id": "generic-parse",
+            "textMarkdown": "Calling the client as `client.get<Order>(url)` so the response is typed on the way in.",
+            "correct": false,
+            "explanationMarkdown": "A generic parameter is another way of asserting the shape. Nothing inspects the body; it just moves the unchecked claim to the call site."
+          },
+          {
+            "id": "as-const",
+            "textMarkdown": "Adding `as const` to the parsed result to make it immutable and exact.",
+            "correct": false,
+            "explanationMarkdown": "`as const` narrows literal types at compile time and produces no runtime code at all."
+          }
+        ]
+      },
+      "primaryConceptId": "ts.compile-vs-runtime"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l14",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Unions and narrowing",
+      "conceptIds": [
+        "ts.unions",
+        "ts.narrowing",
+        "ts.exhaustiveness",
+        "ts.unsafe-cast"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A union says a value is one of several alternatives: `string | number`, or something far more useful — a set of object shapes that each carry a literal tag.\n\n```ts\ntype Payment =\n  | { kind: 'card'; last4: string }\n  | { kind: 'transfer'; reference: string }\n  | { kind: 'cash' };\n```\n\nThat is a **discriminated union**, and the `kind` field is the discriminant. Until you inspect it, TypeScript will not let you read `last4`, because a `Payment` might not have one. Once you check `payment.kind === 'card'`, the compiler narrows the type inside that branch and `last4` becomes readable. The check you would have written anyway is the thing that unlocks the properties — that is the whole trick.\n\nSeveral kinds of check narrow: `typeof` for primitives, `Array.isArray`, `in` for optional members, a literal comparison on a discriminant, and a truthiness check for `null | undefined`. What does *not* narrow is a comment, a variable holding the result of a check you did earlier in a way the compiler cannot follow, or a cast.\n\nWhich brings us to **exhaustiveness**. Handle every branch of the union and, in the impossible final branch, assign the value to `never`:\n\n```ts\nfunction describe(payment: Payment): string {\n  switch (payment.kind) {\n    case 'card': return `card ending ${payment.last4}`;\n    case 'transfer': return `transfer ${payment.reference}`;\n    case 'cash': return 'cash';\n    default: {\n      const unhandled: never = payment;   // fails to compile if a case is added\n      return unhandled;\n    }\n  }\n}\n```\n\nAdd a fourth payment kind and this function stops compiling, pointing at the exact place that needs a decision. Replace that `never` branch with `default: return 'other'` and the new case ships silently as \"other\". The difference between those two lines is the difference between a compiler that finds your work for you and one that hides it.\n\nAnd `as` undoes all of it. `payment as CardPayment` does not convert anything, does not check anything, and does not fail. It simply asserts, and if you are wrong, you find out later at a line that looked safe.",
+      "chapterId": "v1-ch05",
+      "sortOrder": 1,
+      "objectives": [
+        "Model alternatives as a discriminated union rather than optional fields.",
+        "Use a runtime check that also narrows the type for the compiler.",
+        "Make an unhandled union member a build failure instead of a silent default."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "Two ways to model the same thing at Marrow & Co, and why one of them keeps producing bugs.\n\n```ts\n// Loose: every field optional, every combination expressible, none guaranteed.\ninterface Payment {\n  kind: string;\n  last4?: string;\n  reference?: string;\n}\n\nfunction describe(payment: Payment): string {\n  if (payment.kind === 'card') {\n    return `card ending ${payment.last4}`;   // string | undefined — happily prints \"undefined\"\n  }\n  return 'other';\n}\n```\n\nNothing stops `{ kind: 'card' }` with no `last4`, nothing stops `{ kind: 'card', reference: 'X' }`, and nothing tells you when a new kind appears.\n\n```ts\n// Tight: each alternative carries exactly the fields it needs.\ntype Payment =\n  | { kind: 'card'; last4: string }\n  | { kind: 'transfer'; reference: string }\n  | { kind: 'cash' };\n\nfunction describe(payment: Payment): string {\n  switch (payment.kind) {\n    case 'card': return `card ending ${payment.last4}`;   // narrowed: last4 is string\n    case 'transfer': return `transfer ${payment.reference}`;\n    case 'cash': return 'cash';\n    default: {\n      const unhandled: never = payment;\n      return unhandled;\n    }\n  }\n}\n```\n\nNow an impossible combination cannot be constructed, `last4` is guaranteed where it is read, and adding `{ kind: 'voucher'; code: string }` breaks the build at `unhandled` until someone decides what a voucher should say.",
+      "commonMistakes": [
+        "Modelling alternatives as one interface with many optional fields, which permits every impossible combination.",
+        "Writing `default: return 'other'`, so a new union member ships as a silent fallback nobody notices.",
+        "Using `as` to reach a property the compiler is objecting to, which removes the check without changing the data.",
+        "Checking `typeof value === 'object'` and forgetting that `null` passes that test.",
+        "Extracting the check into a helper that returns `boolean`, which does not narrow at the call site unless it is declared as a type predicate."
+      ],
+      "summaryMarkdown": "A discriminated union makes the impossible states unrepresentable, a narrowing check earns you access to the fields, and a `never` assignment in the final branch turns \"someone added a case\" from a production surprise into a build error.",
+      "exerciseIds": [
+        "v1-e040",
+        "v1-e041",
+        "v1-e042"
+      ],
+      "reviewCardIds": [
+        "v1-c027",
+        "v1-c028"
+      ],
+      "references": [
+        {
+          "label": "TypeScript handbook: Narrowing",
+          "url": "https://www.typescriptlang.org/docs/handbook/2/narrowing.html"
+        },
+        {
+          "label": "TypeScript handbook: Discriminated unions",
+          "url": "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e040",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Describe every member of a delivery event union",
+      "conceptIds": [
+        "ts.unions",
+        "ts.narrowing",
+        "ts.exhaustiveness"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Write the switch that narrows a tagged union and closes it against future additions.",
+      "lessonId": "v1-l14",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Thistle Dispatch records delivery events as a discriminated union.\n\n```ts\ntype DeliveryEvent =\n  | { kind: 'dispatched'; courier: string }\n  | { kind: 'delivered'; signedBy: string }\n  | { kind: 'failed'; reason: string; attempts: number };\n```\n\nWrite `describeEvent(event: DeliveryEvent): string` producing exactly:\n\n- dispatched: `Dispatched with <courier>`\n- delivered: `Delivered, signed by <signedBy>`\n- failed: `Failed after <attempts> attempt(s): <reason>`\n\nClose the function with a `default` branch that assigns the event to a `never`-typed variable, so that adding a fourth kind later fails to compile instead of falling through.",
+      "hints": [
+        "Branch on the one field every member shares; that is what lets the compiler tell you which shape you are holding.",
+        "A `switch (event.kind)` narrows inside each `case`, so `event.courier` is readable in the dispatched branch and nowhere else.",
+        "In `default`, write `const unhandled: never = event;` — in a complete switch there is nothing left for `event` to be, so this compiles today and stops compiling the moment a new member is added."
+      ],
+      "solution": {
+        "code": "type DeliveryEvent =\n  | { kind: 'dispatched'; courier: string }\n  | { kind: 'delivered'; signedBy: string }\n  | { kind: 'failed'; reason: string; attempts: number };\n\nfunction describeEvent(event: DeliveryEvent): string {\n  switch (event.kind) {\n    case 'dispatched':\n      return `Dispatched with ${event.courier}`;\n    case 'delivered':\n      return `Delivered, signed by ${event.signedBy}`;\n    case 'failed':\n      return `Failed after ${event.attempts} attempt(s): ${event.reason}`;\n    default: {\n      const unhandled: never = event;\n      return unhandled;\n    }\n  }\n}",
+        "explanationMarkdown": "Two mechanisms are doing the work here. Narrowing means the check you had to write anyway is also the proof that a field exists: inside `case 'failed'`, `attempts` is a `number`, not `number | undefined`, and no defensive test is needed. The `never` assignment is the second: in a complete switch, control cannot reach `default`, so `event` has been narrowed to `never` and the assignment is legal. Add a fourth member and the compiler reports that the new shape is not assignable to `never` at exactly the line that needs a decision. That turns a whole category of missed-case bug into a build failure, which is the strongest form of test you can get for free."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "typescript",
+        "entrypoint": "describeEvent",
+        "starterCode": "type DeliveryEvent =\n  | { kind: 'dispatched'; courier: string }\n  | { kind: 'delivered'; signedBy: string }\n  | { kind: 'failed'; reason: string; attempts: number };\n\nfunction describeEvent(event: DeliveryEvent): string {\n  if (event.kind === 'dispatched') {\n    return `Dispatched with ${event.courier}`;\n  }\n  return 'Unknown event';\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "dispatched",
+            "args": [{ "kind": "dispatched", "courier": "Ferndale Couriers" }],
+            "expected": "Dispatched with Ferndale Couriers",
+            "hidden": false
+          },
+          {
+            "id": "delivered",
+            "args": [{ "kind": "delivered", "signedBy": "R. Okafor" }],
+            "expected": "Delivered, signed by R. Okafor",
+            "hidden": false
+          },
+          {
+            "id": "failed-single-attempt",
+            "args": [{ "kind": "failed", "reason": "nobody home", "attempts": 1 }],
+            "expected": "Failed after 1 attempt(s): nobody home",
+            "hidden": false
+          },
+          {
+            "id": "dispatched-other-courier",
+            "args": [{ "kind": "dispatched", "courier": "Pinegate Runners" }],
+            "expected": "Dispatched with Pinegate Runners",
+            "hidden": false
+          },
+          {
+            "id": "failed-many-attempts",
+            "args": [{ "kind": "failed", "reason": "gate locked", "attempts": 3 }],
+            "expected": "Failed after 3 attempt(s): gate locked",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ts.unions",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e041",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review an assertion that silences a real defect",
+      "conceptIds": [
+        "ts.unsafe-cast",
+        "ts.narrowing"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A pull request where the diff is one word long and the consequence is a production crash.",
+      "lessonId": "v1-l14",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 9,
+      "promptMarkdown": "A colleague hit `Property 'last4' does not exist on type 'Payment'` and shipped this.\n\n```ts\ntype Payment =\n  | { kind: 'card'; last4: string }\n  | { kind: 'transfer'; reference: string };\n\nfunction receiptLine(payment: Payment): string {\n  const card = payment as { kind: 'card'; last4: string };\n  return `Paid by card ending ${card.last4}`;\n}\n```\n\nThe build passes. What happens when a transfer payment reaches this function, and what should the change have been?",
+      "hints": [
+        "An assertion is a statement to the compiler about what you already know. Ask what evidence backs this one.",
+        "Nothing converts or checks the value: a transfer stays a transfer, so `card.last4` reads a property that is not there.",
+        "The output becomes `Paid by card ending undefined` — no error, a wrong receipt. The correct change is to check `payment.kind === 'card'` and handle the transfer branch, which narrows the type honestly and makes `last4` legitimately readable."
+      ],
+      "solution": {
+        "modelAnswer": "Nothing happens at runtime, which is the problem. `as` performs no conversion and no check, so a transfer payment flows through unchanged and `card.last4` is `undefined`. The receipt reads `Paid by card ending undefined` and no error is raised. The change should have been `if (payment.kind === 'card') { ... }` with a real branch for transfers — the same check the compiler was asking for, which also narrows the type so `last4` is guaranteed to exist where it is read.",
+        "explanationMarkdown": "The compiler error was correct and specific: this value might not have that property. An assertion answers that objection by overruling it rather than by resolving it, and it is not a conversion — no runtime code is emitted at all. The reason this is worth recognising on sight is that the resulting defect is a wrong value rather than a crash, so it survives review, survives tests that only exercise card payments, and reaches a customer's receipt."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "undefined-in-receipt",
+            "textMarkdown": "Nothing throws; `last4` is absent on a transfer, so the receipt reads `Paid by card ending undefined`. The check on `payment.kind` should have been written instead.",
+            "correct": true,
+            "explanationMarkdown": "Correct. An assertion emits no runtime code, so the wrong shape passes straight through and produces a wrong value rather than an error."
+          },
+          {
+            "id": "throws-typeerror",
+            "textMarkdown": "A `TypeError` is thrown, because the object does not match the asserted type at runtime.",
+            "correct": false,
+            "explanationMarkdown": "There is no runtime type identity to violate. The assertion exists only during compilation and is erased before execution."
+          },
+          {
+            "id": "converts-shape",
+            "textMarkdown": "The assertion converts the transfer into a card-shaped object, filling `last4` with an empty string.",
+            "correct": false,
+            "explanationMarkdown": "`as` never constructs or modifies a value. Nothing is converted and no field is filled in."
+          },
+          {
+            "id": "needs-double-assertion",
+            "textMarkdown": "The assertion is too narrow and needs `as unknown as { kind: 'card'; last4: string }` to work correctly.",
+            "correct": false,
+            "explanationMarkdown": "Going through `unknown` only defeats the compiler's remaining objections. It makes the same unchecked claim with less friction."
+          }
+        ]
+      },
+      "primaryConceptId": "ts.unsafe-cast",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e042",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain what a default branch costs you",
+      "conceptIds": [
+        "ts.exhaustiveness",
+        "ts.unions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Make the argument for a build failure over a sensible-looking fallback.",
+      "lessonId": "v1-l14",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "Marrow & Co have six functions that switch on a `Payment` union. Five end with `default: return 'other';`. One ends with a `never` assignment.\n\nA new payment kind, `voucher`, is added to the union next sprint. Explain precisely what happens in each group when that change lands, why the `never` version is worth the extra three lines, and what someone should do if they genuinely want a catch-all behaviour for kinds they have not thought about.",
+      "hints": [
+        "Trace the change through the build and then through production for each group separately.",
+        "The five with a default compile without complaint and quietly report every voucher payment as `other`; the sixth stops compiling at the exact line where a decision is missing.",
+        "If you genuinely want a catch-all, keep the exhaustiveness check and make the fallback explicit — list the kinds you intend to treat generically, or handle the new member with a deliberate shared branch, so the choice is recorded rather than inherited from a `default`."
+      ],
+      "solution": {
+        "modelAnswer": "The five with `default: return 'other'` compile cleanly and ship. Every voucher payment is described as `other` on receipts, in the finance export and in the admin list, and nobody finds out until someone reconciles the numbers. The sixth fails to compile at the `never` assignment, with an error naming the voucher shape, at the exact function that needs a decision — before the change can be merged. That is worth three lines because it converts \"remember to update all six call sites\" from a human responsibility into a mechanical one, and because it fails at build time in the author's editor rather than at runtime in front of a customer. If a catch-all is genuinely wanted, keep the exhaustiveness check and be explicit: enumerate the kinds that share the generic treatment in their own `case` labels, so a future reader can see the decision was made rather than defaulted into.",
+        "explanationMarkdown": "This is the general principle that a type system pays for itself when it makes a change *fail loudly at the place that needs attention*. A `default` branch is a promise that every future member of the union is adequately handled by one line written before those members existed — a promise nobody can keep. The subtle part is the last point: exhaustiveness and catch-all behaviour are not in conflict. What conflicts with exhaustiveness is an *implicit* catch-all, because it silently absorbs cases that were never considered."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States that the `default` versions compile and ship, producing wrong output for the new member with no signal.",
+          "States that the `never` version fails at build time and points at the specific function needing a decision.",
+          "Explains the underlying benefit: the compiler enforces the update instead of a person remembering every call site.",
+          "Describes how to keep a deliberate catch-all without losing exhaustiveness, for example by listing the kinds that share a branch explicitly."
+        ],
+        "modelAnswerMarkdown": "The five functions with `default: return 'other'` compile without a word and go to production, where every voucher payment is labelled `other` on receipts, exports and the admin list. Nothing surfaces until a reconciliation turns up money in a category nobody created. The sixth function refuses to compile: the voucher shape is not assignable to `never`, and the error points straight at the switch that needs a new case. Three lines buy the guarantee that adding a union member cannot ship half-finished, and they collect on it in the author's editor rather than in support. If some kinds really should share generic handling, keep the `never` branch and write those kinds as explicit `case` labels falling into a shared return, so the decision is visible in the code instead of inherited from a default nobody revisited."
+      },
+      "primaryConceptId": "ts.exhaustiveness",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c027",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Which checks actually narrow",
+      "conceptIds": [
+        "ts.narrowing"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the runtime checks the compiler follows when narrowing a union.",
+      "lessonId": "v1-l14",
+      "type": "recall",
+      "promptMarkdown": "Name four checks that narrow a type in TypeScript, and one thing people expect to narrow that does not.",
+      "answerMarkdown": "`typeof x === 'string'` for primitives; a literal comparison on a discriminant such as `x.kind === 'card'`; `Array.isArray(x)`; `'field' in x`; and a truthiness or `!== null` check for nullable values. What does not narrow: a helper returning `boolean`, unless it is declared as a type predicate (`function isCard(p: Payment): p is CardPayment`).",
+      "explanationMarkdown": "The compiler follows control flow it can see. Once the check moves into another function, all it knows is that something returned `true` — the connection to the value is lost unless the signature restates it as a predicate.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ts.narrowing"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c028",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Read the switch that will not tell you about new cases",
+      "conceptIds": [
+        "ts.exhaustiveness"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Judge two endings to the same switch statement and predict which one survives a change to the union.",
+      "lessonId": "v1-l14",
+      "type": "code-reading",
+      "promptMarkdown": "One switch ends `default: return 'other';` and another ends `default: { const unhandled: never = value; return unhandled; }`. A new member is added to the union. What is different about what each one does?",
+      "answerMarkdown": "The first compiles and silently reports the new member as `other` in production. The second fails to compile, because the new shape is not assignable to `never`, and the error points at the switch that needs the extra case.",
+      "explanationMarkdown": "The `never` assignment works because a complete switch leaves nothing for the value to be in the default branch. Any new member restores something for it to be, and that something is not assignable to `never`.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "build-error-vs-silent",
+            "textMarkdown": "The `never` version fails the build at the switch that needs updating; the `'other'` version compiles and mislabels the new member at runtime.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The exhaustiveness check moves the discovery from production back to compilation."
+          },
+          {
+            "id": "both-error",
+            "textMarkdown": "Both fail to compile, because a switch on a union must cover every member.",
+            "correct": false,
+            "explanationMarkdown": "TypeScript does not require a switch to be exhaustive on its own. A `default` branch makes it complete as far as the compiler is concerned."
+          },
+          {
+            "id": "runtime-throw",
+            "textMarkdown": "The `never` version throws at runtime when the new member arrives, which is why it is preferred.",
+            "correct": false,
+            "explanationMarkdown": "It does not throw; the whole point is that the code never reaches production. If you also want a runtime guard, throw explicitly in that branch as well."
+          },
+          {
+            "id": "performance",
+            "textMarkdown": "They behave identically; the `never` version is a stylistic preference with no practical effect.",
+            "correct": false,
+            "explanationMarkdown": "The practical effect is the entire reason to write it: one version makes an incomplete update impossible to merge."
+          }
+        ]
+      },
+      "primaryConceptId": "ts.exhaustiveness"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l15",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Interfaces and reusable functions",
+      "conceptIds": [
+        "ts.interfaces",
+        "ts.structural-typing",
+        "ts.generics-constraint"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An interface names a shape. That gives you one place to change when the shape changes, and one name to say in a signature instead of repeating a block of fields at every call site.\n\nBut TypeScript's types are **structural**, not nominal. Compatibility is decided by the fields a value actually has, not by which interface it was declared with. A `Customer` and an `Invoice` with identical fields are the same type as far as the checker is concerned, and an object literal you never annotated will satisfy `Customer` if it has the right shape. There is one wrinkle: an object literal assigned directly to a typed target gets an **excess property check** — a helpful special case that catches typos like `emial` — but store that same literal in a variable first and the extra property passes without complaint, because the variable's type is what gets compared.\n\nWhen a helper should work across many shapes, the temptation is `any[]`, which throws away every guarantee. A **constrained generic** keeps them:\n\n```ts\nfunction indexById<T extends { id: string }>(items: T[]): Record<string, T> { ... }\n```\n\nThe constraint says: I need an `id`, and I promise to hand you back exactly the type you gave me. Call it with `Order[]` and you get `Record<string, Order>` — full field access preserved. Call it with something lacking an `id` and the call site fails, which is precisely where the mistake was made. Compare that with `any[]`, where the call succeeds and the loss of type information spreads outward through everything downstream.\n\nThe rule of thumb: reach for a generic when a function's output type genuinely depends on its input type. If it does not, a plain interface parameter is clearer.",
+      "chapterId": "v1-ch05",
+      "sortOrder": 2,
+      "objectives": [
+        "Describe a reusable object contract with an interface.",
+        "Explain why compatibility depends on shape rather than on a declared name.",
+        "Write a constrained generic that preserves the caller's type."
+      ],
+      "estimatedMinutes": 15,
+      "workedExampleMarkdown": "The same helper written three ways, at Pinegate Library.\n\n```ts\ninterface Loan { id: string; title: string; dueOn: string; }\n\n// 1. Throws the type away. Every caller downstream loses checking.\nfunction indexAny(items: any[]): any {\n  const out: any = {};\n  for (const item of items) out[item.id] = item;\n  return out;\n}\n\n// 2. Correct, but only ever works for Loan.\nfunction indexLoans(items: Loan[]): Record<string, Loan> {\n  const out: Record<string, Loan> = {};\n  for (const item of items) out[item.id] = item;\n  return out;\n}\n\n// 3. Works for any shape with an id, and gives that exact shape back.\nfunction indexById<T extends { id: string }>(items: T[]): Record<string, T> {\n  const index: Record<string, T> = {};\n  for (const item of items) index[item.id] = item;\n  return index;\n}\n\nconst loans = indexById(loanList);      // Record<string, Loan>\nloans['l-1'].title;                     // checked\nloans['l-1'].titel;                     // compile error, as it should be\n```\n\nVersion 1 compiles and every misspelling downstream compiles too. Version 3 costs one type parameter and keeps every guarantee, in both directions: the constraint checks what comes in, and `T` carries the caller's real type back out.",
+      "commonMistakes": [
+        "Using `any[]` for a helper that should be generic, which silently removes checking from everything the helper returns.",
+        "Expecting an extra property to be rejected in every case, when the excess property check only applies to an object literal assigned directly to a typed target.",
+        "Assuming two identically shaped interfaces are incompatible because they have different names.",
+        "Adding a type parameter to a function whose return type does not depend on it, which adds noise without adding a guarantee.",
+        "Writing `<T>` with no constraint and then reading `item.id`, which the compiler rejects because `T` could be anything."
+      ],
+      "summaryMarkdown": "Interfaces name shapes; compatibility follows the shape rather than the name. When a helper must work across shapes, constrain a type parameter instead of falling back to `any` — the constraint checks the input and the parameter carries the caller's type back out.",
+      "exerciseIds": [
+        "v1-e043",
+        "v1-e044",
+        "v1-e045"
+      ],
+      "reviewCardIds": [
+        "v1-c029",
+        "v1-c030"
+      ],
+      "references": [
+        {
+          "label": "TypeScript handbook: Object types",
+          "url": "https://www.typescriptlang.org/docs/handbook/2/objects.html"
+        },
+        {
+          "label": "TypeScript handbook: Generics",
+          "url": "https://www.typescriptlang.org/docs/handbook/2/generics.html"
+        },
+        {
+          "label": "TypeScript handbook: Type compatibility",
+          "url": "https://www.typescriptlang.org/docs/handbook/type-compatibility.html"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e043",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Index any identified record by its id",
+      "conceptIds": [
+        "ts.generics-constraint",
+        "ts.types"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Write the constrained generic that replaces three copy-pasted lookup helpers.",
+      "lessonId": "v1-l15",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Pinegate Library has three near-identical helpers turning a list into a lookup. Replace them with one.\n\nWrite `indexById` that takes an array of records, each with a `string` `id`, and returns an object keyed by that id. Constrain the type parameter so the body may read `id`, and type the return so a caller passing `Loan[]` gets back a `Record<string, Loan>` with full field access.\n\nAn empty list produces an empty object. If two records share an id, the later one wins. Do not modify the input array.",
+      "hints": [
+        "The signature is the exercise; the body is four lines and unremarkable.",
+        "A bare `<T>` will not let you read `item.id`, because `T` could be a number. You need to tell the compiler the minimum shape you require.",
+        "`function indexById<T extends { id: string }>(items: T[]): Record<string, T>` — the constraint permits the property read, and returning `Record<string, T>` rather than `Record<string, unknown>` is what preserves the caller's type."
+      ],
+      "solution": {
+        "code": "interface Identified {\n  id: string;\n}\n\nfunction indexById<T extends Identified>(items: T[]): Record<string, T> {\n  const index: Record<string, T> = {};\n  for (const item of items) {\n    index[item.id] = item;\n  }\n  return index;\n}",
+        "explanationMarkdown": "A constrained type parameter says two things at once. `T extends Identified` is a requirement on the caller, checked at the call site where the mistake would actually be made, and it is also permission for the body: because every `T` has an `id`, reading it is safe. Returning `Record<string, T>` rather than `Record<string, Identified>` is the part people leave out, and it is the part that matters — widening the return to the constraint would throw away every field the caller passed in, so `loans['l-1'].title` would stop compiling. The generic is worth having here precisely because the output type depends on the input type; for a helper that always returns a `number`, a plain parameter type would be clearer."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "typescript",
+        "entrypoint": "indexById",
+        "starterCode": "interface Identified {\n  id: string;\n}\n\nfunction indexById<T extends Identified>(items: T[]): Record<string, T> {\n  return {};\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty-list",
+            "args": [[]],
+            "expected": {},
+            "hidden": false
+          },
+          {
+            "id": "two-records",
+            "args": [[{ "id": "l-1", "title": "Ferns of the North" }, { "id": "l-2", "title": "Ash Grove" }]],
+            "expected": {
+              "l-1": { "id": "l-1", "title": "Ferns of the North" },
+              "l-2": { "id": "l-2", "title": "Ash Grove" }
+            },
+            "hidden": false
+          },
+          {
+            "id": "duplicate-id-last-wins",
+            "args": [[{ "id": "l-1", "title": "old copy" }, { "id": "l-1", "title": "new copy" }]],
+            "expected": { "l-1": { "id": "l-1", "title": "new copy" } },
+            "hidden": false
+          },
+          {
+            "id": "single-record",
+            "args": [[{ "id": "l-9", "title": "Kite Weather" }]],
+            "expected": { "l-9": { "id": "l-9", "title": "Kite Weather" } },
+            "hidden": false
+          },
+          {
+            "id": "empty-string-id-is-still-a-key",
+            "args": [[{ "id": "", "title": "unlabelled" }]],
+            "expected": { "": { "id": "", "title": "unlabelled" } },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ts.generics-constraint",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e044",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review a typo the compiler let through",
+      "conceptIds": [
+        "ts.structural-typing",
+        "ts.interfaces"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Two almost identical assignments where only one of them is rejected, and the reason is not obvious.",
+      "lessonId": "v1-l15",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "```ts\ninterface Loan {\n  id: string;\n  title: string;\n}\n\n// A — rejected by the compiler\nconst a: Loan = { id: 'l-1', title: 'Ferns', renewd: true };\n\n// B — accepted by the compiler\nconst draft = { id: 'l-2', title: 'Ash', renewd: true };\nconst b: Loan = draft;\n```\n\nBoth objects carry the same misspelled `renewd` field. Why is only A rejected?",
+      "hints": [
+        "The difference is not in the objects. It is in what is on the right-hand side of each assignment.",
+        "TypeScript's normal rule is structural: a value is compatible if it has at least the required fields. Extra fields do not break compatibility.",
+        "The rejection of A is a special case — the excess property check, which applies only when an object *literal* is assigned directly to a typed target. In B the literal was assigned to `draft` first, so the comparison is between two types, and the normal structural rule accepts it."
+      ],
+      "solution": {
+        "modelAnswer": "Structural typing accepts a value with extra properties, which is why B compiles. A is rejected by the excess property check, a deliberate special case that applies only to a fresh object literal assigned directly to a typed target — it exists to catch exactly this kind of typo. Storing the literal in `draft` first removes it from that special case, so only the normal structural rule applies and the extra `renewd` is ignored.",
+        "explanationMarkdown": "The underlying model is that a type is a set of requirements, not a description of everything a value may contain. Having more than required is normally harmless, which is what makes structural typing so flexible. The excess property check is a pragmatic exception layered on top, because a fresh literal that was written for a specific target is almost certainly meant to match it exactly. Knowing where that exception stops is what stops it from being a mystery: a typo caught in one file and silently accepted in the next is otherwise very hard to reason about."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "excess-property-check",
+            "textMarkdown": "Extra properties are structurally fine, but a fresh object literal assigned straight to a typed target gets an excess property check; assigning through `draft` first removes it from that rule.",
+            "correct": true,
+            "explanationMarkdown": "Correct. The check is a special case for literals, and `draft` is compared by the normal structural rule instead."
+          },
+          {
+            "id": "const-inference",
+            "textMarkdown": "`draft` is inferred with `renewd` as optional, so it happens to be compatible with `Loan`.",
+            "correct": false,
+            "explanationMarkdown": "`draft` is inferred as having a required `renewd: boolean`. Compatibility comes from the extra property being permitted, not from it being optional."
+          },
+          {
+            "id": "interface-vs-type",
+            "textMarkdown": "Interfaces are checked more strictly than inferred object types, so B would also be rejected if `Loan` were a `type` alias.",
+            "correct": false,
+            "explanationMarkdown": "`interface` and `type` behave identically for this comparison. The difference is where the literal sits, not how the target was declared."
+          },
+          {
+            "id": "two-step-widening",
+            "textMarkdown": "Assigning through an intermediate variable is an implicit cast, which is why the check is skipped.",
+            "correct": false,
+            "explanationMarkdown": "No cast occurs. The assignment is fully checked — just by the ordinary structural rule, which permits extra properties."
+          }
+        ]
+      },
+      "primaryConceptId": "ts.structural-typing",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e045",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Merge notification settings without losing false or zero",
+      "conceptIds": [
+        "ts.interfaces",
+        "ts.types"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "An interface plus Partial describes the override shape exactly; the trap is in how you apply it.",
+      "lessonId": "v1-l15",
+      "sortOrder": 2,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Halcyon Notices stores a user's notification settings.\n\n```ts\ninterface NoticeSettings {\n  channel: string;\n  digest: boolean;\n  quietHours: number;\n}\n```\n\nWrite `mergeSettings(defaults: NoticeSettings, overrides: Partial<NoticeSettings>): NoticeSettings` returning a **new** object where each field comes from `overrides` when that field is present and from `defaults` otherwise.\n\nA user who turns the digest off (`digest: false`) or sets `quietHours: 0` has expressed a real preference, and it must survive the merge. Neither argument may be modified.",
+      "hints": [
+        "\"Present\" and \"truthy\" are different questions, and only one of them is the right one here.",
+        "`overrides.digest || defaults.digest` throws away an explicit `false`, and the same applies to `quietHours: 0`. Test whether the field is `undefined` instead.",
+        "Start from a copy of `defaults` — `const merged: NoticeSettings = { ...defaults }` — then overwrite each field only when `overrides.<field> !== undefined`; copying first is also what keeps the caller's objects untouched."
+      ],
+      "solution": {
+        "code": "interface NoticeSettings {\n  channel: string;\n  digest: boolean;\n  quietHours: number;\n}\n\nfunction mergeSettings(defaults: NoticeSettings, overrides: Partial<NoticeSettings>): NoticeSettings {\n  const merged: NoticeSettings = { ...defaults };\n  if (overrides.channel !== undefined) {\n    merged.channel = overrides.channel;\n  }\n  if (overrides.digest !== undefined) {\n    merged.digest = overrides.digest;\n  }\n  if (overrides.quietHours !== undefined) {\n    merged.quietHours = overrides.quietHours;\n  }\n  return merged;\n}",
+        "explanationMarkdown": "`Partial<NoticeSettings>` says every field may be absent, and absent is the only condition that should hand control back to the defaults. Truthiness is a different question that happens to give the same answer for strings you never expect to be empty, which is why this defect survives so long: it only misbehaves for `false`, `0` and `''`, and those are exactly the values a user chooses deliberately. Copying `defaults` before writing is doing double duty — it produces the new object the signature promises, and it keeps both arguments untouched, so a caller can reuse the same defaults object for every user without it drifting."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "typescript",
+        "entrypoint": "mergeSettings",
+        "starterCode": "interface NoticeSettings {\n  channel: string;\n  digest: boolean;\n  quietHours: number;\n}\n\nfunction mergeSettings(defaults: NoticeSettings, overrides: Partial<NoticeSettings>): NoticeSettings {\n  return {\n    channel: overrides.channel || defaults.channel,\n    digest: overrides.digest || defaults.digest,\n    quietHours: overrides.quietHours || defaults.quietHours,\n  };\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "no-overrides",
+            "args": [{ "channel": "email", "digest": true, "quietHours": 8 }, {}],
+            "expected": { "channel": "email", "digest": true, "quietHours": 8 },
+            "hidden": false
+          },
+          {
+            "id": "channel-override",
+            "args": [{ "channel": "email", "digest": true, "quietHours": 8 }, { "channel": "sms" }],
+            "expected": { "channel": "sms", "digest": true, "quietHours": 8 },
+            "hidden": false
+          },
+          {
+            "id": "digest-false-must-survive",
+            "args": [{ "channel": "email", "digest": true, "quietHours": 8 }, { "digest": false }],
+            "expected": { "channel": "email", "digest": false, "quietHours": 8 },
+            "hidden": false
+          },
+          {
+            "id": "zero-quiet-hours-must-survive",
+            "args": [{ "channel": "email", "digest": true, "quietHours": 8 }, { "quietHours": 0 }],
+            "expected": { "channel": "email", "digest": true, "quietHours": 0 },
+            "hidden": false
+          },
+          {
+            "id": "every-field-overridden",
+            "args": [{ "channel": "email", "digest": true, "quietHours": 8 }, { "channel": "push", "digest": false, "quietHours": 0 }],
+            "expected": { "channel": "push", "digest": false, "quietHours": 0 },
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ts.interfaces",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c029",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What a constraint buys you",
+      "conceptIds": [
+        "ts.generics-constraint",
+        "ts.interfaces"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the two jobs a type-parameter constraint performs at once.",
+      "lessonId": "v1-l15",
+      "type": "recall",
+      "promptMarkdown": "In `function pickIds<T extends { id: string }>(items: T[]): string[]`, what does the constraint do for the caller and what does it do for the body?",
+      "answerMarkdown": "For the caller it is a requirement, checked at the call site: pass an array whose elements lack a `string` `id` and the call fails there, where the mistake was made. For the body it is permission: because every `T` is known to have an `id`, reading `item.id` is checked rather than asserted.",
+      "explanationMarkdown": "The alternative, `any[]`, satisfies the body by removing checking altogether and lets the bad call site compile. The constraint keeps both ends honest at the cost of one clause in the signature.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ts.generics-constraint"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c030",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Transfer structural typing to a new situation",
+      "conceptIds": [
+        "ts.structural-typing"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply shape-based compatibility to a case where two unrelated domain types collide.",
+      "lessonId": "v1-l15",
+      "type": "transfer",
+      "promptMarkdown": "`interface UserId { value: string }` and `interface OrderId { value: string }`. A function takes a `UserId`. Does passing an `OrderId` compile, and what would you do if you wanted it rejected?",
+      "answerMarkdown": "It compiles: the two types have identical structure, and TypeScript compares shape rather than declared name. To have it rejected, give the types a distinguishing member — a branded literal such as `readonly kind: 'user'` — so the shapes genuinely differ.",
+      "explanationMarkdown": "This is why identifier mix-ups are not caught for free. Structural typing is a deliberate trade: enormous flexibility for the ordinary case, at the cost of needing an explicit brand when you want two same-shaped things treated as different.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "compiles-needs-brand",
+            "textMarkdown": "It compiles, because the shapes are identical; adding a distinguishing member such as `readonly kind: 'user'` makes them incompatible.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Compatibility follows structure, so a difference has to be introduced into the structure itself."
+          },
+          {
+            "id": "rejected-by-name",
+            "textMarkdown": "It is rejected, because the interfaces have different names and TypeScript tracks the declared type.",
+            "correct": false,
+            "explanationMarkdown": "That describes nominal typing, which is what C# and Java do. TypeScript compares shapes."
+          },
+          {
+            "id": "compiles-unfixable",
+            "textMarkdown": "It compiles, and there is no way to make TypeScript distinguish two identically shaped interfaces.",
+            "correct": false,
+            "explanationMarkdown": "The first half is right, the second is not. Branding with an extra literal member is the standard technique."
+          },
+          {
+            "id": "depends-on-strict",
+            "textMarkdown": "It depends on `strict`: with strict mode on, identically shaped interfaces are treated as distinct.",
+            "correct": false,
+            "explanationMarkdown": "`strict` tightens null handling and inference. It does not switch the language to nominal typing."
+          }
+        ]
+      },
+      "primaryConceptId": "ts.structural-typing"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v1-a05",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "TypeScript placement check",
+      "conceptIds": [
+        "ts.nullability",
+        "ts.narrowing",
+        "ts.unsafe-cast",
+        "ts.structural-typing",
+        "ts.compile-vs-runtime"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items on absence, narrowing, assertions, structure and the compile-time boundary. Explanations appear after you submit.",
+      "chapterId": "v1-ch05",
+      "items": [
+        {
+          "id": "v1-a05-i1",
+          "objectiveIds": [
+            "ts.nullability",
+            "ts.optional-access"
+          ],
+          "critical": true,
+          "promptMarkdown": "With `strict` on, `interface Slot { capacity?: number }`. Which expression gives the capacity, treating a missing capacity as `0` while preserving a stored capacity of `0`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "nullish",
+                "textMarkdown": "`slot.capacity ?? 0`",
+                "correct": true,
+                "explanationMarkdown": "Correct. `??` substitutes only for `null` and `undefined`, so a stored `0` passes through unchanged."
+              },
+              {
+                "id": "logical-or",
+                "textMarkdown": "`slot.capacity || 0`",
+                "correct": false,
+                "explanationMarkdown": "It produces the right number by accident here, but it replaces a stored `0` with the fallback — the same defect that bites the moment the fallback is not `0`."
+              },
+              {
+                "id": "assertion",
+                "textMarkdown": "`slot.capacity!`",
+                "correct": false,
+                "explanationMarkdown": "The non-null assertion silences the compiler without supplying a value. A missing capacity yields `undefined` at runtime."
+              },
+              {
+                "id": "optional-chain",
+                "textMarkdown": "`slot?.capacity`",
+                "correct": false,
+                "explanationMarkdown": "That guards against a missing `slot`, not a missing `capacity`, and still evaluates to `number | undefined`."
+              }
+            ]
+          },
+          "explanationMarkdown": "Two distinct questions hide behind one expression: is the property present, and is its value acceptable. `??` answers the first precisely; `||` conflates it with the second and loses legitimate falsy values."
+        },
+        {
+          "id": "v1-a05-i2",
+          "objectiveIds": [
+            "ts.narrowing",
+            "ts.unions"
+          ],
+          "critical": false,
+          "promptMarkdown": "A value is typed `string | string[]`. Inside `if (typeof value === 'object') { ... }`, what is the narrowed type, and what is the risk in a broader version of this check?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "array-but-null-risk",
+                "textMarkdown": "`string[]` here — but with a nullable union, `typeof null` is also `\"object\"`, so the same check would let `null` into the branch.",
+                "correct": true,
+                "explanationMarkdown": "Correct on both counts. The narrowing is right for this union, and `Array.isArray` is the safer habit precisely because of the `null` case."
+              },
+              {
+                "id": "string-array-safe",
+                "textMarkdown": "`string[]`, and the check is completely safe because arrays are the only object type in the union.",
+                "correct": false,
+                "explanationMarkdown": "The narrowing is right, but calling the pattern safe misses why `Array.isArray` is preferred: add `null` to the union and this check quietly admits it."
+              },
+              {
+                "id": "no-narrowing",
+                "textMarkdown": "No narrowing occurs; `typeof` only narrows primitives, so the type stays `string | string[]`.",
+                "correct": false,
+                "explanationMarkdown": "`typeof x === 'object'` does narrow — it excludes every primitive member of the union."
+              },
+              {
+                "id": "never",
+                "textMarkdown": "`never`, because neither member of the union is an object type.",
+                "correct": false,
+                "explanationMarkdown": "An array is an object. `string[]` survives the check; `string` does not."
+              }
+            ]
+          },
+          "explanationMarkdown": "`typeof null === 'object'` is a long-standing quirk of JavaScript that TypeScript models faithfully, which is why an `Array.isArray` check is the more durable way to express \"is this the array member\"."
+        },
+        {
+          "id": "v1-a05-i3",
+          "objectiveIds": [
+            "ts.unsafe-cast",
+            "ts.compile-vs-runtime"
+          ],
+          "critical": false,
+          "promptMarkdown": "What JavaScript does `const n = value as number;` emit?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "assignment-only",
+                "textMarkdown": "`const n = value;` — the assertion produces no runtime code at all.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Assertions exist only for the checker and are erased along with every other annotation."
+              },
+              {
+                "id": "number-call",
+                "textMarkdown": "`const n = Number(value);`",
+                "correct": false,
+                "explanationMarkdown": "That is a conversion, which an assertion never performs. If you want the conversion you have to write it."
+              },
+              {
+                "id": "runtime-guard",
+                "textMarkdown": "An assignment plus a generated check that throws if `value` is not a number.",
+                "correct": false,
+                "explanationMarkdown": "No guard is generated. TypeScript emits no validation code of any kind."
+              },
+              {
+                "id": "typeof-branch",
+                "textMarkdown": "A `typeof` branch that leaves `n` as `undefined` when the assertion does not hold.",
+                "correct": false,
+                "explanationMarkdown": "Nothing inspects the value. If the assertion is wrong, `n` simply holds the wrong kind of thing."
+              }
+            ]
+          },
+          "explanationMarkdown": "This is the shortest way to see the compile/runtime boundary: an assertion is a message to the type checker, and the checker is not present when the program runs."
+        },
+        {
+          "id": "v1-a05-i4",
+          "objectiveIds": [
+            "ts.structural-typing",
+            "ts.interfaces"
+          ],
+          "critical": true,
+          "promptMarkdown": "`interface Point { x: number; y: number }`. A variable `p` holds `{ x: 1, y: 2, z: 3 }` (inferred, not annotated). Does `const q: Point = p;` compile?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "yes-structural",
+                "textMarkdown": "Yes. `p` has every field `Point` requires, and extra fields do not break structural compatibility.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The excess property check applies to a fresh literal assigned directly to a typed target, which is not what happens here."
+              },
+              {
+                "id": "no-excess",
+                "textMarkdown": "No. `z` is an excess property, and TypeScript rejects excess properties in every assignment.",
+                "correct": false,
+                "explanationMarkdown": "The excess property check is narrower than that: it applies to object literals assigned straight to a typed target, not to assignments between variables."
+              },
+              {
+                "id": "no-nominal",
+                "textMarkdown": "No. `p` was never declared as a `Point`, and TypeScript requires the declared type to match.",
+                "correct": false,
+                "explanationMarkdown": "That is nominal typing. TypeScript compares structure, so a declaration is not required."
+              },
+              {
+                "id": "only-with-cast",
+                "textMarkdown": "Only with `as Point`, because the inferred type is wider than the interface.",
+                "correct": false,
+                "explanationMarkdown": "No assertion is needed. Having more fields than required is ordinary and accepted."
+              }
+            ]
+          },
+          "explanationMarkdown": "A type states the minimum a value must provide. Providing more is normal, and the literal-only excess property check is a targeted exception aimed at catching typos, not a general prohibition."
+        },
+        {
+          "id": "v1-a05-i5",
+          "objectiveIds": [
+            "ts.exhaustiveness",
+            "ts.types"
+          ],
+          "critical": false,
+          "promptMarkdown": "A team wants adding a member to a union to break the build in every function that handles it. Which change achieves that?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "never-assignment",
+                "textMarkdown": "End each switch with a `default` branch that assigns the value to a variable typed `never`.",
+                "correct": true,
+                "explanationMarkdown": "Correct. In a complete switch the value narrows to `never`; a new member restores something for it to be, and that is not assignable."
+              },
+              {
+                "id": "no-default",
+                "textMarkdown": "Remove the `default` branch entirely; TypeScript then requires the switch to be exhaustive.",
+                "correct": false,
+                "explanationMarkdown": "TypeScript does not require exhaustiveness on its own. Without a `default` the function simply falls through and returns `undefined`, which a declared return type may or may not catch."
+              },
+              {
+                "id": "throw-default",
+                "textMarkdown": "Throw an error in the `default` branch so the missing case is impossible to miss.",
+                "correct": false,
+                "explanationMarkdown": "That is a useful runtime backstop, but it still compiles. The team asked for a build failure, which needs the `never` assignment."
+              },
+              {
+                "id": "enum",
+                "textMarkdown": "Convert the union to an `enum`, which the compiler checks exhaustively in every switch.",
+                "correct": false,
+                "explanationMarkdown": "Switching on an enum is not exhaustively checked either; the same `never` technique is what provides the guarantee."
+              }
+            ]
+          },
+          "explanationMarkdown": "Exhaustiveness in TypeScript is opt-in, and the `never` assignment is how you opt in. Without it, an incomplete switch is a perfectly legal program."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}

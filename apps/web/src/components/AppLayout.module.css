@@ -1,0 +1,220 @@
+.shell {
+  min-height: 100%;
+}
+
+/* ---------------------------- desktop sidebar ---------------------------- */
+
+.sidebar {
+  display: none;
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 1.05rem;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+
+.navList {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-2);
+}
+
+.navRule {
+  margin: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.navLink:hover { background: var(--surface-2); }
+
+.navLinkActive {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.icon {
+  width: 1.2em;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.navLinkActive .icon { color: var(--accent); }
+
+.count {
+  margin-left: auto;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.account {
+  margin-top: auto;
+  padding: var(--space-4);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+/* ----------------------------- mobile header ----------------------------- */
+
+.mobileHeader {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.brandMobile { font-weight: 700; }
+
+/* -------------------------------- content -------------------------------- */
+
+.main {
+  padding: var(--space-4);
+  /* Leave room for the bottom bar so content is never hidden behind it. */
+  padding-bottom: calc(var(--bottomnav-h) + var(--space-5));
+  max-width: 1100px;
+  min-width: 0;
+}
+
+.main:focus { outline: none; }
+
+/* ------------------------------- bottom nav ------------------------------ */
+
+.bottomNav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  z-index: 30;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.bottomList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.bottomLink {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--bottomnav-h);
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.72rem;
+  cursor: pointer;
+  position: relative;
+}
+
+.bottomLinkActive {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* A shape change as well as colour, so state is not colour-only. */
+.bottomLinkActive::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 25%;
+  right: 25%;
+  height: 2px;
+  background: var(--accent);
+}
+
+.bottomIcon { font-size: 1.1rem; }
+
+.bottomLabel { line-height: 1.1; }
+
+.moreSheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--bottomnav-h);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  z-index: 29;
+}
+
+.moreList {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2);
+}
+
+.moreLink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  color: var(--text);
+  text-decoration: none;
+  border-radius: var(--radius);
+}
+
+.moreLink:hover { background: var(--surface-2); }
+
+/* ------------------------------- desktop up ------------------------------ */
+
+@media (min-width: 860px) {
+  .shell {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+
+  .mobileHeader,
+  .bottomNav,
+  .moreSheet { display: none; }
+
+  .main {
+    padding: var(--space-6);
+    padding-bottom: var(--space-6);
+  }
+}

@@ -1,0 +1,266 @@
+{
+  "note": "V1 project missions.",
+  "items": [
+    {
+      "kind": "mission",
+      "id": "m01-support-desk-web",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M01 — Support desk ticket interface",
+      "conceptIds": [
+        "react.components",
+        "react.props",
+        "react.responsibility",
+        "react.state-updates",
+        "react.controlled-forms",
+        "react.validation",
+        "react.submission-state",
+        "react.loading-states",
+        "react.empty-states",
+        "react.response-mapping",
+        "react.feature-composition",
+        "react.keys",
+        "ui.stale-response",
+        "a11y.accessible-name",
+        "a11y.keyboard-navigation",
+        "a11y.focus",
+        "html.forms",
+        "html.labels",
+        "css.responsive",
+        "ts.interfaces"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "You are building the first screen of a small internal support desk. A dispatcher opens it, sees the tickets waiting on them, narrows the list to the ones that need attention now, and raises a new ticket while a customer is still on the phone.\n\nThe data layer is already decided. `src/api/types.ts` defines a `TicketApi` interface — `listTickets`, `getTicket`, `createTicket`, `listComments` — and `src/api/mockApi.ts` implements it in memory. The mock behaves like a network rather than like a local array: it is asynchronous, it can be told to be slow, it can be told to fail, and it validates on its own side, so your form check is fast feedback and never the last word.\n\nThat interface is the whole point of the mission. In M02 you replace the mock with an adapter that speaks HTTP to a real backend, and `src/main.tsx` is the only file that should have to change. If a component imports the mock directly, or assumes tickets already exist in an array, the swap stops being a one-line change and becomes a rewrite.\n\nFour features are missing, and `src/App.tsx` currently renders a heading and a sentence saying so:\n\n1. a ticket list showing title, status and customer;\n2. a status filter across all, open, pending and closed;\n3. a create form with validation the user can actually perceive;\n4. a ticket detail view reachable at its own `/tickets/:id` route.\n\nThe hard part is not any one of those. It is that four states — loading, empty, error and loaded — have to stay distinguishable from one another, that a slow response must not leave a stuck spinner or apply a result the user has already moved past, and that a rejected field has to announce itself to a screen reader rather than only turning red.\n\nEvery customer, ticket and comment in this repository is fictional. There are no credentials, no external services and nothing to configure beyond `npm install`.",
+      "projectId": "m01-support-desk-web",
+      "workType": "build",
+      "stack": "react",
+      "release": "v1",
+      "chapterPrerequisiteIds": ["v1-ch07", "v1-ch08"],
+      "starterAssetId": "m01-starter-v1",
+      "starterCommit": null,
+      "setupMarkdown": "## Get it running\n\n```bash\ncd projects/m01-support-desk-web/starter\nnpm install\nnpm run dev        # http://localhost:5174\n```\n\nThe starter needs no environment file to run; `.env.example` only records that M01 runs against the in-memory mock (`VITE_API_MODE=mock`).\n\n## The two check commands are different on purpose\n\n```bash\nnpm run check:baseline   # vitest run tests/baseline.test.tsx\nnpm run check:mission    # vitest run tests/mission.test.tsx\n```\n\n`check:baseline` must **pass** on a fresh checkout, before you write a line of code. It renders the untouched application shell and exercises the mock API directly: seeded tickets list, status filtering does not disturb the store, the mock hands back copies. If it fails, your environment is broken — dependencies, Node version, jsdom — and fixing that comes before the assignment.\n\n`check:mission` must **fail** on a fresh checkout. It describes the four features that do not exist yet, so its failures are the assignment, not a broken setup. Read the failures as the specification: they assert observable behaviour, so several different implementations can satisfy them.\n\nRun `npm run check:all` when you want both suites in one pass.\n\n## What the mission tests look for\n\nThey query the way a user perceives the page, so a few names are fixed by the tests and worth knowing before you start: the list is found by `data-testid=\"ticket-list\"`, the empty state by `data-testid=\"ticket-list-empty\"`, the detail view by `data-testid=\"ticket-detail\"`, the filter by its combobox role and the accessible name \"Filter by status\", the form fields by the labels \"Summary\", \"Customer\" and \"Details\", and the submit control by the button name \"Create ticket\". Everything else — markup, styling, state management — is yours.",
+      "baselineChecks": [
+        "npm install — installs the pinned React 18, Vite 5 and Vitest 2 toolchain in projects/m01-support-desk-web/starter",
+        "npm run check:baseline — the scaffold renders and the mock API lists, filters and copies correctly; this must pass before you start",
+        "npm run dev — the Vite dev server serves the shell on http://localhost:5174"
+      ],
+      "acceptanceCriteria": [
+        "Once the data has arrived, the list shows every seeded ticket exactly once, with its title, status and customer visible.",
+        "Loading, empty, error and loaded are four visibly distinct states; an empty list never looks like a list that is still loading.",
+        "A failed request produces a message announced as an alert rather than an empty page.",
+        "The status filter narrows the visible list and returning to \"all\" restores every ticket, so filtering has not consumed the underlying data.",
+        "The create form rejects an empty or whitespace-only title, marks the field invalid and associates the message with the input so a screen reader reads it with the field.",
+        "A rejected submission creates nothing: the ticket count is unchanged afterwards.",
+        "While a create request is in flight the submit control is disabled, and a double click produces one ticket rather than two.",
+        "After a successful create, the new ticket appears in the list without a manual refresh.",
+        "A ticket opens at its own route and shows the ticket body and its comments.",
+        "Every control can be reached and operated from the keyboard alone, and focus is never lost into nothing.",
+        "At a 360 px viewport width the page does not scroll horizontally."
+      ],
+      "verificationCommands": [
+        "npm run check:baseline",
+        "npm run check:mission",
+        "npm run check:all",
+        "npm run build"
+      ],
+      "checklist": [
+        { "id": "baseline-green", "label": "check:baseline passes and check:mission fails before I change anything" },
+        { "id": "list-renders", "label": "The ticket list renders every seeded ticket with title, status and customer" },
+        { "id": "four-states", "label": "Loading, empty, error and loaded states are each visible and distinct" },
+        { "id": "filter-nondestructive", "label": "The status filter narrows and restores the list without mutating the source data" },
+        { "id": "form-validation", "label": "Validation errors are programmatically associated with their field, not colour alone" },
+        { "id": "submit-guard", "label": "Submitting disables the button so a double click cannot create two tickets" },
+        { "id": "detail-route", "label": "Ticket detail is reachable at its own route and shows the body and comments" },
+        { "id": "keyboard-and-narrow", "label": "Every control works from the keyboard and the page does not scroll sideways at 360 px" },
+        { "id": "mission-green", "label": "check:mission passes and no component imports the mock adapter directly" }
+      ],
+      "hints": [
+        "Sort the state into two piles before you write a component. The tickets come from somewhere else and can be slow, stale or absent; the selected filter and the half-typed form live entirely in the browser and are never absent. Those two kinds of state have different failure modes and do not belong in the same place.",
+        "Validation has two separate jobs: deciding whether a value is acceptable, and telling the user which field is wrong. `src/validation.ts` already does the first as a pure function, which is why it can be tested without rendering. The second job is markup: an invalid input needs `aria-invalid` and an `aria-describedby` pointing at the element that holds the message.",
+        "After a successful create, choose deliberately between refetching the list and inserting the record the adapter returned — and do not mutate your existing array in place, because the returned record carries the server's id and timestamp. For the slow case, remember that a response can arrive after the request that replaced it: keep track of which request you are still waiting for and ignore results from the ones you are not."
+      ],
+      "solutionMarkdown": "A complete implementation lives in `projects/m01-support-desk-web/solution/src/`, and `npm run verify:solution` copies it over a throwaway copy of the starter and runs both check commands, leaving your own work untouched.\n\nThe shape it settles on is worth reading even if you solved it differently.\n\n**One owner for the ticket data.** The list, the create form and the detail view all read the same fetched collection, so the fetch and its status live above them and are handed down. That is what makes the loading, error and empty branches a single decision rather than three components each guessing.\n\n**Request identity, not just a boolean.** A single `loading` flag cannot tell you whether the response now arriving is the one you are still waiting for. The solution keeps track of the latest request and drops results that belong to an older one, which is what stops a slow first response from overwriting a fast second one.\n\n**Validation split in two.** `validation.ts` stays pure and returns a field-keyed error map; the form turns that map into `aria-invalid` and `aria-describedby` wiring and refuses to call the adapter when it is non-empty. The mock still validates on its own side, and the solution handles `TicketValidationError` coming back, because a client-side check is a courtesy and not a guarantee.\n\n**Submission state is its own state.** The button is disabled from the moment the request starts until it settles either way, so the double-click case never reaches the adapter twice.\n\n**Filtering derives, never stores.** The filtered list is computed from the fetched array and the selected status at render time. Nothing is written back, so the fixture data is intact and switching back to \"all\" needs no repair step.\n\n**The adapter boundary holds.** `main.tsx` is still the only file that names the mock. That is the property M02 depends on.",
+      "reflectionRubric": [
+        "I can say which state in this feature is server state and which is interface state, and what goes wrong when the two are stored together.",
+        "I can explain why a validation message needs a programmatic association with its input, not just a visual one.",
+        "I can describe how a slow response can overwrite a newer one, and what I did to prevent it.",
+        "I can explain what the TicketApi interface buys me, and name the change in M02 that it makes cheap.",
+        "I can say what would have to change if two dispatchers had the same ticket list open at once, and which of my assumptions that breaks."
+      ]
+    },
+    {
+      "kind": "mission",
+      "id": "m02-support-desk-api",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M02 — Persistent ticket API",
+      "conceptIds": [
+        "node.route-boundaries",
+        "node.handler-stages",
+        "node.parameter-parsing",
+        "node.separation-of-concerns",
+        "node.runtime-validation",
+        "node.invalid-input",
+        "node.error-contracts",
+        "http.methods",
+        "http.status-codes",
+        "http.validation-response",
+        "http.error-mapping",
+        "ts.compile-vs-runtime",
+        "sql.keys",
+        "sql.relationships",
+        "sql.select",
+        "sql.ordering",
+        "sql.pagination",
+        "sql.duplicates",
+        "sql.migrations",
+        "sql.partial-writes"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "M01 built an interface against a mock that forgot everything when the tab closed. Now you build the backend it was always meant to talk to, and then point M01's adapter at it without touching a single component.\n\nThe starter is a working Fastify server with a Prisma schema, a repeatable seed and a PostgreSQL container of its own. `src/routes/tickets.ts` is where the assignment lives: right now every request to `/tickets` answers `501 Not Implemented`. You implement five endpoints — create a ticket, list tickets, fetch one, list a ticket's comments, add a comment.\n\nThe list endpoint is the one that teaches. Cursor pagination only works over a **total** order, and `createdAt` alone is not total: two tickets seeded in the same millisecond tie, and a cursor that cannot break the tie will either skip a row or serve it twice. The schema already carries an index on `(createdAt, id)` because that pair is the order the endpoint is expected to use.\n\nThe second lesson is where a rule belongs. TypeScript checked your code at compile time and then went home; the JSON body arriving over the network has never met the type system. A runtime schema at the edge of the process is what turns an unknown payload into a value you may trust, and a foreign key in the database is what stops a comment ever pointing at a ticket that is not there. Some rules are worth stating in both places.\n\n**Identity here is training scaffolding, not authentication.** A request names itself with an `x-training-user` header identifying one of two seeded fictional dispatchers. There is no password, no session, no token, and nothing is verified. This starter does not implement authentication and does not claim to. Enforcing ownership is mission M03, and even there the identity stays a fixture.\n\nThe learning database runs in its own container on its own port. It is separate from the DevPractice platform database, and every user, ticket and customer in it is fictional.",
+      "projectId": "m02-support-desk-api",
+      "workType": "extend",
+      "stack": "node",
+      "release": "v1",
+      "chapterPrerequisiteIds": ["v1-ch09", "v1-ch10"],
+      "starterAssetId": "m02-starter-v1",
+      "starterCommit": null,
+      "setupMarkdown": "## Get it running\n\n```bash\ncd projects/m02-support-desk-api/starter\ncp .env.example .env\ndocker compose up -d db          # PostgreSQL on host port 5441\nnpm install\nnpm run db:migrate               # prisma migrate dev --name init\nnpm run db:seed                  # tsx prisma/seed.ts, safe to run twice\nnpm run dev                      # tsx watch src/server.ts, http://localhost:3101\n```\n\n`.env.example` sets `DATABASE_URL` and a separate `TEST_DATABASE_URL`. Keep them different: the integration tests reset the database they point at between cases, and pointing both at the same database will delete your development data mid-run.\n\nThe learning database is a container of its own on port 5441. Nothing in this project can reach the DevPractice platform database.\n\n## The two check commands are different on purpose\n\n```bash\nnpm run check:baseline   # vitest run tests/baseline.test.ts\nnpm run check:mission    # vitest run tests/mission.test.ts\n```\n\n`check:baseline` must **pass** before you write code. It proves the environment: the learning database is reachable, the migration has been applied, the tables exist, the comment-to-ticket foreign key is enforced by PostgreSQL itself, and the server answers its health route. A failure here is infrastructure — container not up, migration not run, wrong `DATABASE_URL` — and none of it is part of the assignment.\n\n`check:mission` must **fail** before you start, because `src/routes/tickets.ts` answers `501` to everything. Those failures are the assignment. They are written against observable HTTP behaviour — status codes, response bodies, row counts — so how you get there is up to you.\n\n`npm run check:all` runs both suites. `npm run build` type-checks with `tsc --noEmit`. If a migration goes wrong, `npm run db:reset` destroys and rebuilds the **learning** database only.\n\n## Response shape the tests expect\n\nSuccess bodies are `{ \"data\": ... }`; a list also carries `{ \"meta\": { \"nextCursor\": ... } }` with `null` on the final page. A rejection is `{ \"error\": { \"code\": ..., \"message\": ..., \"fieldErrors\": { ... } } }`. Match that shape and the assertions will read the parts they are looking for.\n\n## When the API works, connect M01\n\nWrite an adapter implementing M01's `TicketApi` interface over `fetch` and swap it into M01's `src/main.tsx`. If any component has to change to accommodate it, the adapter boundary was leaking — that is a finding about M01, and worth writing down.",
+      "baselineChecks": [
+        "docker compose up -d db — the PostgreSQL 16 learning container reports healthy on host port 5441",
+        "npm run db:migrate — the initial Prisma migration applies to an empty database",
+        "npm run db:seed — the seed loads two fictional dispatchers, five tickets and three comments, and is safe to run twice",
+        "npm run check:baseline — database reachable, tables migrated, comment-to-ticket foreign key enforced, health route answering; this must pass before you start"
+      ],
+      "acceptanceCriteria": [
+        "POST /tickets returns 201 with the stored record, and the stored title has been trimmed.",
+        "POST /tickets rejects an empty or whitespace-only title with 400 and a field-keyed error naming the title.",
+        "A rejected request writes no rows: the ticket count is unchanged after a 400.",
+        "GET /tickets returns an empty page with a null cursor when there are no tickets, rather than an error.",
+        "GET /tickets orders by createdAt and then id, so tickets sharing a timestamp still have one definite position.",
+        "Page size is bounded: a caller asking for 10,000 rows receives a bounded page instead.",
+        "Paging from the first cursor to the last yields every ticket exactly once, with no duplicates and no gaps.",
+        "GET /tickets/:id returns 404 for an unknown id — not a 500 and not a 200 with an empty body.",
+        "POST /tickets/:id/comments on a ticket that does not exist is rejected, and no orphan comment row is written.",
+        "An empty comment body is rejected without writing a row.",
+        "Migrations apply cleanly to an empty database, and running the seed twice produces the same data rather than duplicates."
+      ],
+      "verificationCommands": [
+        "npm run check:baseline",
+        "npm run check:mission",
+        "npm run check:all",
+        "npm run build"
+      ],
+      "checklist": [
+        { "id": "baseline-green", "label": "check:baseline passes and check:mission fails before I change anything" },
+        { "id": "create-validates", "label": "POST /tickets validates at runtime, returns 201 with the stored record, and writes nothing on a 400" },
+        { "id": "total-ordering", "label": "GET /tickets orders by createdAt then id, so the order is total and stable" },
+        { "id": "cursor-pagination", "label": "Cursor paging covers every ticket exactly once and bounds the page size" },
+        { "id": "missing-record", "label": "An unknown ticket id answers 404, not 500 and not an empty 200" },
+        { "id": "comment-integrity", "label": "A comment cannot be attached to a ticket that does not exist, at the route and in the schema" },
+        { "id": "layer-separation", "label": "Parsing and status codes live in the route layer; data rules live with the data" },
+        { "id": "mission-green", "label": "check:mission passes and npm run build type-checks cleanly" },
+        { "id": "m01-connected", "label": "M01 runs against this API through a new adapter, with no component changed" }
+      ],
+      "hints": [
+        "Before writing either layer, decide what belongs to each. Parsing a query string, choosing 400 against 404, and shaping the response body are transport concerns. \"A comment needs a ticket\" and \"a title is not blank\" are rules about the data that survive whether the caller arrived over HTTP or through a script. Putting a rule in the wrong layer is what makes it easy to bypass later.",
+        "A cursor has to encode enough to resume a total order. Ordering by `createdAt` alone is not total — the seed deliberately contains rows close enough together to tie — so the cursor needs the timestamp and the id, and the resume condition needs both branches: rows strictly after that timestamp, plus rows at that exact timestamp with a greater id. The schema's `(createdAt, id)` index exists for precisely this query.",
+        "TypeScript can only check values it saw at compile time. `request.body` arrives as unknown JSON, so parse it with a runtime schema (zod is already a dependency) and let the parse result be the only value you pass onward. Do the same for the query string, and prefer a bounded default for `limit` over trusting whatever number the caller sent."
+      ],
+      "solutionMarkdown": "The reference implementation is `projects/m02-support-desk-api/solution/src/routes/tickets.ts`. Only that one file differs from the starter, which is itself a statement about where this kind of work belongs. Its own README shows the copy-and-verify command.\n\nWhat it does and why:\n\n**Every handler runs the same three stages.** Parse the input with a runtime schema, do the data work, shape the reply. Nothing between the stages, so it stays obvious which failure produces which status code and no partially-validated value ever reaches a query.\n\n**Rejections happen before any write.** The create handler parses first and returns `400` with `fieldErrors` before touching Prisma, which is what makes \"invalid input changes no rows\" true by construction rather than by cleanup.\n\n**The cursor carries both ordering columns.** It base64url-encodes `{ createdAt, id }`, and the resume predicate is the disjunction of \"later timestamp\" and \"same timestamp, greater id\". That is the pair the total order is built on, and it is why paging cannot skip or repeat a tie. A cursor that does not decode is a `400`, not a silent restart from the beginning.\n\n**The page size is clamped, not trusted.** The query schema bounds `limit` and falls back to the default rather than failing the request, so a caller cannot turn a list endpoint into a full table scan.\n\n**One extra row decides `hasMore`.** Taking `limit + 1` rows and slicing back to `limit` answers \"is there another page\" without a second count query.\n\n**A missing record is a `404`, and a missing parent is a rejection.** The comment endpoints check the ticket exists before writing, and the foreign key in `schema.prisma` keeps the rule true even if a future handler forgets — the same rule stated twice, in the place that gives fast feedback and the place that cannot be bypassed.",
+      "reflectionRubric": [
+        "I can explain why ordering by a timestamp alone is not enough for cursor pagination, and what the id adds.",
+        "I can name a rule I enforced in both API validation and a database constraint, and say why that duplication is worth its cost.",
+        "I can describe what a runtime schema checks that TypeScript cannot, and where in a request that check belongs.",
+        "I can say which of my endpoints would break first if a caller sent hostile input, and what protects it.",
+        "I can explain what changed in M01 when it moved from the mock to this API, and what that says about the adapter boundary.",
+        "I can state plainly why the x-training-user header is not authentication and what would be required to make it so."
+      ]
+    },
+    {
+      "kind": "mission",
+      "id": "m03-ownership-defect",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M03 — Ownership defect and regression tests",
+      "conceptIds": [
+        "auth.identity-vs-access",
+        "auth.resource-ownership",
+        "auth.ownership-check",
+        "auth.cross-user-access",
+        "auth.regression-cases",
+        "auth.sensitive-logging",
+        "node.error-contracts",
+        "node.stack-trace-disclosure",
+        "http.status-codes",
+        "http.error-mapping",
+        "sql.select",
+        "sql.pagination",
+        "ops.request-id",
+        "ops.log-hygiene",
+        "debug.minimal-reproduction",
+        "test.boundary-cases",
+        "test.mirroring-implementation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "This time the code already works. The support desk API in this repository starts, serves requests, validates input, pages correctly and passes its baseline checks. It also hands one dispatcher the other dispatcher's data.\n\nTwo fictional dispatchers are seeded: Dana and Ravi. Ravi can ask for one of Dana's tickets by id and receive it, comments and all. The list endpoint is scoped to its caller and always was — which is the tell. Somebody knew the rule existed and applied it in exactly one place.\n\nYour job has three parts: reproduce the defect from a fresh checkout, repair the boundary where it actually belongs, and leave regression tests that would have caught it before release.\n\n**The documented access policy is that an inaccessible resource is reported as 404 Not Found.** Not 403. Confirming that a record exists is itself a disclosure — a 403 tells an attacker the id is real, and ids are guessable. From outside, \"you may not see this\" and \"this does not exist\" must be indistinguishable. Applying that policy consistently is part of the work: one endpoint currently gets this wrong in a different way, and its refusal message reads out the very record it just refused.\n\nA fix that hides a button in the interface does not pass. The interface is a convenience; the API is the boundary. Anything reachable by `curl` is reachable.\n\nThe last part matters as much as the repair. A defect that could survive a full test suite is telling you something about the suite. Tests that only ever act as the owner cannot see a missing ownership check, because for the owner the broken code and the correct code behave identically.\n\nThe intentional defect exists only in this training repository. Both dispatchers, every ticket and every customer are fictional, and the learning database runs in a container of its own.",
+      "projectId": "m03-ownership-defect",
+      "workType": "repair",
+      "stack": "node",
+      "release": "v1",
+      "chapterPrerequisiteIds": ["v1-ch11", "v1-ch12"],
+      "starterAssetId": "m03-starter-v1",
+      "starterCommit": null,
+      "setupMarkdown": "## Get it running\n\n```bash\ncd projects/m03-ownership-defect/starter\ncp .env.example .env\ndocker compose up -d db          # PostgreSQL on host port 5442\nnpm install\nnpm run db:migrate\nnpm run db:seed                  # seeds Dana and Ravi, five tickets, three comments\nnpm run dev\n```\n\nThe server reads `PORT` from your `.env` and falls back to 3102. The copied `.env.example` sets `PORT=3101`, so check which one you are on before you start sending requests — the README's examples assume 3102.\n\nKeep `TEST_DATABASE_URL` different from `DATABASE_URL`. The security tests reset the database they point at.\n\n## Reproduce the defect before you fix it\n\nDana owns `seed-t-1`. Ask for it as Ravi:\n\n```bash\ncurl -s http://localhost:3102/tickets/seed-t-1 -H 'x-training-user: user-ravi'\n```\n\nYou get the ticket. Try the same id against `PATCH /tickets/:id` as Ravi and read the refusal carefully — it is a different failure, and it says more than it should.\n\n## The two check commands are different on purpose\n\n```bash\nnpm run check:baseline   # vitest run tests/baseline.test.ts\nnpm run check:mission    # vitest run tests/security.test.ts\n```\n\n`check:baseline` must **pass** right now. The database is reachable, the migration is applied, the foreign key is enforced and the health route answers. The application is not broken.\n\n`check:mission` must **fail** right now, and here that failure is the defect itself rather than an unwritten feature. If the security suite passes on what you believe is a fresh checkout, you are running against an already-modified `src/routes/tickets.ts`: `git checkout -- src/routes/tickets.ts` and try again.\n\n`npm run check:all` runs both. `npm run build` type-checks. `npm run db:reset` rebuilds the **learning** database only.\n\n## What you write up\n\nAlongside the code: a short explanation in your own words of what was reachable and by whom, where the access-control boundary belongs and why there rather than higher up, and which regression test would have caught this before release — and why it did not exist.",
+      "baselineChecks": [
+        "docker compose up -d db — the PostgreSQL 16 learning container reports healthy on host port 5442",
+        "npm run db:migrate && npm run db:seed — the schema applies and the two fictional dispatchers and their tickets load",
+        "npm run check:baseline — database reachable, tables migrated, foreign key enforced, health route answering; this passes now and must still pass after your repair",
+        "curl -s http://localhost:3102/tickets/seed-t-1 -H 'x-training-user: user-ravi' — reproduces the defect: Ravi receives Dana's ticket"
+      ],
+      "acceptanceCriteria": [
+        "A dispatcher requesting another dispatcher's ticket by id does not receive it.",
+        "A dispatcher cannot change the status of another dispatcher's ticket.",
+        "A dispatcher can neither read nor write comments on another dispatcher's ticket, and a refused comment writes no row.",
+        "List results stay scoped to their caller, including when a cursor from another dispatcher's page is supplied.",
+        "Every inaccessible resource answers 404, matching the documented policy — a refusal is indistinguishable from an id that was never real.",
+        "No response body carries foreign data, including inside error messages: no other dispatcher's name, no customer name, no ticket content.",
+        "The owner's own reads, edits and comments all still work exactly as before.",
+        "Logs still carry a request id and contain no ticket bodies or customer names.",
+        "Regression tests cover every affected endpoint, written from the point of view of the dispatcher who should be refused.",
+        "The repair lives in the API; disabling a control in an interface would not satisfy any of these."
+      ],
+      "verificationCommands": [
+        "npm run check:baseline",
+        "npm run check:mission",
+        "npm run check:all",
+        "npm run build"
+      ],
+      "checklist": [
+        { "id": "reproduced", "label": "I reproduced the defect on a fresh checkout before changing any code" },
+        { "id": "read-scoped", "label": "Fetching another dispatcher's ticket by id no longer succeeds" },
+        { "id": "write-scoped", "label": "Editing another dispatcher's ticket no longer succeeds" },
+        { "id": "comments-scoped", "label": "Comments on another dispatcher's ticket can be neither read nor written" },
+        { "id": "list-and-cursor-scoped", "label": "List queries stay owner-scoped even with a crafted cursor" },
+        { "id": "consistent-404", "label": "Every refusal is a 404 and none of them names the record it refused" },
+        { "id": "owner-unaffected", "label": "The owner's own operations and the baseline checks still pass" },
+        { "id": "regression-tests", "label": "I added regression tests written as the refused user, covering every affected endpoint" },
+        { "id": "writeup", "label": "I wrote up what was reachable, where the boundary belongs, and why the test was missing" }
+      ],
+      "hints": [
+        "Read the five endpoints against each other rather than one at a time. One of them already scopes its query by owner and the others do not, which tells you the rule was known and applied inconsistently. Ask what each handler assumes about who is asking, and where that assumption came from.",
+        "\"Fetch the row, then check who owns it\" and \"fetch only rows this caller may see\" behave identically for the owner and very differently for everyone else. The second is stronger because it cannot be forgotten halfway: a query that is incapable of returning a foreign row cannot leak one, and there is no window between the fetch and the check. Notice that the same reasoning applies to the cursor, which is caller-supplied input like any other.",
+        "Then reread every refusal path out loud. The status code is the first disclosure — a 403 confirms the id is real, so the documented policy is 404 everywhere — and the message body is the second: the edit endpoint currently interpolates the real owner's display name and the customer name into its refusal, handing over the exact data the check existed to protect. A shared helper that finds an owned ticket or answers a bare 404 removes both problems in one place, which is what the reference solution does with `findOwnedTicket`."
+      ],
+      "solutionMarkdown": "The reference repair is `projects/m03-ownership-defect/solution/src/routes/tickets.ts`, which replaces the starter file of the same name. Its README gives the copy-and-verify command. The diff is deliberately small — no permissions library, no framework changes.\n\n**The defect.** `GET /tickets/:id` and both comment endpoints looked up the ticket by id alone and returned it. Nothing about the caller entered the query. The list endpoint had always filtered by `ownerId`, so the rule existed in the codebase; it simply was not applied everywhere. `PATCH /tickets/:id` did check ownership, but refused with `403` and a message naming the real owner and the customer — the wrong status code by the documented policy, and a disclosure in the body on top of it.\n\n**Why the ownership check moves into the query.** Fetching first and then comparing owners leaves the decision to a line of code that a future handler can forget, and it means the foreign row was already in memory when the refusal was written — which is exactly how it ended up in the message. Making ownership part of the `where` clause means the row never arrives. The solution wraps that in a small `findOwnedTicket` helper so every endpoint asks the same question the same way, and adding a sixth endpoint means reaching for the helper rather than remembering the rule.\n\n**Why everything answers 404.** Under the documented policy, refused and non-existent are indistinguishable from outside. `403` on a real id and `404` on a fake one is an existence oracle over guessable ids. Every refusal is now the same bare `404` with the same message, carrying nothing from the record.\n\n**Why the cursor is scoped too.** A cursor is caller-supplied input. Handing back rows that resume from someone else's page would reopen the same hole through a different door, so the owner filter is applied to the paged query and not only to the unpaged one.\n\n**Why the tests were the real bug.** The original suite exercised the endpoints as their owner, and for the owner the broken code and the fixed code return identical responses. A cross-user case is the only test that can see this class of defect, which is why the regression tests are written from the refused dispatcher's point of view and assert on the status code, the absence of foreign data in the body, and the row count after a refused write.",
+      "reflectionRubric": [
+        "I can state what was reachable and by whom, in a sentence a non-engineer would understand.",
+        "I can explain why an ownership check inside the query is stronger than a check after the fetch.",
+        "I can justify answering 404 rather than 403 for a resource the caller may not see, and name what a 403 discloses.",
+        "I can point at the difference between identity and access, and say which one the x-training-user header supplies.",
+        "I can describe the regression test that would have caught this before release, and explain why a suite written from the owner's point of view never could.",
+        "I can name what a refusal message and a log line must not contain, and why an error is an easy place to leak the thing being protected."
+      ]
+    }
+  ]
+}

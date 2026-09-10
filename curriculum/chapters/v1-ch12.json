@@ -1,0 +1,1215 @@
+{
+  "note": "Chapter 12 — Verification and operation (L34 meaningful testing, L35 logs and configuration, L36 shipping and maintenance). Deployment and logging cannot be executed in the browser sandbox, so they are assessed by reading, judgement and rubric; the runnable function tasks are the two genuinely pure pieces of logic — an SLA state machine whose boundaries the learner must reason about, and a required-configuration check that must not use truthiness. prerequisiteIds carry CONCEPT ids, which is what the validator resolves them against.",
+  "items": [
+    {
+      "kind": "chapter",
+      "id": "v1-ch12",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Verification and operation",
+      "conceptIds": [
+        "test.boundary-cases",
+        "test.testable-functions",
+        "test.mirroring-implementation",
+        "test.component-integration",
+        "ops.request-id",
+        "ops.configuration",
+        "ops.log-hygiene",
+        "ops.deployment-order",
+        "ops.failed-deployment",
+        "ops.rollback"
+      ],
+      "prerequisiteIds": [
+        "js.functions",
+        "sql.migrations"
+      ],
+      "bodyMarkdown": "Ashgrove Deliveries has a working application. This chapter is about the difference between working and *knowing* it works — and about what happens after it is running somewhere other than a laptop.\n\nTesting first, and specifically the difference between a test that could fail and a test that cannot. A test written by reading the implementation line by line and asserting each line happened will pass against a rewrite that is completely wrong, because it only ever checked that the code is the code. A test worth having states an expectation about *behaviour* that was decided before the implementation existed, and chooses inputs at the edges — the empty list, the exact boundary, the value one past it — where defects actually live.\n\nThen the two things you will wish you had at three in the morning. **Configuration** that comes from the environment rather than from a literal in the source, validated once at start-up so a missing setting stops the process immediately instead of failing on the one code path that reads it. And **logs** that let you follow a single request end to end through a shared identifier, without recording anything that must stay secret.\n\nFinally, shipping. A deploy is an ordered sequence — checks, then a schema change that is compatible with both versions, then the release — and rollback is a plan you make before you need it, because the one thing a rollback cannot undo is a migration that already dropped a column.",
+      "trackId": "v1-track",
+      "lessonIds": [
+        "v1-l34",
+        "v1-l35",
+        "v1-l36"
+      ],
+      "assessmentId": "v1-a12",
+      "objectiveIds": [
+        "test.boundary-cases",
+        "test.testable-functions",
+        "test.mirroring-implementation",
+        "test.component-integration",
+        "ops.request-id",
+        "ops.configuration",
+        "ops.log-hygiene",
+        "ops.deployment-order",
+        "ops.failed-deployment",
+        "ops.rollback"
+      ],
+      "missionIds": [],
+      "sortOrder": 11
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l34",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Tests that could actually fail",
+      "conceptIds": [
+        "test.boundary-cases",
+        "test.testable-functions",
+        "test.mirroring-implementation",
+        "test.component-integration"
+      ],
+      "prerequisiteIds": [
+        "js.functions",
+        "js.boundaries"
+      ],
+      "bodyMarkdown": "A test is an experiment with a predicted outcome. Its value is entirely in whether it could come out the other way. A test that cannot fail — whatever the implementation does — is a cost with no benefit, and a green suite full of them is worse than no suite, because it is read as evidence.\n\nThe commonest way to write one is to **mirror the implementation**. You open the function, walk down it, and assert that each step happened: this helper was called, then that one, with these arguments. The test now encodes *how* the code works. Rewrite the function correctly and the test fails; rewrite it incorrectly in the same shape and the test passes. It measures similarity to the current code, which is a property nobody needs verified.\n\nThe alternative is to assert on **observable behaviour**: for this input, that output; after this action, this visible state. State the expectation in the language of the requirement — *a delivery two hours past its window is marked late* — and any implementation that satisfies the requirement passes, while any that does not, fails.\n\nWhich inputs? Defects cluster at **boundaries**. For a rule expressed as *at or after four hours*, the interesting inputs are 3, 4 and 5 — not 1 and 100, which are the same case twice. Add the structural edges: the empty collection, a single element, a duplicate, and any value that is falsy but legitimate — `0`, `''`, `false` — because a truthiness check will treat those as missing. If you can only write three cases, write the boundary, the boundary minus one, and the empty input.\n\nAll of this is far easier when the logic is **testable by construction**. A pure function of its arguments needs no setup: no server, no database, no clock. When code depends on the current time, pass the time in rather than reading it inside, and the untestable becomes a table of cases. The rule of thumb is to keep decisions pure and push the messy world — input and output, time, randomness — to the edges where a thin layer can be checked separately.\n\nSome things genuinely cannot be checked that way. A feature that spans a form, a request and a rendered list needs a **component integration test** that drives it the way a user does: fill the field, submit, assert the row appears. Those cost more to write and run, so use them for the paths that matter and let the fast unit tests cover the combinations. What an integration test must not do is assert on internals — reach into component state or a mock's call list — because that is mirroring the implementation again, just more expensively.",
+      "chapterId": "v1-ch12",
+      "sortOrder": 0,
+      "objectives": [
+        "Recognise a test that mirrors the implementation and could not fail against a wrong rewrite.",
+        "Choose boundary and structural edge cases rather than arbitrary values.",
+        "Shape logic as pure functions so it can be verified without a server or a clock."
+      ],
+      "estimatedMinutes": 17,
+      "workedExampleMarkdown": "The requirement: *a delivery is late once it is at least 30 minutes past the end of its window; between 15 and 30 minutes past it is at risk; before that it is on time.*\n\nAn untestable implementation and a testable one:\n\n```js\n// Hard to test: reads the clock itself, so the result depends on when you run it.\nfunction deliveryState(delivery) {\n  const minutesLate = (Date.now() - delivery.windowEndsAt) / 60000;\n  ...\n}\n\n// Testable: the time is an argument, so a test states it.\nfunction deliveryState(windowEndsAt, now) {\n  const minutesLate = (now - windowEndsAt) / 60000;\n  if (minutesLate >= 30) return 'late';\n  if (minutesLate >= 15) return 'at-risk';\n  return 'on-time';\n}\n```\n\n**A test that mirrors the implementation:**\n\n```js\ntest('deliveryState computes minutes late', () => {\n  const spy = vi.spyOn(Math, 'floor');\n  deliveryState(0, 1_800_000);\n  expect(spy).toHaveBeenCalled();          // asserts HOW, not WHAT\n});\n```\n\nThis passes whatever the function returns, and fails if someone removes a rounding step that was never part of the requirement. It cannot detect a wrong answer.\n\n**A test that could fail:**\n\n```js\nconst MINUTE = 60_000;\nconst windowEnd = 1_000_000;\n\ntest.each([\n  [0,   'on-time'],    // exactly on the window end\n  [14,  'on-time'],    // one below the at-risk boundary\n  [15,  'at-risk'],    // exactly the at-risk boundary\n  [29,  'at-risk'],    // one below the late boundary\n  [30,  'late'],       // exactly the late boundary\n  [120, 'late'],       // well past, to confirm nothing wraps around\n  [-5,  'on-time'],    // early: before the window even ends\n])('%i minutes past the window is %s', (minutes, expected) => {\n  expect(deliveryState(windowEnd, windowEnd + minutes * MINUTE)).toBe(expected);\n});\n```\n\nEvery row is chosen, not sprinkled. `14` and `15` sit either side of one boundary and `29` and `30` either side of the other, so an implementation using `>` instead of `>=` fails on exactly two rows and the failure message names the boundary. `-5` covers a case the requirement never mentioned, which is precisely why it is worth pinning down.\n\n**And the integration test for the part that is not pure:**\n\n```js\ntest('marking a delivery late shows it in the exceptions list', async () => {\n  render(<DeliveryBoard deliveries={[{ id: 'D-1', state: 'late' }]} />);\n\n  await userEvent.click(screen.getByRole('tab', { name: 'Exceptions' }));\n\n  expect(screen.getByRole('row', { name: /D-1/ })).toBeVisible();\n});\n```\n\nIt asserts what a user can see — a row, reachable by its accessible name — and says nothing about hooks, state or which function was called. Rewrite the component entirely and the test still means the same thing.",
+      "commonMistakes": [
+        "Asserting that a helper was called with certain arguments, so the test verifies the shape of the implementation rather than the result.",
+        "Writing the test after the code by reading the code, which reproduces any misunderstanding the implementation already contains.",
+        "Picking round numbers like 1 and 100 that both sit far from the boundary, and testing the same case twice.",
+        "Reading the clock inside the function under test, so a test either sleeps or is flaky near midnight.",
+        "Skipping the empty-collection case because it feels trivial, when it is the input most implementations get wrong.",
+        "Using a truthiness check and never testing 0, '' or false, so a legitimate falsy value is treated as missing.",
+        "Reaching into component state from an integration test instead of asserting what is rendered."
+      ],
+      "summaryMarkdown": "A test earns its place only if a wrong implementation would make it fail. Assert observable behaviour rather than the steps taken, and choose inputs at the boundaries — the value at the edge, the one either side, the empty collection, and legitimate falsy values. Make logic testable by passing in the clock and anything else from the outside world, so the decision is a pure function and its tests are a table. Use integration tests for whole user paths, and keep them talking about what is rendered rather than what was called.",
+      "exerciseIds": [
+        "v1-e100",
+        "v1-e101",
+        "v1-e102"
+      ],
+      "reviewCardIds": [
+        "v1-c067",
+        "v1-c068"
+      ],
+      "references": [
+        {
+          "label": "Testing Library: Guiding principles",
+          "url": "https://testing-library.com/docs/guiding-principles/"
+        },
+        {
+          "label": "MDN: Date.now()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/now"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e100",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Review the test that mirrors its implementation",
+      "conceptIds": [
+        "test.mirroring-implementation",
+        "test.testable-functions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read an implementation and its test together, and decide what the test would notice if the implementation were wrong.",
+      "lessonId": "v1-l34",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 10,
+      "promptMarkdown": "Ashgrove computes a delivery surcharge.\n\n```js\nfunction surcharge(order, rates) {\n  const base = rates.lookup(order.zone);\n  const weighted = base * order.weightKg;\n  return round2(weighted);\n}\n```\n\nThe accompanying test:\n\n```js\ntest('surcharge applies the zone rate', () => {\n  const rates = { lookup: vi.fn().mockReturnValue(2) };\n  const order = { zone: 'B', weightKg: 3 };\n\n  surcharge(order, rates);\n\n  expect(rates.lookup).toHaveBeenCalledWith('B');\n  expect(rates.lookup).toHaveBeenCalledTimes(1);\n});\n```\n\nA colleague rewrites the body as `return round2(rates.lookup(order.zone) + order.weightKg);` — addition instead of multiplication. What does the test do, and what should it assert instead?",
+      "hints": [
+        "Read the assertions and ask which values they constrain. Does any of them mention the number the function gives back?",
+        "The test never inspects the return value at all, so any body that calls `rates.lookup(order.zone)` once passes — including the one that adds instead of multiplying.",
+        "Assert the result: `expect(surcharge({ zone: 'B', weightKg: 3 }, rates)).toBe(6)`, and add rows for a zero weight and a fractional weight that exercises the rounding."
+      ],
+      "solution": {
+        "modelAnswer": "The test still passes. It asserts only that the lookup was called with 'B' exactly once, which the broken version also does, so it cannot detect the wrong arithmetic. It should assert the returned number for chosen inputs — including zero weight and a case that forces rounding.",
+        "explanationMarkdown": "The two assertions describe the implementation's *interactions*, and the rewrite preserves those interactions exactly while changing the answer from 6 to 5. The test measured how the code is written, not what it computes, so it goes green on a defect that would appear on every invoice.\n\nInteraction assertions are not always wrong. They are the right tool when the interaction *is* the requirement — that an email is sent once rather than twice, that a payment is not charged again on retry. Here the requirement is an amount of money, and the amount is exactly what went unchecked.\n\nA test that could fail:\n\n```js\nconst rates = { lookup: () => 2 };\n\ntest.each([\n  [{ zone: 'B', weightKg: 3 },    6],\n  [{ zone: 'B', weightKg: 0 },    0],      // zero weight: addition would return 2 here\n  [{ zone: 'B', weightKg: 1.005 }, 2.01],  // forces the rounding to matter\n])('surcharge(%o) is %d', (order, expected) => {\n  expect(surcharge(order, rates)).toBe(expected);\n});\n```\n\nThe zero-weight row is the interesting one: multiplication gives 0 and addition gives 2, so it separates the two implementations on its own. A plain stub replaces the mock, because nothing needs to be recorded once the answer is being checked."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "still-passes",
+            "textMarkdown": "It still passes — the assertions only describe the call to `rates.lookup`, which the rewrite makes identically. It should assert the returned amount for chosen inputs, including a zero weight.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Interaction assertions cannot detect a wrong result when the interactions are unchanged."
+          },
+          {
+            "id": "fails",
+            "textMarkdown": "It fails, because `toHaveBeenCalledTimes(1)` no longer holds once the expression is restructured.",
+            "correct": false,
+            "explanationMarkdown": "The rewrite still calls `rates.lookup(order.zone)` exactly once; only the operator between the two values changed."
+          },
+          {
+            "id": "mock-problem",
+            "textMarkdown": "The real problem is using a mock at all; the test should use the real rates table.",
+            "correct": false,
+            "explanationMarkdown": "A stub for the rate table is reasonable and keeps the test fast and deterministic. The defect is that nothing asserts the number that comes back."
+          },
+          {
+            "id": "needs-integration",
+            "textMarkdown": "Pure functions like this cannot be tested meaningfully in isolation; it needs an end-to-end test through the checkout page.",
+            "correct": false,
+            "explanationMarkdown": "This is the easiest kind of code to test meaningfully — inputs in, number out. An end-to-end test would be slower and would still need to assert the amount."
+          }
+        ]
+      },
+      "primaryConceptId": "test.mirroring-implementation",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e101",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Implement a rule whose boundaries are the whole difficulty",
+      "conceptIds": [
+        "test.boundary-cases",
+        "test.testable-functions"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The cases below are the boundaries a careful engineer would have written before the implementation. Getting them all green is the exercise.",
+      "lessonId": "v1-l34",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "Ashgrove tracks how a delivery is doing against its promised service level.\n\nImplement `slaState(hoursOpen, slaHours)`, returning one of three strings:\n\n- `'breached'` when `hoursOpen` is **at or beyond** `slaHours`;\n- `'due-soon'` when it is within the last two hours before that — at or beyond `slaHours - 2`, but not yet breached;\n- `'ok'` otherwise.\n\nBoth arguments are whole numbers of hours. Note the consequences of the rule as stated rather than as you might expect it: with a two-hour service level, a delivery opened moments ago is already `'due-soon'`, because `0` is at or beyond `slaHours - 2`. That is intended — say so in the code by writing the comparisons exactly as specified.",
+      "hints": [
+        "Three outcomes, so two decisions. Which one has to be asked first?",
+        "Test for `'breached'` before `'due-soon'`: every breached delivery is also at or beyond `slaHours - 2`, so asking the warning question first would swallow every breach.",
+        "`if (hoursOpen >= slaHours) return 'breached';` then `if (hoursOpen >= slaHours - 2) return 'due-soon';` then `return 'ok';` — note both comparisons are `>=`, because the rule says *at or beyond*."
+      ],
+      "solution": {
+        "code": "function slaState(hoursOpen, slaHours) {\n  if (hoursOpen >= slaHours) return 'breached';\n  if (hoursOpen >= slaHours - 2) return 'due-soon';\n  return 'ok';\n}",
+        "explanationMarkdown": "Two things decide whether this is right, and both are invisible without boundary cases.\n\n**Order.** The two conditions overlap: anything at or beyond `slaHours` is also at or beyond `slaHours - 2`. Asking the warning question first would label every breached delivery `'due-soon'`, and the case that reveals it is `slaHours` exactly — a value a casual test set of `1` and `100` would never contain.\n\n**Inclusivity.** The rule says *at or beyond*, so both comparisons are `>=`. Swapping either one for `>` shifts the boundary by exactly one hour, which is wrong for precisely one input each: `hoursOpen === slaHours` and `hoursOpen === slaHours - 2`. Those two cases are the entire difference between a correct implementation and a plausible wrong one, which is why they are in the suite and why an arbitrary middle value is not.\n\nThe short-service-level cases are worth noticing too. With `slaHours` of `1`, `slaHours - 2` is `-1`, so a brand-new delivery reports `'due-soon'` — a consequence of the rule rather than a bug in the code. Pinning it down in a test is how a surprising-but-intended behaviour stops being reintroduced as a 'fix'."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "slaState",
+        "starterCode": "function slaState(hoursOpen, slaHours) {\n  // Ask the two questions in the order that makes them mean what the rule says.\n  return 'ok';\n}",
+        "assertInputUnchanged": false,
+        "cases": [
+          {
+            "id": "brand-new-delivery",
+            "args": [
+              0,
+              8
+            ],
+            "expected": "ok",
+            "hidden": false
+          },
+          {
+            "id": "one-below-warning-boundary",
+            "args": [
+              5,
+              8
+            ],
+            "expected": "ok",
+            "hidden": false
+          },
+          {
+            "id": "exactly-the-warning-boundary",
+            "args": [
+              6,
+              8
+            ],
+            "expected": "due-soon",
+            "hidden": false
+          },
+          {
+            "id": "one-below-the-breach",
+            "args": [
+              7,
+              8
+            ],
+            "expected": "due-soon",
+            "hidden": false
+          },
+          {
+            "id": "exactly-the-breach-boundary",
+            "args": [
+              8,
+              8
+            ],
+            "expected": "breached",
+            "hidden": false
+          },
+          {
+            "id": "well-past-the-breach",
+            "args": [
+              40,
+              8
+            ],
+            "expected": "breached",
+            "hidden": false
+          },
+          {
+            "id": "short-sla-starts-due-soon",
+            "args": [
+              0,
+              1
+            ],
+            "expected": "due-soon",
+            "hidden": true
+          },
+          {
+            "id": "short-sla-breaches-immediately",
+            "args": [
+              1,
+              1
+            ],
+            "expected": "breached",
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "test.boundary-cases",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e102",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Choose the cases for a feature that spans the stack",
+      "conceptIds": [
+        "test.component-integration",
+        "test.boundary-cases"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Argue for a test plan: which checks are cheap and pure, which need the whole feature, and which cases you would insist on.",
+      "lessonId": "v1-l34",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 13,
+      "promptMarkdown": "Ashgrove is adding a feature: a dispatcher types a postcode into a form, the application requests `/routes?postcode=...`, and the matching routes are listed. A route counts as matching when its coverage radius includes the postcode, and the list shows a message when nothing matches.\n\nA colleague proposes one end-to-end test: type a postcode, click search, assert a row appears.\n\nDescribe the test plan you would write instead. Say which parts belong in fast unit tests and which genuinely need a component integration test, and name the specific input cases you would insist on and why.",
+      "hints": [
+        "Split the feature into the decision (does this route cover this postcode?) and the assembly (form, request, list, empty message). They fail in different ways and cost very different amounts to test.",
+        "The matching rule is pure, so its edges are cheap: a postcode exactly on the radius boundary, just inside, just outside, and a route with a zero radius. One end-to-end test can only afford one of those.",
+        "Keep integration tests for the paths that only exist when the parts are joined: a successful search rendering rows, and — the case the proposal omits — a search with no matches rendering the empty message rather than a blank area or a stale previous result."
+      ],
+      "solution": {
+        "modelAnswer": "I would test the matching rule as a pure function with a table of cases: a postcode well inside the radius, one exactly on the boundary, one exactly one unit outside, a route with a radius of zero, and an unknown postcode that cannot be resolved. Those are cheap, run in milliseconds, and are where the arithmetic actually goes wrong. The single end-to-end test cannot afford them: each one would be a form fill and a network round trip, and a failure would report 'no row appeared' rather than 'the boundary is off by one'. Integration tests then cover what only exists once the parts are joined: a successful search rendering a row for each match, a search with no matches rendering the empty message rather than an empty area or the previous results, and the request being sent with the postcode the dispatcher typed. I would also insist on the empty-result case at both levels, because it is the one the proposal omits and the one a naive implementation gets wrong by showing stale rows. The integration tests should assert what is rendered — a row found by its accessible name, the message text — not component state or which functions were called.",
+        "explanationMarkdown": "The reasoning being assessed is about *placement*: putting each check at the cheapest level that can still detect the defect it targets.\n\nThe matching rule is arithmetic. Its failure modes are off-by-one at the radius boundary and mishandling zero, and both are detectable from a pure function in microseconds. Driving them through a form and a network call makes each case hundreds of times more expensive and makes the failure message far less specific, so in practice only one of them ever gets written.\n\nThe assembly has its own failure modes that no unit test sees: the query parameter is named wrongly, the response is mapped to the wrong field, the empty state is never rendered. Those need the parts joined, and they are worth the cost — for a small number of paths.\n\nThe empty-result case is the one to insist on. A list that keeps showing the previous results when the new search matched nothing is a real and common defect, it looks fine to the developer who only ever searches for something that exists, and it is invisible to the proposed test."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Separates the pure matching rule from the assembled feature and assigns each to a different level of test.",
+          "Names concrete boundary cases for the matching rule, such as exactly on the radius, one unit outside, and a zero radius.",
+          "Gives a reason for the split: cost, speed, or the specificity of the failure message when a case breaks.",
+          "Identifies at least one path that only an integration test can cover, such as the request being sent correctly or the empty state rendering.",
+          "Insists on the no-match case and explains what goes wrong without it, for example stale results remaining on screen.",
+          "States that integration assertions should be about rendered output rather than internal state or mock call lists."
+        ],
+        "modelAnswerMarkdown": "I would split the feature in two.\n\n**Pure unit tests for the matching rule.** Whether a route covers a postcode is arithmetic, so I would test it as a table: a postcode comfortably inside the radius, one exactly on the radius, one exactly one unit outside, a route with a radius of zero, and a postcode that cannot be resolved at all. Those five run in milliseconds, and when one fails it names the boundary directly. Pushed through the interface instead, each case costs a form fill and a request, and the failure reads only 'expected a row'.\n\n**Component integration tests for the assembly.** Three paths need the parts joined: a search that matches renders one row per route; a search that matches nothing renders the empty message; and the request goes out with the postcode the dispatcher typed, under the parameter name the server expects. None of those can fail in a unit test, and all of them have failed in real projects.\n\nThe case I would insist on is the empty result. It is missing from the proposal, and the natural implementation gets it wrong in a specific way: the previous results stay on screen because nothing clears them, so a dispatcher reads a stale list as an answer. Testing it also forces the distinction between *no matches* and *not searched yet*, which the interface has to render differently.\n\nAll integration assertions should be about what a dispatcher can see — a row located by its accessible name, the message text — never about component state or which functions were called. Otherwise the integration test becomes an expensive way to mirror the implementation."
+      },
+      "primaryConceptId": "test.component-integration",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c067",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "When is a test worthless?",
+      "conceptIds": [
+        "test.mirroring-implementation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the property that makes a test worth keeping.",
+      "lessonId": "v1-l34",
+      "type": "recall",
+      "promptMarkdown": "What single question decides whether a test is worth keeping, and what does a test that mirrors its implementation actually measure?",
+      "answerMarkdown": "Would this test fail if the implementation were wrong? A mirroring test measures how closely the code resembles the code — it asserts which helpers were called and in what order, so a wrong rewrite in the same shape still passes, while a correct rewrite in a different shape fails.",
+      "explanationMarkdown": "Assert what the code produces, not the steps it took. Interaction assertions belong only where the interaction itself is the requirement, such as sending exactly one email.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "test.mirroring-implementation"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c068",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Pick the three cases",
+      "conceptIds": [
+        "test.boundary-cases"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the boundary rule to a new specification.",
+      "lessonId": "v1-l34",
+      "type": "transfer",
+      "promptMarkdown": "A rule states: *a parcel qualifies for free delivery when the basket total is 25 or more.* You may write only three test cases. Which values do you choose, and which value would you never choose?",
+      "answerMarkdown": "`24.99`, `25` and `25.01` — or `24`, `25`, `26` for whole numbers. The boundary itself plus one value either side is what separates `>` from `>=` and catches an off-by-one. You would never choose something like `100`: it is the same case as `26` and proves nothing extra. Adding `0` for an empty basket is the fourth case worth having.",
+      "explanationMarkdown": "Two values far from the boundary test the same thing twice. Everything interesting happens where the condition changes its mind.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "test.boundary-cases"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l35",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Logs and configuration",
+      "conceptIds": [
+        "ops.request-id",
+        "ops.configuration",
+        "ops.log-hygiene"
+      ],
+      "prerequisiteIds": [
+        "auth.sensitive-logging",
+        "node.handler-stages"
+      ],
+      "bodyMarkdown": "Once the application runs somewhere you cannot attach a debugger, two things decide how quickly a problem gets solved: whether you can find the evidence, and whether the environment was configured correctly in the first place.\n\n**Configuration** is every value that differs between a laptop, a staging environment and production: the database URL, the port, the log level, a feature flag, an external service key. None of it belongs in the source. The rule that matters most is not *use environment variables* but **validate once, at start-up**. Read the environment in a single module, check it against a schema, and refuse to start when something required is missing. A process that dies immediately with `DATABASE_URL is required` is a five-minute problem; a process that starts happily and fails four hours later on the one endpoint that reads the setting is a very long evening.\n\nValidation has a trap of its own. `const port = env.PORT || 3000` looks harmless and silently ignores `PORT=0`; `const debug = env.DEBUG || true` is worse, because it can never be false. Check for absence explicitly — `env.PORT ?? 3000`, or better, parse and validate the string — so a legitimate `0`, `''` or `false` survives.\n\nSecrets are configuration too, with one extra rule: they enter through the environment or a secret store, never through the repository, and they are never printed. A start-up line that dumps the whole config object to prove it loaded is how a database password reaches the log store.\n\n**Logs** are the other half. A production log is not a debugger; it is a stream of independent lines from many concurrent requests, interleaved. What makes it usable is a **request id**: generate one at the edge of every request (or accept an incoming one from a trusted proxy), attach it to every line that request produces, and return it to the client in the error response. Then a customer who reports 'it failed at 14:32 and said reference `7f3c9a`' has just handed you the exact filter to run, and the whole story of that request — including its database timings and the exception — comes back in order.\n\nWhat goes in a line: the request id, the route, the outcome, a duration, and identifiers for the records involved. What stays out: credentials, tokens, personal data, and the full body of anything. Log the account id, not the account. And log an error *once*, where you have the most context — catching, logging, rethrowing, and logging again at each layer turns one incident into five entries that look like five failures.\n\nA final point about levels. `info` is the story of what the system did; `warn` is something recoverable that a human should eventually look at; `error` is a failure that needs attention. If everything is logged at `error`, nothing is — and if the safety of a line depends on `debug` staying switched off, it is not safe, because debug is exactly what gets switched on during an incident.",
+      "chapterId": "v1-ch12",
+      "sortOrder": 1,
+      "objectives": [
+        "Load and validate configuration once at start-up so a missing value stops the process immediately.",
+        "Correlate every log line of one request with a shared request id returned to the client.",
+        "Write log lines that aid diagnosis without recording secrets or personal data."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "**Configuration in one place, validated at start-up:**\n\n```js\n// config.js — the ONLY module that reads the environment\nimport { z } from 'zod';\n\nconst schema = z.object({\n  DATABASE_URL: z.string().url(),\n  PORT: z.coerce.number().int().min(0).max(65535).default(3000),\n  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),\n  SESSION_SECRET: z.string().min(32),\n});\n\nconst parsed = schema.safeParse(getEnvironment());\nif (!parsed.success) {\n  // Names the missing keys. Never prints the values.\n  throw new Error(`invalid configuration: ${parsed.error.issues.map((i) => i.path.join('.')).join(', ')}`);\n}\n\nexport const config = parsed.data;\n```\n\nThree deliberate choices. `PORT` is coerced and defaulted with `.default(3000)` rather than `||`, so an explicit `PORT=0` is honoured instead of being swallowed as falsy. `SESSION_SECRET` has a minimum length, because a secret that is present but two characters long passes a mere existence check. And the failure message lists the *keys* that were wrong — printing the values would put the secret in the log of the crash.\n\n**A request id threaded through a request:**\n\n```js\napp.addHook('onRequest', (request, reply, done) => {\n  request.id = request.headers['x-request-id'] ?? randomId();\n  reply.header('x-request-id', request.id);\n  request.log = logger.child({ requestId: request.id });\n  done();\n});\n\napp.post('/deliveries', async (request, reply) => {\n  request.log.info({ route: 'POST /deliveries' }, 'received');\n  try {\n    const delivery = await createDelivery(request.body, request.log);\n    request.log.info({ deliveryId: delivery.id, durationMs: request.elapsed() }, 'created');\n    return reply.code(201).send({ id: delivery.id });\n  } catch (error) {\n    // Logged ONCE, here, with the most context available.\n    request.log.error({ err: error }, 'delivery creation failed');\n    return reply.code(500).send({ error: 'internal_error', requestId: request.id });\n  }\n});\n```\n\nThe client receives `{ error: 'internal_error', requestId: '7f3c9a' }` — a generic message plus the one token that finds everything. The stack trace stays on the server. `createDelivery` receives the child logger, so its lines carry the same id without passing the id around by hand, and it does *not* log-and-rethrow: the handler is where the error becomes one entry.\n\nA line from that stream:\n\n```json\n{ \"level\": \"info\", \"requestId\": \"7f3c9a\", \"route\": \"POST /deliveries\", \"deliveryId\": 8812, \"durationMs\": 43, \"msg\": \"created\" }\n```\n\nIdentifiers and outcomes; no addresses, no phone numbers, no request body.",
+      "commonMistakes": [
+        "Reading environment variables ad hoc throughout the codebase, so a missing one is discovered by whichever endpoint happens to need it.",
+        "Defaulting with `||`, which discards a legitimate `0` or empty string and makes a `false` flag impossible to set.",
+        "Checking only that a secret is present, so a two-character placeholder passes validation.",
+        "Printing the loaded configuration object at start-up to confirm it worked, and writing the credentials into the log.",
+        "Committing a .env file with real credentials because the example file was inconvenient.",
+        "Logging without a request id, so two interleaved requests read as one impossible sequence of events.",
+        "Catching, logging and rethrowing at every layer, so one failure appears as several unrelated errors.",
+        "Returning the stack trace to the client to help support, and telling any caller the framework versions and file layout."
+      ],
+      "summaryMarkdown": "Read configuration in one module, validate it against a schema at start-up, and fail immediately and loudly when something is missing — using explicit absence checks rather than `||` so `0` and `false` survive. Never print secret values, including in a start-up confirmation. Give every request an id, attach it to every line that request produces, return it in error responses, and log each failure exactly once where the context is richest. Log identifiers and outcomes, never bodies or credentials.",
+      "exerciseIds": [
+        "v1-e103",
+        "v1-e104",
+        "v1-e105"
+      ],
+      "reviewCardIds": [
+        "v1-c069",
+        "v1-c070"
+      ],
+      "references": [
+        {
+          "label": "OWASP: Logging Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html"
+        },
+        {
+          "label": "MDN: Nullish coalescing operator",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Nullish_coalescing"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e103",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose why the incident cannot be reconstructed from the logs",
+      "conceptIds": [
+        "ops.log-hygiene",
+        "ops.request-id"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read an extract of real log output and decide what is missing and what should never have been there.",
+      "lessonId": "v1-l35",
+      "sortOrder": 0,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 11,
+      "promptMarkdown": "A customer reports that one delivery booking failed at 14:32 while several others succeeded. The service handles roughly 40 requests a second. This is what the logs contain:\n\n```text\n14:32:01.114 INFO  creating delivery {\"payload\":{\"name\":\"J. Bell\",\"phone\":\"+44 7700 900123\",\"apiKey\":\"ag_live_9f2c...\"}}\n14:32:01.118 INFO  creating delivery {\"payload\":{\"name\":\"R. Okafor\",\"phone\":\"+44 7700 900456\",\"apiKey\":\"ag_live_9f2c...\"}}\n14:32:01.140 ERROR insert failed\n14:32:01.141 ERROR createDelivery failed\n14:32:01.142 ERROR POST /deliveries failed\n14:32:01.155 INFO  delivery created\n```\n\nWhich change would most improve the team's ability to investigate this incident, and what else must change regardless?",
+      "hints": [
+        "There are two questions here: can you tell which lines belong to the failed request, and should those lines exist in this form at all?",
+        "At 40 requests a second the lines interleave, and nothing connects the three ERROR lines to either of the two bookings — or tells you whether they are three failures or one.",
+        "Attach a request id to every line and return it to the client, so the customer's reference selects exactly their request. Separately, the payload lines must go: they contain a customer's phone number and a live API key, and no investigation needs either."
+      ],
+      "solution": {
+        "modelAnswer": "Add a request id generated at the edge, attached to every line and returned in the error response, so the customer's reference isolates their request among the interleaved traffic. Independently, stop logging the request payload: it contains personal data and a live API key, which now sit permanently in the log store. Also collapse the three ERROR lines into one logged at the handler, since they are one failure logged at three layers.",
+        "explanationMarkdown": "Take the two problems in order of what they cost.\n\n**Correlation.** With 40 requests a second, timestamps prove nothing: `14:32:01.140` sits between two bookings and belongs to neither by any evidence in the file. There is no way to say which customer failed, and no way to know whether the three ERROR lines are three failures or one error logged by three layers — which, given the wording, they clearly are. A request id fixes both: generate one per request, attach it to every line via a child logger, and return it in the error body so the customer's `reference` is the filter.\n\n**Disclosure.** The payload lines are a separate and non-negotiable problem. A phone number is personal data, and `ag_live_...` is a live credential now readable by everyone with log access and copied into every backup. Fixing the code stops future lines; the existing ones need purging and the key needs rotating.\n\n**Noise.** `insert failed` / `createDelivery failed` / `POST /deliveries failed` is one incident logged at three layers, each with less context than the last. Let the error propagate and log it once in the handler, where the request id, the route and the stack are all available.\n\nWhat the extract should have looked like:\n\n```text\n14:32:01.114 INFO  {\"requestId\":\"7f3c9a\",\"route\":\"POST /deliveries\",\"msg\":\"received\"}\n14:32:01.142 ERROR {\"requestId\":\"7f3c9a\",\"route\":\"POST /deliveries\",\"err\":\"duplicate key value violates unique constraint\",\"msg\":\"delivery creation failed\"}\n14:32:01.155 INFO  {\"requestId\":\"b04e12\",\"deliveryId\":8812,\"durationMs\":43,\"msg\":\"created\"}\n```"
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "request-id",
+            "textMarkdown": "Attach a request id to every line and return it to the client — and separately stop logging the payload, which is putting a phone number and a live API key into the log store.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Correlation is what makes the investigation possible; removing the credential and personal data is required whether or not anyone is investigating."
+          },
+          {
+            "id": "timestamps",
+            "textMarkdown": "Increase timestamp precision to microseconds so the lines can be matched by time.",
+            "correct": false,
+            "explanationMarkdown": "Finer timestamps still cannot say which request a line belongs to — concurrent requests interleave, and one request's lines are spread across the whole period it ran."
+          },
+          {
+            "id": "more-logging",
+            "textMarkdown": "Log the full request and response bodies at every layer so nothing is missing next time.",
+            "correct": false,
+            "explanationMarkdown": "This makes both problems worse: more unlinked lines to sift, and far more personal data and credentials written down."
+          },
+          {
+            "id": "level",
+            "textMarkdown": "Raise the payload lines from INFO to DEBUG so they are not written in production.",
+            "correct": false,
+            "explanationMarkdown": "A level is an operational switch, and debug is exactly what gets enabled during an incident. It also does nothing to make the failed request identifiable."
+          }
+        ]
+      },
+      "primaryConceptId": "ops.log-hygiene",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e104",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Validate required configuration at start-up",
+      "conceptIds": [
+        "ops.configuration"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The check that decides whether a process may start is small, pure and worth getting exactly right — including for the values that are present but falsy.",
+      "lessonId": "v1-l35",
+      "sortOrder": 1,
+      "type": "function",
+      "difficulty": "core",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Ashgrove refuses to start unless every required setting is supplied. Implement `missingSettings(settings, required)`.\n\n- `settings` is an object of the values that were loaded.\n- `required` is an array of key names that must be present.\n\nReturn the names of the required keys that are **not usable**, sorted alphabetically so the start-up error message is stable.\n\nA key is not usable when it is absent from `settings`, or its value is `null`, `undefined`, or the empty string `''`.\n\nA key **is** usable when it holds `0` or `false`. Those are legitimate settings — a port of `0`, a flag deliberately turned off — and treating them as missing is the classic version of this bug.\n\nReturn an empty array when nothing is missing. Do not modify either argument.",
+      "hints": [
+        "Walk the `required` list rather than the keys of `settings`; only the required names can be missing, and a setting nobody asked for is not your concern.",
+        "`if (!settings[key])` is the trap this exercise is built around — it rejects `0` and `false`. Test the three unusable values explicitly instead.",
+        "Collect into a new array and sort *that*. Calling `required.sort()` would reorder the caller's array in place, which is a mutation the cases check for."
+      ],
+      "solution": {
+        "code": "function missingSettings(settings, required) {\n  const missing = [];\n  for (const key of required) {\n    const value = settings[key];\n    if (value === undefined || value === null || value === '') {\n      missing.push(key);\n    }\n  }\n  missing.sort();\n  return missing;\n}",
+        "explanationMarkdown": "The single decision that matters is testing for the three unusable values rather than for falsiness. `if (!settings[key])` reads better and is wrong for `0` and `false`, which means a service configured with `PORT=0` or `ENABLE_TRACING=false` refuses to start and reports a setting the operator can plainly see in their environment. That is a genuinely miserable half hour, and it is the reason `??` exists alongside `||`.\n\nSorting a fresh array rather than the caller's is the second detail. `required.sort()` would return the right answer and quietly reorder the caller's list, so a later error message or a start-up summary that walks `required` prints a different order than the code that built it — a mutation bug that no assertion about the return value would ever catch.\n\nWalking `required` rather than `Object.keys(settings)` also gives the right behaviour for a key that is absent entirely: `settings[key]` is `undefined`, so it lands in the missing list without any need for a separate existence check."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "missingSettings",
+        "starterCode": "function missingSettings(settings, required) {\n  const missing = [];\n  // Decide, for each required key, whether its value is usable.\n  return missing;\n}",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "nothing-required",
+            "args": [
+              {},
+              []
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "all-present",
+            "args": [
+              { "DATABASE_URL": "postgres://localhost/ashgrove", "PORT": "3000" },
+              [
+                "DATABASE_URL",
+                "PORT"
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "one-absent",
+            "args": [
+              { "PORT": "3000" },
+              [
+                "DATABASE_URL",
+                "PORT"
+              ]
+            ],
+            "expected": [
+              "DATABASE_URL"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "empty-string-is-missing",
+            "args": [
+              { "SESSION_SECRET": "" },
+              [
+                "SESSION_SECRET"
+              ]
+            ],
+            "expected": [
+              "SESSION_SECRET"
+            ],
+            "hidden": false
+          },
+          {
+            "id": "zero-is-a-real-value",
+            "args": [
+              { "PORT": 0 },
+              [
+                "PORT"
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "false-is-a-real-value",
+            "args": [
+              { "ENABLE_TRACING": false },
+              [
+                "ENABLE_TRACING"
+              ]
+            ],
+            "expected": [],
+            "hidden": false
+          },
+          {
+            "id": "null-is-missing",
+            "args": [
+              { "DATABASE_URL": null },
+              [
+                "DATABASE_URL"
+              ]
+            ],
+            "expected": [
+              "DATABASE_URL"
+            ],
+            "hidden": true
+          },
+          {
+            "id": "result-is-sorted",
+            "args": [
+              {},
+              [
+                "ZONE_NAME",
+                "API_KEY",
+                "MAIL_FROM"
+              ]
+            ],
+            "expected": [
+              "API_KEY",
+              "MAIL_FROM",
+              "ZONE_NAME"
+            ],
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "ops.configuration",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e105",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain what one request should leave behind",
+      "conceptIds": [
+        "ops.request-id",
+        "ops.log-hygiene"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Design the trail a single request should leave, and justify each decision. The criteria appear after you answer.",
+      "lessonId": "v1-l35",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "A customer emails Ashgrove support: *my booking failed this afternoon, the screen said something went wrong.* Support has the customer's email address and a rough time.\n\nDescribe what the system should have recorded so that an engineer can reconstruct exactly what happened to that one request, and what it must not have recorded. Explain how the customer's report is connected to the log lines, and how many times a single failure should be logged.",
+      "hints": [
+        "Start from the search the engineer has to run. What token could the customer have quoted that would select their request and nothing else?",
+        "That token has to exist before the failure: generated at the edge of the request, attached to every line the request produces, and shown to the customer in the error response.",
+        "Then decide the contents. Identifiers, route, outcome, duration and the error — never the request body, the customer's personal details, or a credential. And log the failure once, in the handler, rather than at each layer that catches it."
+      ],
+      "solution": {
+        "modelAnswer": "Every request should get an id generated at the edge — or accepted from a trusted proxy — attached to a child logger so that every line the request produces carries it. The error response should include that id and a generic message, and the interface should show it, so the customer's email says 'reference 7f3c9a' instead of 'this afternoon'. The engineer then filters the logs on that one value and gets the whole story in order: the request received, the route, the record ids involved, timings, and the failure itself. The lines should hold identifiers and outcomes — request id, route, deliveryId, accountId, durationMs, status — and must not hold the request body, the customer's name, address or phone number, any token or API key, or a password. The stack trace belongs in the log, not in the response. A single failure should be logged exactly once, at the layer with the most context, usually the handler; catching, logging and rethrowing at each layer produces several entries that look like several incidents and each carry less context than the last.",
+        "explanationMarkdown": "The organising idea is that diagnosability has to be designed in before the incident, and the design has a specific shape: one token that the customer can quote, that the server generated, and that appears on every line.\n\nA good answer notices that the id has to travel *outward* as well as inward. An id that exists only in the logs still leaves support matching a rough timestamp against 40 requests a second. Returning it in the error body, and rendering it in the message the customer sees, is what turns a vague report into an exact query.\n\nThe contents question is where log hygiene and diagnosis are usually assumed to be in tension, and they are not. `deliveryId: 8812` finds the record; the customer's phone number adds nothing to the investigation and creates a permanent obligation. Identifiers over contents is the whole rule.\n\nLogging once is the detail that most people have to learn from experience. Log-and-rethrow at every layer feels defensive and produces a log where one failure is indistinguishable from a cascade, with the least informative entry usually appearing last."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Proposes a request id generated at the edge of each request and attached to every line that request produces.",
+          "States that the id must be returned to the client and shown to the customer, so their report identifies the request precisely.",
+          "Lists useful contents — route, outcome, duration, record and account identifiers, the error — as identifiers rather than record contents.",
+          "Names what must be excluded: request bodies, personal data, credentials and tokens, and stack traces in the response.",
+          "States that a single failure should be logged once, at the layer with the most context, and explains what log-and-rethrow does to the log."
+        ],
+        "modelAnswerMarkdown": "The system should mint a request id at the edge of every request — a random value, or one accepted from a trusted proxy — and put it on a child logger so that every line produced while handling that request carries it. When the handler fails, it responds with a generic message and that id: `{ \"error\": \"internal_error\", \"requestId\": \"7f3c9a\" }`, and the interface shows the reference in the message the customer reads.\n\nThat is what connects the email to the evidence. Instead of 'this afternoon' against 40 requests a second, support forwards `7f3c9a`, the engineer filters on it, and the request's whole story comes back in order: received, route, which delivery and account were involved, how long each step took, and the exception with its stack.\n\nThe lines should carry identifiers and outcomes — `requestId`, `route`, `deliveryId`, `accountId`, `durationMs`, `status` — because identifiers let you look anything up while contents create a permanent liability. They must not carry the request body, the customer's name, address or phone number, or any token, API key or password. The stack trace goes in the log and never in the response, where it would tell any caller the framework versions and file layout.\n\nAnd the failure should be logged exactly once, in the handler, where the request id, the route and the error are all in scope. Catching, logging and rethrowing at each layer turns one incident into four entries that read like four failures, with the vaguest one — 'POST /deliveries failed' — arriving last."
+      },
+      "primaryConceptId": "ops.request-id",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c069",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "When should configuration be validated?",
+      "conceptIds": [
+        "ops.configuration"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the timing rule and the operator that goes with it.",
+      "lessonId": "v1-l35",
+      "type": "recall",
+      "promptMarkdown": "When should required configuration be validated, what should happen when a value is missing, and why is `env.PORT || 3000` the wrong way to apply a default?",
+      "answerMarkdown": "Once, at start-up, in a single module that reads the environment — and the process should refuse to start, naming the missing keys but never printing their values. `||` treats every falsy value as absent, so it discards an explicit `PORT=0` and makes a `false` flag impossible to set. Use `??`, or parse and validate the value properly.",
+      "explanationMarkdown": "Failing at start-up turns a configuration mistake into a five-minute problem instead of one that surfaces hours later on a single endpoint. The `||` trap is the same truthiness confusion that hides a legitimate `0` everywhere else.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ops.configuration"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c070",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Apply correlation to a two-service call",
+      "conceptIds": [
+        "ops.request-id"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Transfer the request-id idea across a service boundary.",
+      "lessonId": "v1-l35",
+      "type": "transfer",
+      "promptMarkdown": "The booking service calls a separate pricing service over HTTP. Each generates its own request id. An engineer investigating a slow booking can see the booking service's lines but cannot tell which pricing-service request belongs to it. What should change?",
+      "answerMarkdown": "The booking service should forward its request id — typically as an `X-Request-Id` header — and the pricing service should adopt the incoming id rather than minting a fresh one, logging it alongside its own. One id then spans both services, so a single filter returns the whole story of the booking.",
+      "explanationMarkdown": "Correlation is only as long as the id is propagated. This is the same idea distributed tracing formalises: an identifier that crosses process boundaries so one user action stays one story.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ops.request-id"
+    },
+
+    {
+      "kind": "lesson",
+      "id": "v1-l36",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Shipping and maintenance",
+      "conceptIds": [
+        "ops.deployment-order",
+        "ops.failed-deployment",
+        "ops.rollback"
+      ],
+      "prerequisiteIds": [
+        "sql.migrations",
+        "git.commit-sequence"
+      ],
+      "bodyMarkdown": "A deploy is a sequence, and the sequence is where the risk lives.\n\nThe order that works: run the checks (build, types, tests) against the exact commit you intend to release; apply any schema change that is **compatible with both the running version and the new one**; release the application; verify it is genuinely healthy; and only then, in a later release, contract the schema to the shape only the new version needs. That is the expand-migrate-contract pattern from chapter 10, seen from the deployment side.\n\nWhy the migration goes before the release: during a rolling deploy both versions run at once, and the new one will fail on the old schema the moment it starts. Why the contraction has to wait: if the schema is narrowed to what only the new code understands, the old version can no longer run — which is precisely the version you would want to go back to.\n\nWhich brings us to the property that decides everything else. **A rollback restores code, never data.** Reverting the application is minutes of work. A migration that dropped a column has already discarded what was in it, and no revert brings it back. So the rule is: never deploy a destructive migration in the same release as the code change that depends on it. Ship the code first, run it for a while, and drop the column in a later release once you are confident you will not need to go back.\n\n**Diagnosing a failed deployment** is its own skill, and it starts with a question that sounds too simple: *is the new version actually running?* A deploy that fails to start leaves the old version serving traffic, and the symptom is that your fix appears to have done nothing. Then work outward from what changed: the commit, the configuration, the schema, the dependencies. Check whether the process is crashing at start-up — a missing required setting is the single most common cause, which is exactly why start-up validation names it. Check whether the health check is meaningful: an endpoint that returns 200 without touching the database will happily report a healthy service that cannot serve a single request.\n\nAnd when you cannot fix it in minutes, **roll back first and diagnose afterwards**. Restoring service is not an admission that you do not understand the problem; it is what buys you the time to understand it. Keep the failing artefact and its logs so the investigation still has evidence.\n\nOne last habit: know what a rollback leaves behind. Rows the new version wrote in a new format, an outbound webhook already delivered, an email already sent, a queue full of messages the old version cannot parse. A release plan that names those in advance is the difference between a rollback that restores service and one that starts a second incident.",
+      "chapterId": "v1-ch12",
+      "sortOrder": 2,
+      "objectives": [
+        "Order checks, migrations and release so both versions can run during a rolling deploy.",
+        "Diagnose a release that did not come up healthy, starting from whether the new version is running at all.",
+        "Plan a rollback that accounts for data the new version already wrote."
+      ],
+      "estimatedMinutes": 16,
+      "workedExampleMarkdown": "**Renaming `deliveries.notes` to `deliveries.instructions`, safely.** The tempting version is one release: rename the column, ship the code that uses the new name. It is also unrollbackable — the moment the rename lands, the previous version is broken, so going back is not an option.\n\nThe safe sequence spans three releases:\n\n| Release | Migration | Application code | Can we roll back? |\n| --- | --- | --- | --- |\n| 1 | `ADD COLUMN instructions text` | writes both columns, reads `notes` | Yes — the new column is unused by the old version |\n| 2 | backfill `instructions` from `notes` | reads `instructions`, still writes both | Yes — `notes` is still being maintained |\n| 3 | `DROP COLUMN notes` | reads and writes `instructions` only | Code yes, data no |\n\nThe double write in releases 1 and 2 is what makes the middle reversible: at every point before release 3, both versions of the application can read what they expect. Release 3 is the destructive one, it happens only after release 2 has run happily for long enough, and it is the one to schedule when someone is watching.\n\n**A deploy that did not come up, diagnosed in order:**\n\n```text\n1. Is the new version serving?     GET /version  -> {\"commit\":\"a1b9\"}  ... still the OLD commit.\n                                   The release did not take over; the old version is serving.\n2. Why did it not start?           deploy logs -> Error: invalid configuration: SESSION_SECRET\n3. What changed?                   the release added a required setting; it was set in staging,\n                                   never added to production.\n4. Fix forward or roll back?       adding one setting is a two-minute fix with no data risk,\n                                   so fix forward and redeploy.\n5. Prevent the repeat.             make the deploy fail loudly on missing configuration BEFORE\n                                   traffic shifts, and add the setting to the environment template.\n```\n\nStep 1 is the one people skip. A version endpoint reporting the running commit turns *did my change deploy?* from a guess into an observation — and here it immediately explains why the fix appeared to do nothing.\n\n**A rollback plan written before the release:**\n\n```text\nRelease: delivery-window redesign (v42)\nRollback trigger: error rate above 2% for 5 minutes, or any 500 on POST /deliveries.\nRollback action:  redeploy v41. No migration to reverse (release adds a nullable column only).\nData written by v42 that v41 cannot read:\n  - deliveries.window_end (new column) -> v41 ignores it. Safe.\n  - queue messages with schema v2      -> v41 cannot parse them. Drain the queue before\n                                          rolling back, or v41 will reject them on start.\nKnown one-way effects:\n  - 'window changed' emails already sent cannot be recalled; support has a note prepared.\n```\n\nThe value is in the third and fourth sections. The rollback itself is one command; what needs thinking about in advance is everything the new version already did that the old version has to live with."
+      ,
+      "commonMistakes": [
+        "Shipping a destructive migration in the same release as the code that needs it, which removes the option of rolling back.",
+        "Releasing the application before the migration, so the new version starts against a schema it cannot use.",
+        "Assuming a rollback restores data, when it only restores code.",
+        "Diagnosing a failed release without first checking whether the new version is actually the one serving traffic.",
+        "Relying on a health check that returns 200 without touching the database, so an unusable service reports itself healthy.",
+        "Debugging a broken production release for an hour instead of rolling back first and investigating with the service restored.",
+        "Forgetting that queued messages, delivered webhooks and sent emails survive a rollback and may be unreadable to the old version."
+      ],
+      "summaryMarkdown": "Check, migrate compatibly, release, verify, and contract the schema only in a later release. Both versions run at once during a rolling deploy, so every intermediate state must work for both. A rollback restores code and not data, which is why destructive migrations never ship with the code that needs them. When a release misbehaves, first establish which version is actually serving, then work outward through configuration, schema and dependencies — and if the fix is not immediate, roll back to restore service and diagnose afterwards, keeping the artefact and logs.",
+      "exerciseIds": [
+        "v1-e106",
+        "v1-e107",
+        "v1-e108"
+      ],
+      "reviewCardIds": [
+        "v1-c071",
+        "v1-c072"
+      ],
+      "references": [
+        {
+          "label": "PostgreSQL: ALTER TABLE",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html"
+        },
+        {
+          "label": "MDN: HTTP response status codes",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status"
+        }
+      ]
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e106",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Order the steps of a release",
+      "conceptIds": [
+        "ops.deployment-order"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Choose the sequence that keeps every intermediate state serviceable.",
+      "lessonId": "v1-l36",
+      "sortOrder": 0,
+      "type": "choice",
+      "difficulty": "foundation",
+      "estimatedMinutes": 7,
+      "promptMarkdown": "Ashgrove is releasing a feature that needs a new nullable column on `deliveries`. Instances are replaced gradually, so for a few minutes the old and new versions both serve traffic.\n\nWhich sequence is correct?",
+      "hints": [
+        "For each candidate, ask what the *old* version experiences at each step, and what the *new* version experiences.",
+        "The new version cannot work against the old schema, so the migration cannot come after the release. The old version must survive the new schema, which is why the column is nullable.",
+        "Run the checks against the commit you are releasing, apply the additive migration, release the code, verify it is healthy — and leave anything destructive for a later release."
+      ],
+      "solution": {
+        "modelAnswer": "Run the checks, apply the additive migration, release the application, then verify health — deferring any destructive schema change to a later release.",
+        "explanationMarkdown": "The constraint is that both versions run simultaneously, so every intermediate state must be serviceable by both. An additive, nullable column satisfies that: the old version does not know it exists and is unaffected, and the new version finds it already there.\n\nReleasing before migrating inverts the problem — new instances start querying a column that is not there yet, and they fail for the whole window between the two steps.\n\nRunning checks after deploying is not a check; it is a report on something already live. And bundling a destructive change into this release would forfeit the ability to roll back, which is the property most worth protecting at the moment of a release."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "correct-order",
+            "textMarkdown": "Run build, type and test checks against the release commit → apply the additive migration → release the application → verify health; leave any destructive change to a later release.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Every intermediate state is serviceable by both versions, and rollback stays available because nothing was destroyed."
+          },
+          {
+            "id": "release-first",
+            "textMarkdown": "Release the application → apply the migration → run the checks against the deployed version.",
+            "correct": false,
+            "explanationMarkdown": "The new instances query a column that does not exist yet and fail for the whole gap. Checks that run after the release are a post-mortem, not a gate."
+          },
+          {
+            "id": "all-at-once",
+            "textMarkdown": "Apply the migration, drop the column the feature replaces, and release the application in a single atomic step so there is no window of mismatch.",
+            "correct": false,
+            "explanationMarkdown": "A rolling deploy has no atomic step — the instances are replaced one at a time. Dropping the old column also destroys data and removes the option of rolling back."
+          },
+          {
+            "id": "migrate-after-verify",
+            "textMarkdown": "Run the checks → release the application → verify health → apply the migration once the new version is confirmed healthy.",
+            "correct": false,
+            "explanationMarkdown": "The new version cannot be healthy before the column exists. A health check that passes here is telling you it does not exercise the new code path."
+          }
+        ]
+      },
+      "primaryConceptId": "ops.deployment-order",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e107",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose the release that changed nothing",
+      "conceptIds": [
+        "ops.failed-deployment",
+        "ops.deployment-order"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read the evidence from a release that appeared to succeed and choose the next observation.",
+      "lessonId": "v1-l36",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "stretch",
+      "estimatedMinutes": 12,
+      "promptMarkdown": "Ashgrove deploys a fix for a 500 on `POST /deliveries`. The pipeline reports success. Twenty minutes later the 500s are unchanged.\n\nThe evidence:\n\n```text\npipeline:      build ok, tests ok, deploy step exited 0\nGET /health -> 200 {\"status\":\"ok\"}\nGET /version -> {\"commit\":\"c41f8\",\"startedAt\":\"09:02\"}   (the release commit is a1b9, cut at 11:40)\nerror rate:    unchanged since 09:00\napp logs:      no new lines since 11:41 from any instance started after 11:40\n```\n\nThe health check is implemented as `app.get('/health', (_, reply) => reply.send({ status: 'ok' }))`.\n\nWhat is the most defensible conclusion, and what is the next thing to look at?",
+      "hints": [
+        "Compare the commit that is serving with the commit that was released, and compare the start time with the time of the release.",
+        "`/version` reports `c41f8`, started at 09:02 — hours before the 11:40 release. The old version is still the one answering, so the fix was never exercised.",
+        "The deploy step exiting 0 means the command finished, not that the new instances became healthy and took over traffic. Read the orchestrator's events for the new instances — a crash loop at start-up, most often a missing required setting — and note that this `/health` cannot distinguish a working service from a broken one because it touches nothing."
+      ],
+      "solution": {
+        "modelAnswer": "The old version is still serving: /version reports commit c41f8 started at 09:02, hours before the 11:40 release, and no instance started after 11:40 has logged anything. So the fix was never running and the unchanged error rate says nothing about whether it works. Next, read the orchestrator or platform events for the new instances — they are almost certainly failing at start-up, and a missing required configuration value is the most common cause. Separately, the health endpoint needs to check a dependency, because as written it cannot tell a working service from a broken one.",
+        "explanationMarkdown": "The trap is treating *the pipeline went green* as *the new code is running*. A deploy step exiting 0 means the command it ran returned successfully — the image was pushed, the rollout was requested — not that the new instances passed their checks and took traffic. Most platforms will happily keep the previous version serving when the new one never becomes healthy, which is the desired behaviour and also why the symptom is 'my fix did nothing'.\n\nThe evidence settles it without any guessing. `/version` names a commit and a start time that both predate the release, and no post-11:40 instance has logged a line. Those two facts together mean the new version never got as far as handling a request.\n\nThe next observation is the platform's own account of the new instances: their start-up logs and restart counts. A crash loop at start-up points first at configuration, which is exactly the failure that good start-up validation announces by name.\n\nThe health endpoint is a second finding worth writing down. `reply.send({ status: 'ok' })` proves the web framework is listening and nothing else. A health check should touch what the service cannot work without — typically a cheap `SELECT 1` — so that a service which cannot reach its database reports unhealthy instead of confidently reporting `ok`."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "old-version-serving",
+            "textMarkdown": "The old version is still serving — `/version` shows a pre-release commit and start time, and no new instance has logged anything — so look at the new instances' start-up events, most likely a crash loop from missing configuration.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A green pipeline reports that the rollout was requested, not that the new version became healthy and took traffic."
+          },
+          {
+            "id": "fix-wrong",
+            "textMarkdown": "The fix was incorrect: the error rate is unchanged, so the change did not address the cause.",
+            "correct": false,
+            "explanationMarkdown": "That conclusion requires the fix to have run. The evidence says it never did, so the unchanged error rate is exactly what you would expect either way."
+          },
+          {
+            "id": "health-ok",
+            "textMarkdown": "The service is healthy — `/health` returns 200 — so the 500s must come from a dependency rather than from this service.",
+            "correct": false,
+            "explanationMarkdown": "This health check touches nothing but the web framework. It would return 200 with the database unreachable, so it cannot support that conclusion."
+          },
+          {
+            "id": "rollback",
+            "textMarkdown": "Roll back immediately, since the release clearly made things worse.",
+            "correct": false,
+            "explanationMarkdown": "Rolling back first is often the right instinct, but here the old version is already the one serving — there is nothing to roll back to, and the error rate is unchanged rather than worse."
+          }
+        ]
+      },
+      "primaryConceptId": "ops.failed-deployment",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "exercise",
+      "id": "v1-e108",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Plan the rollback before the release",
+      "conceptIds": [
+        "ops.rollback",
+        "ops.deployment-order"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Write the rollback plan, including the parts a redeploy cannot undo. The criteria appear after you answer.",
+      "lessonId": "v1-l36",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "stretch",
+      "estimatedMinutes": 14,
+      "promptMarkdown": "Ashgrove is about to release v42. It contains three things:\n\n1. a migration adding a nullable `deliveries.window_end` column, which v42 populates on every new booking;\n2. a change that publishes each booking to a message queue in a new message format;\n3. an email to the customer whenever a delivery window changes.\n\nWrite the rollback plan. Say what a redeploy of v41 does and does not undo, name the effects that survive a rollback and what you would do about each, and state the one thing you would refuse to include in this release.",
+      "hints": [
+        "Separate the three items by what they leave behind: a schema change, data written for other systems to read, and an action taken in the outside world.",
+        "Redeploying v41 restores code only. The new column and the rows in it remain; the queue still holds messages in the new format; the emails have been read.",
+        "Decide a concrete handling for each: the nullable column is safe because v41 ignores it; the queue needs draining before the rollback or a v41 that tolerates unknown formats; the emails cannot be recalled, so support needs a prepared note. And refuse to include any destructive migration in this release."
+      ],
+      "solution": {
+        "modelAnswer": "Redeploying v41 restores the application code and nothing else. The migration is additive and nullable, so the column and the values v42 wrote both remain — harmless, because v41 never selects it, and useful if we roll forward again. The queue is the real risk: v42 published messages in a new format that v41's consumer cannot parse, so those messages will fail or poison the consumer after the rollback. I would drain or pause the queue before rolling back, or ship v41's consumer ahead of time so it tolerates and skips unknown formats. The emails cannot be undone at all: customers have been told their window changed, and after a rollback the application may show the old window. Support needs a prepared explanation and a list of affected customers, which means the send has to be logged with the delivery ids. The one thing I would refuse to include is any destructive migration — a DROP COLUMN or a NOT NULL constraint — because it would make v41 unable to run and remove rollback as an option precisely when it is most needed. Those belong in a later release once v42 has been stable for a while.",
+        "explanationMarkdown": "The plan is really an inventory of *irreversibility*, sorted by how far the effect has travelled.\n\nThe schema change is the easy case, and it is easy because it was designed to be: additive and nullable means the previous version is indifferent to it. Rows that v42 wrote into `window_end` survive the rollback and are simply ignored, which is the behaviour you want — no data destroyed and nothing to clean up.\n\nThe queue is the case people miss, because the data was written for a *different program* to read. Rolling back the publisher does not roll back the messages already published, so a consumer that was never taught the new format meets it after the rollback. Draining first, or making the consumer skip what it does not understand, is what keeps the rollback from starting a second incident. This is the general shape of the problem for anything asynchronous: outbox rows, scheduled jobs, webhooks in flight.\n\nThe emails are irreversible in the strongest sense — they left the system entirely and a person has read one. The engineering response is not to prevent it but to make it recoverable *socially*: log what was sent to whom so support can act, and consider putting the send behind a flag that can be turned off without a deploy.\n\nThe refusal is the load-bearing judgement. Destructive migrations and the code that needs them belong in different releases, because a release that cannot be rolled back turns every unexpected problem into a forward-only emergency."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "States plainly that a redeploy restores code and not data, and applies that to the migration.",
+          "Explains that the additive nullable column is safe to leave in place because the previous version ignores it.",
+          "Identifies the queue messages in the new format as data another program must read, and gives a concrete handling such as draining first or a tolerant consumer.",
+          "Identifies the emails as irreversible and proposes a practical response, such as logging recipients for support or gating the send behind a flag.",
+          "Refuses to include a destructive migration in this release and explains that it would remove the ability to roll back.",
+          "Names a rollback trigger or decision rule rather than leaving the decision to be made under pressure."
+        ],
+        "modelAnswerMarkdown": "**What redeploying v41 undoes:** the application code, and only that.\n\n**The migration.** `window_end` is nullable and additive, so v41 never selects it and is unaffected. The values v42 wrote stay in the table — harmless, and useful if we roll forward again. Nothing to reverse, and deliberately so: that is why the column was designed this way.\n\n**The queue.** This is the real risk, because the messages were written for a different program to read. Every booking v42 published is sitting in the queue in a format v41's consumer does not understand, and after the rollback the consumer meets them and fails — potentially blocking the queue. Handling: pause the publisher and drain the queue before rolling back, or ship a v41 consumer in advance that skips messages whose format it does not recognise. The second is better, because it does not depend on doing anything correctly during an incident.\n\n**The emails.** Irreversible. Customers have been told their window changed, and after the rollback the application may show the old window. There is no technical undo, so the response is operational: log every send with the delivery id and recipient so support can produce the affected list, prepare a short note explaining the correction, and put the send behind a flag that can be switched off without a deploy.\n\n**Trigger:** roll back if the error rate on `POST /deliveries` exceeds 2% for five minutes, or on any data-corruption report — decided now, so nobody has to decide it at 22:00.\n\n**What I would refuse to include:** any destructive migration — a `DROP COLUMN`, a `NOT NULL`, a rename. It would leave v41 unable to run, so the rollback plan above would not exist. Those changes go in a later release, after v42 has been stable long enough that we are confident we will not need to go back."
+      },
+      "primaryConceptId": "ops.rollback",
+      "requiredForLessonCompletion": true
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c071",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does a rollback restore?",
+      "conceptIds": [
+        "ops.rollback"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the boundary of what reverting a release can achieve.",
+      "lessonId": "v1-l36",
+      "type": "recall",
+      "promptMarkdown": "What does redeploying the previous version restore, and what does it leave untouched? Give two examples of the second kind.",
+      "answerMarkdown": "It restores the application code and nothing else. Everything the new version already did to the world remains: rows it wrote in a new format, a column a migration dropped, messages already published to a queue, webhooks already delivered, emails already sent. Two clear examples are a dropped column — whose data is simply gone — and queued messages the old consumer cannot parse.",
+      "explanationMarkdown": "This asymmetry is the reason destructive migrations never ship with the code that needs them: the moment one lands, rolling back stops being an option.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "ops.rollback"
+    },
+
+    {
+      "kind": "review_card",
+      "id": "v1-c072",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Read the health check",
+      "conceptIds": [
+        "ops.failed-deployment"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read a health endpoint and decide what its 200 actually proves.",
+      "lessonId": "v1-l36",
+      "type": "code-reading",
+      "promptMarkdown": "A service exposes `app.get('/health', (_, reply) => reply.send({ status: 'ok' }))`, and the platform uses it to decide whether a newly released instance may take traffic. What does a 200 from this endpoint prove, and what can it hide?",
+      "answerMarkdown": "It proves the process started and the HTTP framework is listening. It hides everything the service depends on: an unreachable database, an expired credential, a missing migration. Such an instance is declared healthy and given traffic, then fails every real request. A health check should touch the critical dependency — a cheap `SELECT 1` — so that unhealthy means unable to serve.",
+      "explanationMarkdown": "A health check is a promise the platform acts on. If it is cheaper than the work the service actually does, it will approve instances that cannot do that work.",
+      "gradingOrigin": "server_objective",
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "only-listening",
+            "textMarkdown": "Only that the process started and is listening; it would return 200 with the database unreachable, so a broken instance is given traffic.",
+            "correct": true,
+            "explanationMarkdown": "Correct. Check a critical dependency cheaply so that unhealthy actually means unable to serve."
+          },
+          {
+            "id": "fully-healthy",
+            "textMarkdown": "That the service is fully operational, since a broken service could not respond at all.",
+            "correct": false,
+            "explanationMarkdown": "The web framework and the database are separate. A service can answer this route perfectly while every route that reads data fails."
+          },
+          {
+            "id": "too-slow",
+            "textMarkdown": "Nothing useful, and the fix is to have it run the full test suite on each call.",
+            "correct": false,
+            "explanationMarkdown": "A health check is called every few seconds by the platform. It has to be cheap — one dependency probe, not a suite."
+          },
+          {
+            "id": "status-code",
+            "textMarkdown": "Nothing, because a health check must return 204 rather than 200 to be valid.",
+            "correct": false,
+            "explanationMarkdown": "The status code is a convention and either works. What matters is whether anything meaningful was checked before the code was chosen."
+          }
+        ]
+      },
+      "primaryConceptId": "ops.failed-deployment"
+    },
+
+    {
+      "kind": "assessment",
+      "id": "v1-a12",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Verification and operation placement check",
+      "conceptIds": [
+        "test.mirroring-implementation",
+        "test.boundary-cases",
+        "ops.configuration",
+        "ops.request-id",
+        "ops.rollback"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering chapter 12. Each describes a situation the lessons did not cover directly; reason from the principle rather than from a remembered example.",
+      "chapterId": "v1-ch12",
+      "items": [
+        {
+          "id": "v1-a12-i1",
+          "objectiveIds": [
+            "test.mirroring-implementation",
+            "test.testable-functions"
+          ],
+          "critical": true,
+          "promptMarkdown": "A test reads `expect(repository.save).toHaveBeenCalledWith({ id: 7, total: 40 })` and asserts nothing else. The function under test is then rewritten to compute a different total, but still to call `repository.save` with the object it computed. What happens to the test, and what does that tell you?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "fails-for-shape",
+                "textMarkdown": "It fails — but only because the recorded argument differs, so it can detect a changed total here. It still asserts nothing about what the caller receives, so it would not notice a wrong return value.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Argument assertions do constrain the value passed on, but they say nothing about the function's own result, and they break on any refactor that changes how the value is handed over."
+              },
+              {
+                "id": "passes",
+                "textMarkdown": "It passes, because interaction assertions never inspect values.",
+                "correct": false,
+                "explanationMarkdown": "`toHaveBeenCalledWith` does compare the argument, so a different total makes it fail. The weakness is narrower than 'checks nothing'."
+              },
+              {
+                "id": "always-good",
+                "textMarkdown": "It fails, which proves interaction assertions are as good as asserting the result.",
+                "correct": false,
+                "explanationMarkdown": "They coincide here. They diverge as soon as the code passes the value differently — a second argument, a builder, a transaction object — where the test fails despite correct behaviour."
+              },
+              {
+                "id": "needs-real-db",
+                "textMarkdown": "It fails, and the lesson is that the repository should not be mocked at all.",
+                "correct": false,
+                "explanationMarkdown": "Using a real repository would make the test slower and would still leave the choice of what to assert unresolved."
+              }
+            ]
+          },
+          "explanationMarkdown": "Interaction assertions are not worthless — they constrain the value handed on. They are simply the wrong instrument for 'is the answer right', and they are brittle against refactors that change how a correct value travels."
+        },
+        {
+          "id": "v1-a12-i2",
+          "objectiveIds": [
+            "ops.configuration"
+          ],
+          "critical": true,
+          "promptMarkdown": "A service reads `const maxRetries = Number(env.MAX_RETRIES) || 3;`. An operator sets `MAX_RETRIES=0` to disable retrying during an incident, and retries continue. What is the cause?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "zero-falsy",
+                "textMarkdown": "`0` is falsy, so `||` discards it and applies the default of 3. An explicit absence check such as `??` on the raw value, or a parsed-and-validated setting, is needed.",
+                "correct": true,
+                "explanationMarkdown": "Correct. `||` cannot distinguish 'not set' from 'set to a falsy value', which makes 0 and false impossible to configure."
+              },
+              {
+                "id": "number-fails",
+                "textMarkdown": "`Number('0')` returns `NaN`, which then falls through to the default.",
+                "correct": false,
+                "explanationMarkdown": "`Number('0')` is `0`, a perfectly good number. The value survives the conversion and is then thrown away by `||`."
+              },
+              {
+                "id": "string-env",
+                "textMarkdown": "Environment variables are strings, and the string `'0'` is truthy, so the default is not applied at all.",
+                "correct": false,
+                "explanationMarkdown": "The string `'0'` is indeed truthy, but it has already been converted to the number `0` before `||` sees it — which is exactly when it becomes falsy."
+              },
+              {
+                "id": "restart",
+                "textMarkdown": "The setting was read at start-up and the process was not restarted.",
+                "correct": false,
+                "explanationMarkdown": "A plausible operational cause worth ruling out, but the code shown would ignore `MAX_RETRIES=0` even after a clean restart."
+              }
+            ]
+          },
+          "explanationMarkdown": "Defaulting with `||` collapses 'absent' and 'falsy'. It is the same misconception as a truthiness check on a legitimate 0, and in configuration it makes 'off' unexpressible."
+        },
+        {
+          "id": "v1-a12-i3",
+          "objectiveIds": [
+            "ops.rollback",
+            "ops.deployment-order"
+          ],
+          "critical": false,
+          "promptMarkdown": "A release contains a migration that drops an unused column and the code change that stopped using it. Both go out together. Two hours later a serious defect is found in unrelated code in the same release. What is the position?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "no-rollback",
+                "textMarkdown": "Rolling back is no longer straightforward: the previous version's code may still reference the dropped column, and the data in it is gone regardless. The team must fix forward.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Bundling a destructive migration with the code removed the rollback option for everything else in the release."
+              },
+              {
+                "id": "safe",
+                "textMarkdown": "Rolling back is safe, because the column was unused.",
+                "correct": false,
+                "explanationMarkdown": "Unused by the *new* code. The previous version — the one being rolled back to — may still select it, and either way the data cannot be recovered by a redeploy."
+              },
+              {
+                "id": "rerun-down",
+                "textMarkdown": "Run the migration's down step, which recreates the column, then redeploy the old version.",
+                "correct": false,
+                "explanationMarkdown": "The down step recreates an empty column. The schema is restored and the contents are not, which for a column anything reads is a different kind of outage."
+              },
+              {
+                "id": "unrelated",
+                "textMarkdown": "The defect is in unrelated code, so the migration has no bearing on the decision.",
+                "correct": false,
+                "explanationMarkdown": "Rollback operates on the release as a whole. Anything in it that cannot be reversed constrains what can be done about everything else in it."
+              }
+            ]
+          },
+          "explanationMarkdown": "A release is reversible only if every part of it is. One destructive migration removes the option for the whole release, which is why they are scheduled separately from the code that depends on them."
+        },
+        {
+          "id": "v1-a12-i4",
+          "objectiveIds": [
+            "ops.request-id",
+            "ops.log-hygiene"
+          ],
+          "critical": false,
+          "promptMarkdown": "A team adds request ids, then implements them by generating a fresh id inside each function that logs. Investigations do not improve. Why not?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "per-function",
+                "textMarkdown": "A new id per function means the lines of one request share no value, so nothing is correlated. The id must be created once per request and passed down.",
+                "correct": true,
+                "explanationMarkdown": "Correct. The point of the id is that it is the *same* on every line of one request, which is why it is minted at the edge and carried on a child logger."
+              },
+              {
+                "id": "too-short",
+                "textMarkdown": "The generated ids are too short and collide between requests.",
+                "correct": false,
+                "explanationMarkdown": "Collisions would merge distinct requests. Here the opposite happens: one request is split across many unrelated ids."
+              },
+              {
+                "id": "not-returned",
+                "textMarkdown": "The ids are not returned to the client, which is the only thing that matters.",
+                "correct": false,
+                "explanationMarkdown": "Returning the id is genuinely important for turning a customer report into a query — but with a different id per function there would be no single id to return."
+              },
+              {
+                "id": "wrong-level",
+                "textMarkdown": "The ids are logged at debug level, which is disabled in production.",
+                "correct": false,
+                "explanationMarkdown": "Nothing in the description says so, and even at info level a per-function id would still correlate nothing."
+              }
+            ]
+          },
+          "explanationMarkdown": "Correlation comes from sharing one value across every line of one request, and propagating it across service boundaries. An identifier that is unique per log site is just noise with extra steps."
+        },
+        {
+          "id": "v1-a12-i5",
+          "objectiveIds": [
+            "test.boundary-cases"
+          ],
+          "critical": false,
+          "promptMarkdown": "A function returns the median of a numeric array. A colleague's tests cover `[1,2,3]`, `[5,6,7]` and `[10,20,30]`. Which single additional case is most likely to expose a defect?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "even-length",
+                "textMarkdown": "An even-length array such as `[1, 2, 3, 4]`, where the median is the average of the two middle values.",
+                "correct": true,
+                "explanationMarkdown": "Correct. Every existing case is odd-length and takes the middle element; the even-length branch is completely unexercised."
+              },
+              {
+                "id": "bigger-array",
+                "textMarkdown": "A much longer array such as 1,000 sorted values.",
+                "correct": false,
+                "explanationMarkdown": "That repeats the odd-length case at greater cost. Size is not the dimension along which this function has a second behaviour."
+              },
+              {
+                "id": "negatives",
+                "textMarkdown": "An array of negative numbers such as `[-3, -2, -1]`.",
+                "correct": false,
+                "explanationMarkdown": "Worth having eventually, but it exercises the same odd-length path, and median has no special handling for sign."
+              },
+              {
+                "id": "strings",
+                "textMarkdown": "An array of numeric strings such as `['1','2','3']`.",
+                "correct": false,
+                "explanationMarkdown": "That tests input validation rather than the median rule, and the specification says the input is a numeric array."
+              }
+            ]
+          },
+          "explanationMarkdown": "Look for the dimension along which the specification changes behaviour — here, odd versus even length. Three examples of the same case are one case, however different the numbers look."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    }
+  ]
+}
