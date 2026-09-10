@@ -43,7 +43,10 @@ export default defineConfig({
   webServer: process.env.E2E_NO_SERVER
     ? undefined
     : {
-        command: './node_modules/.bin/vite --port 5173 --strictPort',
+        // Playwright launches this through cmd.exe on Windows, where a './'
+        // path is not a recognised command. Invoking the JS entry with node
+        // works on every platform and avoids npx resolving the wrong binary.
+        command: 'node ./node_modules/vite/bin/vite.js --port 5173 --strictPort',
         url: BASE_URL,
         reuseExistingServer: true,
         // Vite's first cold start here has been measured at ~62s; 180s left no

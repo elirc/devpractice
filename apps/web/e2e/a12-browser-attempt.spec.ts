@@ -134,16 +134,22 @@ test.describe('browser runner', () => {
     // newlines, so asserting multi-line source is fragile — but a token with no
     // whitespace survives intact on its own line.
     const marker = `DRAFTMARKER${Date.now()}`;
-    await replaceCode(page, `// ${marker}\n${SOLUTION}`);
 
-    // Wait for the server to acknowledge the draft write, not just the debounce.
-    await page.waitForResponse(
+    // Arm the wait BEFORE typing. Autosave can fire while replaceCode is still
+    // running, and waitForResponse only observes responses that arrive after it
+    // is called — registering it afterwards misses the write and times out.
+    const draftSaved = page.waitForResponse(
       (r) =>
         new URL(r.url()).pathname.startsWith('/api/v1/drafts') &&
         r.request().method() !== 'GET' &&
         r.ok(),
       { timeout: 60_000 },
     );
+
+    await replaceCode(page, `// ${marker}\n${SOLUTION}`);
+
+    // Wait for the server to acknowledge the draft write, not just the debounce.
+    await draftSaved;
 
     await page.reload();
     const editor = page.getByLabel(`Code editor for ${ENTRYPOINT}`);
