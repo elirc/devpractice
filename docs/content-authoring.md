@@ -23,8 +23,9 @@ turned into MDX components.
 
 | Path | Purpose |
 | --- | --- |
-| `curriculum/concepts.json` | the stable concept-id catalog (115 ids) |
-| `curriculum/release.json` | the release manifest: which chapter files make up the snapshot |
+| `curriculum/concepts.json` | the stable concept-id catalog (193 ids: 115 `v1`, 32 `v2`, 46 `v3`) |
+| `curriculum/release.json` | the V1 release manifest: which chapter files make up the snapshot |
+| `curriculum/release-v2.json`, `release-v3.json` | the V2 and V3 manifests; select one with `--manifest` |
 | `curriculum/chapters/*.json` | one file per chapter: `{ "items": [...] }` |
 | `curriculum/verification.json` | starter exemptions and author-declared mutants |
 | `curriculum/fixtures/*.json` | the valid and deliberately-broken packages the gate tests itself against |
@@ -39,6 +40,28 @@ every existing chapter plus the new one into a fresh snapshot.
 `dp-content build` does this for you from `release.json`. If you write a chapter
 file and forget to list it there, the CLI prints it as an orphan rather than
 silently leaving it out.
+
+`--manifest <file>` selects a manifest other than `release.json`, which is how V2
+and V3 are assembled. Every chapter file listed by a manifest is in that snapshot
+and nothing else is, so the orphan note is relative to the manifest you chose: on
+a V1 run it lists every V2 and V3 file, which is correct and expected.
+
+### Reachability is checked in both directions
+
+A chapter has to be listed by its release's track, and a mission has to be listed
+by some chapter's `missionIds`. Both are errors
+(`reachability.chapter-unlisted`, `reachability.mission-unclaimed`) because the
+UI renders from those two arrays, and content nothing points at is complete,
+correct and invisible. A mission's `chapterPrerequisiteIds` is about ordering, not
+placement.
+
+### The track item exists once per release
+
+Because a release is a snapshot, the track item has to list exactly the chapters
+that release contains — so the same `v1-track` item exists at version 1, 2 and 3
+in three separate files, and each manifest pins one of them. `curriculum/README.md`
+has the table. Two reachability edges the validator does not check are documented
+there too; both have already shipped broken once.
 
 ## Concept ids
 

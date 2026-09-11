@@ -8,8 +8,15 @@ These are the exact commands whose results are recorded in
 
 ## Content gate (the most important one)
 
+    pnpm content:validate            # V1
+    pnpm content:validate:v2         # V2
+    pnpm content:validate:v3         # V3
+
+Or directly, which is what those scripts do:
+
     cd packages/content-tools
     ./node_modules/.bin/tsx src/cli.ts validate
+    ./node_modules/.bin/tsx src/cli.ts validate --manifest release-v2.json --target v2
 
 Expect `OK`, exit 0, and — critically — this line:
 
@@ -18,9 +25,15 @@ Expect `OK`, exit 0, and — critically — this line:
 If it says `node:vm`, the QuickJS runner failed to load and the gate is testing
 the wrong engine. That is a **failure**, not a detail. See `04-gotchas.md`.
 
-Add `--package <file>` to validate one assembled package. Read `src/cli.ts` for
-the current flags rather than guessing. `--skip-verify` skips the behavioural
-gate — run WITHOUT it at least once, or solutions and starters never execute.
+Add `--package <file>` to validate one assembled package, or `--manifest <file>`
+to assemble a different release. Read `src/cli.ts` for the current flags rather
+than guessing. `--skip-verify` skips the behavioural gate — run WITHOUT it at
+least once, or solutions and starters never execute.
+
+`pnpm content:assets` (and `assets:v2`, `assets:v3`) recomputes every bundled
+asset's checksum from the files on disk and compares it with the manifest. On V1
+it reports three mismatches; that is expected and explained in
+`docs/known-limitations.md`, not a regression.
 
 ## Typechecks (all six packages)
 
@@ -76,16 +89,32 @@ Chromium r1148 only. WebKit/Firefox have never been exercised.
 ## Mission gate (A13) — for each mission
 
     # inside projects/<mission>/starter
-    npm install                # or: dotnet restore
+    npm install                # or: dotnet restore && dotnet build
     <baseline command>         # MUST pass
+    <baseline command>         # again — proves the seed and fixtures are repeatable
     <mission command>          # MUST fail, for the intended reason
 
     # then against the reference solution
     <baseline command>         # MUST pass
     <mission command>          # MUST pass
+    # and restore the starter file afterwards
 
-Read the actual failure text at step 3. A failure from a missing dependency or a
-DB connection error is a broken assignment, not a correctly failing one.
+Read the actual failure text at the mission step. A failure from a missing
+dependency or a DB connection error is a broken assignment, not a correctly
+failing one.
+
+Run the baseline **twice**. That is what caught M07, whose reset left one table
+alone so the second run failed on its own fixture row.
+
+Drop and recreate each mission's databases first, or "migrations apply to an empty
+database" is an assumption rather than a result. The .NET missions have no
+migrations — they use `EnsureCreatedAsync` — so for those the equivalent proof is
+EnsureCreated against a recreated database plus two baseline runs. Say it that way.
+
+Two reusable scripts from the last session are worth reading before writing your
+own: the chained Node flow in `docs/missions-verification-v2.md`'s command list,
+and `a13-dotnet.sh`, which the V3 record names. Each mission owns its own
+database; never point one at the platform's (spec §5.2).
 
 ## Whole-repo sweep
 

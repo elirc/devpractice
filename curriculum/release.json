@@ -4,6 +4,7 @@
   "title": "DevPractice V1 — practical web application engineering",
   "baseReleaseId": null,
   "chapterFiles": [
+    "chapters/v1-track.json",
     "chapters/v1-ch01.json",
     "chapters/v1-ch02.json",
     "chapters/v1-ch03.json",

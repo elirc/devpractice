@@ -31,7 +31,9 @@
         "jobs.idempotency",
         "jobs.interrupted-work"
       ],
-      "missionIds": [],
+      "missionIds": [
+        "m08-inventory-report-job"
+      ],
       "sortOrder": 15
     },
     {

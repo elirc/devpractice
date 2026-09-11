@@ -93,3 +93,27 @@ manifests as `browserType.launch` failing.
 The e2e config starts Vite itself but expects the API to be started separately.
 On Windows the `webServer` command must be `node ./node_modules/vite/bin/vite.js`
 — a `./`-prefixed path is not a recognised command under `cmd.exe`.
+
+## Wall-clock, measured during the V2/V3 mission verification
+
+Budget from these, not from experience on a normal machine:
+
+| Thing | Observed |
+|---|---|
+| One `vitest run` of a mission suite | 25s to 235s; the first run after an edit is the slow one (transform + collect dominate) |
+| `tsc --noEmit` in a mission | 60 to 120s |
+| A content `validate --skip-verify` | 60 to 120s |
+| `dotnet restore` for a mission (warm NuGet cache) | 10 to 20s |
+| `dotnet build` for a mission, cold `obj/` | **3 to 8 minutes** |
+| `dotnet test --filter Category=...` | 20s to 2 minutes |
+
+The OS **killed a background `vitest` run** during this work because free memory
+fell under about 0.5 GB. Run one heavy process at a time, full stop. If a
+background job dies with no test output and no error, suspect the memory killer
+before you suspect the code.
+
+Useful check before starting anything long:
+
+    powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB"
+
+Under 0.7 GB free, do not start a second one.

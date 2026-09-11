@@ -1,0 +1,685 @@
+{
+  "schemaVersion": 1,
+  "packageId": "fx-mission-unclaimed",
+  "packageVersion": "1.0.0",
+  "baseReleaseId": null,
+  "mode": "snapshot",
+  "title": "INVALID: a mission no chapter lists",
+  "items": [
+    {
+      "kind": "track",
+      "id": "fx-track",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Fixture track",
+      "conceptIds": [
+        "js.array-filter"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Fixture track used by the content-tools test suite.",
+      "description": "A minimal but complete track used to test the content pipeline.",
+      "targetOutcomes": [
+        "Prove the content pipeline validates a complete package."
+      ],
+      "chapterIds": [
+        "fx-chapter"
+      ]
+    },
+    {
+      "kind": "chapter",
+      "id": "fx-chapter",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Selections over collections",
+      "conceptIds": [
+        "js.array-filter",
+        "js.purity",
+        "js.shallow-copy"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A single-chapter fixture used to exercise the content pipeline end to end.",
+      "trackId": "fx-track",
+      "lessonIds": [
+        "fx-lesson"
+      ],
+      "assessmentId": "fx-assessment",
+      "objectiveIds": [
+        "js.array-filter",
+        "js.purity",
+        "js.shallow-copy"
+      ],
+      "missionIds": [],
+      "sortOrder": 0
+    },
+    {
+      "kind": "lesson",
+      "id": "fx-lesson",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Selecting records without changing them",
+      "conceptIds": [
+        "js.array-filter",
+        "js.purity",
+        "js.shallow-copy"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A support desk constantly asks narrow questions of a wide list: how many tickets are open, which ones belong to this customer, which breached their response time. Each of those is a selection over the same array, and none of them should change the array itself.\n\nJavaScript gives you `filter` for exactly this. It walks the array, keeps the records your predicate accepts, and hands back a **new** array. The original is untouched, which means the caller can ask a second question of the same data and get an answer that still makes sense.",
+      "chapterId": "fx-chapter",
+      "sortOrder": 0,
+      "objectives": [
+        "Select matching records from an array with filter.",
+        "Explain why a selection must not modify its input."
+      ],
+      "estimatedMinutes": 8,
+      "workedExampleMarkdown": "```js\nconst tickets = [\n  { id: 'T-1', status: 'open' },\n  { id: 'T-2', status: 'closed' },\n];\n\n// filter builds a NEW array; `tickets` is unchanged afterwards.\nconst open = tickets.filter((ticket) => ticket.status === 'open');\n\nopen.length;    // 1\ntickets.length; // still 2\n```\n\nThe predicate answers one question per record: keep it, or not. Because `filter` returns a new array, you can chain a second selection without disturbing the first result.",
+      "commonMistakes": [
+        "Using `forEach` with a counter and accidentally editing the records while counting them.",
+        "Comparing with `==` so that a status of `null` or `0` matches unexpectedly.",
+        "Assuming `filter` edits the array in place and then wondering why the original still has every record."
+      ],
+      "summaryMarkdown": "`filter` selects; it never edits. Keep selections pure so the same data can answer several questions in a row.",
+      "exerciseIds": [
+        "js-arrays-filter-open",
+        "fx-ex-shallow-copy",
+        "fx-ex-explain-purity"
+      ],
+      "reviewCardIds": [
+        "fx-card-filter",
+        "fx-card-transfer"
+      ],
+      "references": [
+        {
+          "label": "MDN: Array.prototype.filter()",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/filter"
+        }
+      ]
+    },
+    {
+      "kind": "exercise",
+      "id": "js-arrays-filter-open",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Count open support tickets",
+      "conceptIds": [
+        "js.array-filter",
+        "js.purity"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Practice selecting records without changing the input.",
+      "lessonId": "fx-lesson",
+      "sortOrder": 0,
+      "type": "function",
+      "difficulty": "foundation",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "Return the number of tickets whose status is exactly `open`. Do not mutate the input. Status comparisons are case-sensitive.",
+      "hints": [
+        "Separate selecting the matching tickets from counting them.",
+        "Array.filter returns a new array containing only the records that match.",
+        "Filter by ticket.status === 'open', then read the resulting array's length."
+      ],
+      "solution": {
+        "code": "function countOpen(tickets) { return tickets.filter(ticket => ticket.status === 'open').length; }",
+        "explanationMarkdown": "Filtering selects matching records without changing the original array, and the resulting length is the count. An empty input produces zero. A loop with a counter is equally valid."
+      },
+      "grading": {
+        "kind": "function-cases",
+        "language": "javascript",
+        "entrypoint": "countOpen",
+        "starterCode": "function countOpen(tickets) { return 0; }",
+        "assertInputUnchanged": true,
+        "cases": [
+          {
+            "id": "empty",
+            "args": [
+              []
+            ],
+            "expected": 0,
+            "hidden": false
+          },
+          {
+            "id": "mixed",
+            "args": [
+              [
+                {
+                  "status": "open"
+                },
+                {
+                  "status": "closed"
+                },
+                {
+                  "status": "open"
+                }
+              ]
+            ],
+            "expected": 2,
+            "hidden": false
+          },
+          {
+            "id": "all-closed",
+            "args": [
+              [
+                {
+                  "status": "closed"
+                }
+              ]
+            ],
+            "expected": 0,
+            "hidden": false
+          },
+          {
+            "id": "uppercase-open-is-not-open",
+            "args": [
+              [
+                {
+                  "status": "Open"
+                },
+                {
+                  "status": "open"
+                }
+              ]
+            ],
+            "expected": 1,
+            "hidden": false
+          },
+          {
+            "id": "all-open",
+            "args": [
+              [
+                {
+                  "status": "open"
+                },
+                {
+                  "status": "open"
+                },
+                {
+                  "status": "open"
+                }
+              ]
+            ],
+            "expected": 3,
+            "hidden": true
+          }
+        ]
+      },
+      "primaryConceptId": "js.array-filter",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "fx-ex-shallow-copy",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Diagnose a shared nested record",
+      "conceptIds": [
+        "js.shallow-copy",
+        "js.mutation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Read the code and decide what the spread actually copied.",
+      "lessonId": "fx-lesson",
+      "sortOrder": 1,
+      "type": "code-reading",
+      "difficulty": "core",
+      "estimatedMinutes": 5,
+      "promptMarkdown": "A dispatcher copies a ticket with `const copy = { ...ticket }` and then edits `copy.customer.name`. The original ticket changes too. Why?",
+      "hints": [
+        "Ask how many levels deep the copy went.",
+        "A spread copies the top-level properties only; nested objects are shared by reference.",
+        "`copy.customer` and `ticket.customer` point at the same object, so editing one is editing both."
+      ],
+      "solution": {
+        "modelAnswer": "The spread is a shallow copy, so the nested customer object is shared.",
+        "explanationMarkdown": "A spread copies each top-level property value. For a nested object that value is a reference, so the copy and the original point at the same customer record. Copying the nested object as well fixes it."
+      },
+      "grading": {
+        "kind": "choice",
+        "mode": "single",
+        "options": [
+          {
+            "id": "shallow",
+            "textMarkdown": "The spread copied only the top level, so `customer` is shared.",
+            "correct": true,
+            "explanationMarkdown": "Correct. A spread copies one level; nested values stay shared references."
+          },
+          {
+            "id": "spread-broken",
+            "textMarkdown": "Object spread does not copy anything.",
+            "correct": false,
+            "explanationMarkdown": "It does copy: `copy` is a new object. The issue is only that the copy is one level deep."
+          },
+          {
+            "id": "const-blocks",
+            "textMarkdown": "`const` prevents the copy from being modified.",
+            "correct": false,
+            "explanationMarkdown": "`const` stops the binding being reassigned. It does not freeze the object it refers to."
+          },
+          {
+            "id": "needs-json",
+            "textMarkdown": "Only `JSON.parse(JSON.stringify(x))` can copy an object at all.",
+            "correct": false,
+            "explanationMarkdown": "That produces a deep copy, but it is not the only way, and it silently drops dates and functions."
+          }
+        ]
+      },
+      "primaryConceptId": "js.shallow-copy",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "exercise",
+      "id": "fx-ex-explain-purity",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Explain why the filter helper stays pure",
+      "conceptIds": [
+        "js.purity"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Put the reasoning into your own words; the criteria are shown after you answer.",
+      "lessonId": "fx-lesson",
+      "sortOrder": 2,
+      "type": "explanation",
+      "difficulty": "core",
+      "estimatedMinutes": 6,
+      "promptMarkdown": "A colleague proposes changing `countOpen` to also mark each open ticket as seen. Explain what that would cost the caller and what you would suggest instead.",
+      "hints": [
+        "Think about what the caller assumes when it passes its own array in.",
+        "A function that both answers a question and changes data is hard to reuse and hard to test.",
+        "Separate the query from the command: return the count, and let a separate function record that tickets were seen."
+      ],
+      "solution": {
+        "modelAnswer": "Marking tickets inside countOpen makes the function impure: calling it twice would change the data, callers could no longer use it for a simple count, and tests would need to rebuild fixtures between assertions. Keep the count as a pure query and move the marking into an explicit separate operation.",
+        "explanationMarkdown": "The point is separating a query from a command. A pure count can be called anywhere, cached and tested trivially. Once it also mutates, every caller inherits that side effect whether it wanted it or not."
+      },
+      "grading": {
+        "kind": "rubric",
+        "criteria": [
+          "Identifies that the function would no longer be pure, because it changes data the caller owns.",
+          "Names a concrete consequence, such as repeat calls differing, or tests needing fresh fixtures each time.",
+          "Proposes separating the count from the marking rather than adding a flag argument."
+        ],
+        "modelAnswerMarkdown": "Marking tickets inside `countOpen` makes it impure. Calling it twice would produce different data, so callers can no longer treat it as a simple question, and every test needs a fresh fixture. I would keep `countOpen` as a pure query and add a separate `markTicketsSeen` operation the caller invokes deliberately."
+      },
+      "primaryConceptId": "js.purity",
+      "requiredForLessonCompletion": true
+    },
+    {
+      "kind": "review_card",
+      "id": "fx-card-filter",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "What does filter return?",
+      "conceptIds": [
+        "js.array-filter"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Recall the return value and its effect on the original array.",
+      "lessonId": "fx-lesson",
+      "type": "recall",
+      "promptMarkdown": "What does `Array.prototype.filter` return, and what happens to the array you called it on?",
+      "answerMarkdown": "It returns a **new** array containing the elements the predicate accepted. The original array is not modified.",
+      "explanationMarkdown": "This is the property that makes selections composable: the source data survives, so you can ask another question of it.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.array-filter"
+    },
+    {
+      "kind": "review_card",
+      "id": "fx-card-transfer",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Spot the impure selection",
+      "conceptIds": [
+        "js.purity",
+        "js.mutation"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Apply the idea to unfamiliar code.",
+      "lessonId": "fx-lesson",
+      "type": "transfer",
+      "promptMarkdown": "A helper is written as `function urgent(t) { t.forEach(x => x.seen = true); return t.filter(x => x.priority === 1); }`. Name the defect and the symptom a caller would report.",
+      "answerMarkdown": "It mutates every ticket by setting `seen` before selecting. A caller would report that simply asking for urgent tickets marked the whole queue as seen.",
+      "explanationMarkdown": "The `filter` half is fine. The `forEach` above it is a hidden side effect, so the function is a command pretending to be a query.",
+      "gradingOrigin": "self_reported",
+      "primaryConceptId": "js.purity"
+    },
+    {
+      "kind": "assessment",
+      "id": "fx-assessment",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Selections and immutability placement check",
+      "conceptIds": [
+        "js.array-filter",
+        "js.purity",
+        "js.shallow-copy"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "Five separately authored items covering this chapter. No hints are shown until you submit.",
+      "chapterId": "fx-chapter",
+      "items": [
+        {
+          "id": "fx-a-1",
+          "objectiveIds": [
+            "js.array-filter"
+          ],
+          "critical": true,
+          "promptMarkdown": "Given `[3, 8, 2, 9]`, what does `nums.filter(n => n > 4)` evaluate to, and what is `nums` afterwards?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a",
+                "textMarkdown": "`[8, 9]`, and `nums` still has four elements.",
+                "correct": true,
+                "explanationMarkdown": "Correct: a new array of the accepted values, source unchanged."
+              },
+              {
+                "id": "b",
+                "textMarkdown": "`[8, 9]`, and `nums` now has two elements.",
+                "correct": false,
+                "explanationMarkdown": "filter does not remove elements from the source array."
+              },
+              {
+                "id": "c",
+                "textMarkdown": "`[3, 2]`, and `nums` is unchanged.",
+                "correct": false,
+                "explanationMarkdown": "The predicate keeps values greater than 4, not the others."
+              },
+              {
+                "id": "d",
+                "textMarkdown": "`true`, because the predicate returns a boolean.",
+                "correct": false,
+                "explanationMarkdown": "The predicate returns booleans; filter itself returns an array."
+              }
+            ]
+          },
+          "explanationMarkdown": "filter builds a new array from the values the predicate accepted and leaves the source alone."
+        },
+        {
+          "id": "fx-a-2",
+          "objectiveIds": [
+            "js.purity"
+          ],
+          "critical": true,
+          "promptMarkdown": "Which of these makes a function impure?",
+          "grading": {
+            "kind": "choice",
+            "mode": "multiple",
+            "options": [
+              {
+                "id": "a",
+                "textMarkdown": "It writes a property on an object it received as an argument.",
+                "correct": true,
+                "explanationMarkdown": "Yes: it changes state the caller owns."
+              },
+              {
+                "id": "b",
+                "textMarkdown": "It reads a property of its argument.",
+                "correct": false,
+                "explanationMarkdown": "Reading is fine; purity restricts changes, not access."
+              },
+              {
+                "id": "c",
+                "textMarkdown": "It appends to an array declared outside the function.",
+                "correct": true,
+                "explanationMarkdown": "Yes: that is an observable side effect outside its own scope."
+              },
+              {
+                "id": "d",
+                "textMarkdown": "It declares a local variable.",
+                "correct": false,
+                "explanationMarkdown": "Local state is invisible to callers and keeps the function pure."
+              }
+            ]
+          },
+          "explanationMarkdown": "Impurity is about observable change outside the function, not about how much work happens inside it."
+        },
+        {
+          "id": "fx-a-3",
+          "objectiveIds": [
+            "js.shallow-copy"
+          ],
+          "critical": false,
+          "promptMarkdown": "After `const b = { ...a }`, which statement changes `a` as well as `b`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a",
+                "textMarkdown": "`b.meta.tag = \"x\"` where `a.meta` is an object.",
+                "correct": true,
+                "explanationMarkdown": "Correct: the nested object is shared between the two copies."
+              },
+              {
+                "id": "b",
+                "textMarkdown": "`b.title = \"x\"` where `a.title` is a string.",
+                "correct": false,
+                "explanationMarkdown": "Top-level properties were copied, so this only affects `b`."
+              },
+              {
+                "id": "c",
+                "textMarkdown": "`b = {}`.",
+                "correct": false,
+                "explanationMarkdown": "That reassigns the binding `b`; `a` is untouched."
+              },
+              {
+                "id": "d",
+                "textMarkdown": "None of them, because the spread is a deep copy.",
+                "correct": false,
+                "explanationMarkdown": "The spread copies one level only."
+              }
+            ]
+          },
+          "explanationMarkdown": "A spread copies top-level values. Nested objects are copied by reference, so both records share them."
+        },
+        {
+          "id": "fx-a-4",
+          "objectiveIds": [
+            "js.array-filter",
+            "js.purity"
+          ],
+          "critical": false,
+          "promptMarkdown": "A colleague replaces `list.filter(fn)` with a `for` loop that calls `list.splice()` when a record does not match. What breaks?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a",
+                "textMarkdown": "The caller’s array is emptied of non-matching records, and the loop skips elements as indices shift.",
+                "correct": true,
+                "explanationMarkdown": "Both problems are real: splice mutates in place and shifts every later index."
+              },
+              {
+                "id": "b",
+                "textMarkdown": "Nothing; splice and filter are equivalent.",
+                "correct": false,
+                "explanationMarkdown": "splice edits in place, filter returns a new array."
+              },
+              {
+                "id": "c",
+                "textMarkdown": "Only performance changes.",
+                "correct": false,
+                "explanationMarkdown": "Correctness changes first: the source array is modified."
+              },
+              {
+                "id": "d",
+                "textMarkdown": "The loop throws because splice cannot be used on arrays.",
+                "correct": false,
+                "explanationMarkdown": "splice is a standard array method; it works, which is exactly why the defect is quiet."
+              }
+            ]
+          },
+          "explanationMarkdown": "Mutating a collection while iterating over it shifts the indices under the loop, and it destroys data the caller still needed."
+        },
+        {
+          "id": "fx-a-5",
+          "objectiveIds": [
+            "js.array-filter"
+          ],
+          "critical": false,
+          "promptMarkdown": "Which predicate counts only tickets whose status is exactly the lowercase word `open`?",
+          "grading": {
+            "kind": "choice",
+            "mode": "single",
+            "options": [
+              {
+                "id": "a",
+                "textMarkdown": "`t => t.status === \"open\"`",
+                "correct": true,
+                "explanationMarkdown": "Strict equality against the exact string is what the requirement asks for."
+              },
+              {
+                "id": "b",
+                "textMarkdown": "`t => t.status == \"open\"`",
+                "correct": false,
+                "explanationMarkdown": "Loose equality is unnecessary here and invites coercion surprises elsewhere."
+              },
+              {
+                "id": "c",
+                "textMarkdown": "`t => t.status.toLowerCase() === \"open\"`",
+                "correct": false,
+                "explanationMarkdown": "That also accepts `Open` and `OPEN`, which the requirement excludes."
+              },
+              {
+                "id": "d",
+                "textMarkdown": "`t => t.status`",
+                "correct": false,
+                "explanationMarkdown": "That accepts every non-empty status, not just `open`."
+              }
+            ]
+          },
+          "explanationMarkdown": "The requirement is case-sensitive, so normalising the case would accept records it should reject."
+        }
+      ],
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      }
+    },
+    {
+      "kind": "mission",
+      "id": "fx-mission",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M01 — Support desk ticket interface",
+      "conceptIds": [
+        "react.components",
+        "react.props",
+        "react.responsibility",
+        "react.state-updates",
+        "react.controlled-forms",
+        "react.validation",
+        "react.submission-state",
+        "react.loading-states",
+        "react.empty-states",
+        "react.response-mapping",
+        "react.feature-composition",
+        "react.keys",
+        "ui.stale-response",
+        "a11y.accessible-name",
+        "a11y.keyboard-navigation",
+        "a11y.focus",
+        "html.forms",
+        "html.labels",
+        "css.responsive",
+        "ts.interfaces"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "You are building the first screen of a small internal support desk. A dispatcher opens it, sees the tickets waiting on them, narrows the list to the ones that need attention now, and raises a new ticket while a customer is still on the phone.\n\nThe data layer is already decided. `src/api/types.ts` defines a `TicketApi` interface — `listTickets`, `getTicket`, `createTicket`, `listComments` — and `src/api/mockApi.ts` implements it in memory. The mock behaves like a network rather than like a local array: it is asynchronous, it can be told to be slow, it can be told to fail, and it validates on its own side, so your form check is fast feedback and never the last word.\n\nThat interface is the whole point of the mission. In M02 you replace the mock with an adapter that speaks HTTP to a real backend, and `src/main.tsx` is the only file that should have to change. If a component imports the mock directly, or assumes tickets already exist in an array, the swap stops being a one-line change and becomes a rewrite.\n\nFour features are missing, and `src/App.tsx` currently renders a heading and a sentence saying so:\n\n1. a ticket list showing title, status and customer;\n2. a status filter across all, open, pending and closed;\n3. a create form with validation the user can actually perceive;\n4. a ticket detail view reachable at its own `/tickets/:id` route.\n\nThe hard part is not any one of those. It is that four states — loading, empty, error and loaded — have to stay distinguishable from one another, that a slow response must not leave a stuck spinner or apply a result the user has already moved past, and that a rejected field has to announce itself to a screen reader rather than only turning red.\n\nEvery customer, ticket and comment in this repository is fictional. There are no credentials, no external services and nothing to configure beyond `npm install`.",
+      "projectId": "fx-mission",
+      "workType": "build",
+      "stack": "react",
+      "release": "v1",
+      "chapterPrerequisiteIds": [
+        "fx-chapter"
+      ],
+      "starterAssetId": "m01-starter-v1",
+      "starterCommit": null,
+      "setupMarkdown": "## Get it running\n\n```bash\ncd projects/m01-support-desk-web/starter\nnpm install\nnpm run dev        # http://localhost:5174\n```\n\nThe starter needs no environment file to run; `.env.example` only records that M01 runs against the in-memory mock (`VITE_API_MODE=mock`).\n\n## The two check commands are different on purpose\n\n```bash\nnpm run check:baseline   # vitest run tests/baseline.test.tsx\nnpm run check:mission    # vitest run tests/mission.test.tsx\n```\n\n`check:baseline` must **pass** on a fresh checkout, before you write a line of code. It renders the untouched application shell and exercises the mock API directly: seeded tickets list, status filtering does not disturb the store, the mock hands back copies. If it fails, your environment is broken — dependencies, Node version, jsdom — and fixing that comes before the assignment.\n\n`check:mission` must **fail** on a fresh checkout. It describes the four features that do not exist yet, so its failures are the assignment, not a broken setup. Read the failures as the specification: they assert observable behaviour, so several different implementations can satisfy them.\n\nRun `npm run check:all` when you want both suites in one pass.\n\n## What the mission tests look for\n\nThey query the way a user perceives the page, so a few names are fixed by the tests and worth knowing before you start: the list is found by `data-testid=\"ticket-list\"`, the empty state by `data-testid=\"ticket-list-empty\"`, the detail view by `data-testid=\"ticket-detail\"`, the filter by its combobox role and the accessible name \"Filter by status\", the form fields by the labels \"Summary\", \"Customer\" and \"Details\", and the submit control by the button name \"Create ticket\". Everything else — markup, styling, state management — is yours.",
+      "baselineChecks": [
+        "npm install — installs the pinned React 18, Vite 5 and Vitest 2 toolchain in projects/m01-support-desk-web/starter",
+        "npm run check:baseline — the scaffold renders and the mock API lists, filters and copies correctly; this must pass before you start",
+        "npm run dev — the Vite dev server serves the shell on http://localhost:5174"
+      ],
+      "acceptanceCriteria": [
+        "Once the data has arrived, the list shows every seeded ticket exactly once, with its title, status and customer visible.",
+        "Loading, empty, error and loaded are four visibly distinct states; an empty list never looks like a list that is still loading.",
+        "A failed request produces a message announced as an alert rather than an empty page.",
+        "The status filter narrows the visible list and returning to \"all\" restores every ticket, so filtering has not consumed the underlying data.",
+        "The create form rejects an empty or whitespace-only title, marks the field invalid and associates the message with the input so a screen reader reads it with the field.",
+        "A rejected submission creates nothing: the ticket count is unchanged afterwards.",
+        "While a create request is in flight the submit control is disabled, and a double click produces one ticket rather than two.",
+        "After a successful create, the new ticket appears in the list without a manual refresh.",
+        "A ticket opens at its own route and shows the ticket body and its comments.",
+        "Every control can be reached and operated from the keyboard alone, and focus is never lost into nothing.",
+        "At a 360 px viewport width the page does not scroll horizontally."
+      ],
+      "verificationCommands": [
+        "npm run check:baseline",
+        "npm run check:mission",
+        "npm run check:all",
+        "npm run build"
+      ],
+      "checklist": [
+        {
+          "id": "baseline-green",
+          "label": "check:baseline passes and check:mission fails before I change anything"
+        },
+        {
+          "id": "list-renders",
+          "label": "The ticket list renders every seeded ticket with title, status and customer"
+        },
+        {
+          "id": "four-states",
+          "label": "Loading, empty, error and loaded states are each visible and distinct"
+        },
+        {
+          "id": "filter-nondestructive",
+          "label": "The status filter narrows and restores the list without mutating the source data"
+        },
+        {
+          "id": "form-validation",
+          "label": "Validation errors are programmatically associated with their field, not colour alone"
+        },
+        {
+          "id": "submit-guard",
+          "label": "Submitting disables the button so a double click cannot create two tickets"
+        },
+        {
+          "id": "detail-route",
+          "label": "Ticket detail is reachable at its own route and shows the body and comments"
+        },
+        {
+          "id": "keyboard-and-narrow",
+          "label": "Every control works from the keyboard and the page does not scroll sideways at 360 px"
+        },
+        {
+          "id": "mission-green",
+          "label": "check:mission passes and no component imports the mock adapter directly"
+        }
+      ],
+      "hints": [
+        "Sort the state into two piles before you write a component. The tickets come from somewhere else and can be slow, stale or absent; the selected filter and the half-typed form live entirely in the browser and are never absent. Those two kinds of state have different failure modes and do not belong in the same place.",
+        "Validation has two separate jobs: deciding whether a value is acceptable, and telling the user which field is wrong. `src/validation.ts` already does the first as a pure function, which is why it can be tested without rendering. The second job is markup: an invalid input needs `aria-invalid` and an `aria-describedby` pointing at the element that holds the message.",
+        "After a successful create, choose deliberately between refetching the list and inserting the record the adapter returned — and do not mutate your existing array in place, because the returned record carries the server's id and timestamp. For the slow case, remember that a response can arrive after the request that replaced it: keep track of which request you are still waiting for and ignore results from the ones you are not."
+      ],
+      "solutionMarkdown": "A complete implementation lives in `projects/m01-support-desk-web/solution/src/`, and `npm run verify:solution` copies it over a throwaway copy of the starter and runs both check commands, leaving your own work untouched.\n\nThe shape it settles on is worth reading even if you solved it differently.\n\n**One owner for the ticket data.** The list, the create form and the detail view all read the same fetched collection, so the fetch and its status live above them and are handed down. That is what makes the loading, error and empty branches a single decision rather than three components each guessing.\n\n**Request identity, not just a boolean.** A single `loading` flag cannot tell you whether the response now arriving is the one you are still waiting for. The solution keeps track of the latest request and drops results that belong to an older one, which is what stops a slow first response from overwriting a fast second one.\n\n**Validation split in two.** `validation.ts` stays pure and returns a field-keyed error map; the form turns that map into `aria-invalid` and `aria-describedby` wiring and refuses to call the adapter when it is non-empty. The mock still validates on its own side, and the solution handles `TicketValidationError` coming back, because a client-side check is a courtesy and not a guarantee.\n\n**Submission state is its own state.** The button is disabled from the moment the request starts until it settles either way, so the double-click case never reaches the adapter twice.\n\n**Filtering derives, never stores.** The filtered list is computed from the fetched array and the selected status at render time. Nothing is written back, so the fixture data is intact and switching back to \"all\" needs no repair step.\n\n**The adapter boundary holds.** `main.tsx` is still the only file that names the mock. That is the property M02 depends on.",
+      "reflectionRubric": [
+        "I can say which state in this feature is server state and which is interface state, and what goes wrong when the two are stored together.",
+        "I can explain why a validation message needs a programmatic association with its input, not just a visual one.",
+        "I can describe how a slow response can overwrite a newer one, and what I did to prevent it.",
+        "I can explain what the TicketApi interface buys me, and name the change in M02 that it makes cheap.",
+        "I can say what would have to change if two dispatchers had the same ticket list open at once, and which of my assumptions that breaks."
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "id": "m01-starter-v1",
+      "path": "projects/m01-support-desk-web/starter",
+      "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

@@ -9,6 +9,7 @@ import { assembleSnapshot, checksumOf, findOrphanChapterFiles, loadManifest } fr
 import { validateStructure } from './validate.js';
 import { verifyPackage, loadSidecar } from './verify.js';
 import { buildInventory, checkInventoryAgainstTarget, RELEASE_TARGETS } from './inventory.js';
+import { checksumAsset } from './asset-checksum.js';
 import type { Issue, ValidationReport } from './types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -17,6 +18,7 @@ const DEFAULT_CURRICULUM = join(REPO_ROOT, 'curriculum');
 
 interface CliOptions {
   curriculum: string;
+  manifestFile: string | undefined;
   target: string | undefined;
   out: string | undefined;
   packageFile: string | undefined;
@@ -81,11 +83,11 @@ async function loadPackageRaw(
     const raw: unknown = JSON.parse(await readFile(options.packageFile, 'utf8'));
     return { raw, checksum: checksumOf(raw) };
   }
-  const manifest = await loadManifest(options.curriculum);
+  const manifest = await loadManifest(options.curriculum, options.manifestFile);
   const orphans = await findOrphanChapterFiles(options.curriculum, manifest);
   if (orphans.length > 0) {
     process.stderr.write(
-      `\nNote: these chapter files exist but are not listed in release.json, so they are NOT in the snapshot:\n` +
+      `\nNote: these chapter files exist but are not listed in this release manifest, so they are NOT in the snapshot:\n` +
         orphans.map((o) => `  ${o}`).join('\n') +
         `\n`,
     );
@@ -160,6 +162,51 @@ async function runBuild(options: CliOptions): Promise<number> {
   return 0;
 }
 
+/**
+ * Print the checksum every asset in the manifest should carry, computed from
+ * what is on disk. It reports rather than rewrites: a manifest is authored, and
+ * a tool that silently re-stamped a checksum would make a changed bundle look
+ * unchanged in review.
+ */
+async function runAssets(options: CliOptions): Promise<number> {
+  const manifest = await loadManifest(options.curriculum, options.manifestFile);
+  const repoRoot = resolve(options.curriculum, '..');
+  let mismatched = 0;
+
+  for (const asset of manifest.assets) {
+    const directory = join(repoRoot, asset.path);
+    if (!existsSync(directory)) {
+      process.stdout.write(`  MISSING  ${asset.id}
+           no directory at ${directory}
+`);
+      mismatched += 1;
+      continue;
+    }
+    const { checksum, files } = await checksumAsset(directory);
+    const agrees = checksum === asset.checksum;
+    if (!agrees) mismatched += 1;
+    process.stdout.write(
+      `  ${agrees ? 'OK      ' : 'DIFFERS '} ${asset.id}  (${files.length} files)
+` +
+        `           on disk  ${checksum}
+` +
+        (agrees ? '' : `           manifest ${asset.checksum}
+`),
+    );
+  }
+
+  process.stdout.write(
+    mismatched === 0
+      ? `
+All ${manifest.assets.length} asset checksum(s) match the files on disk.
+`
+      : `
+${mismatched} of ${manifest.assets.length} asset checksum(s) do not match. Update the manifest deliberately.
+`,
+  );
+  return mismatched === 0 ? 0 : 1;
+}
+
 async function runInventory(options: CliOptions): Promise<number> {
   const { raw } = await loadPackageRaw(options);
   const catalog = await loadConceptCatalog(join(options.curriculum, 'concepts.json'));
@@ -198,6 +245,7 @@ export async function main(argv: string[]): Promise<number> {
     options: {
       curriculum: { type: 'string' },
       package: { type: 'string' },
+      manifest: { type: 'string' },
       target: { type: 'string' },
       out: { type: 'string' },
       'skip-verify': { type: 'boolean', default: false },
@@ -215,6 +263,7 @@ export async function main(argv: string[]): Promise<number> {
 
   const options: CliOptions = {
     curriculum: values.curriculum ? resolve(values.curriculum) : DEFAULT_CURRICULUM,
+    manifestFile: values.manifest,
     target: values.target,
     out: values.out,
     packageFile: values.package ? resolve(values.package) : undefined,
@@ -235,6 +284,8 @@ export async function main(argv: string[]): Promise<number> {
       return runBuild(options);
     case 'inventory':
       return runInventory(options);
+    case 'assets':
+      return runAssets(options);
     default:
       process.stderr.write(`Unknown command '${command}'\n`);
       usage();

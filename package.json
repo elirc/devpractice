@@ -17,7 +17,12 @@
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:seed": "pnpm --filter @devpractice/api seed",
     "content:validate": "pnpm --filter @devpractice/content-tools validate",
+    "content:validate:v2": "pnpm --filter @devpractice/content-tools validate:v2",
+    "content:validate:v3": "pnpm --filter @devpractice/content-tools validate:v3",
     "content:build": "pnpm --filter @devpractice/content-tools build:package",
+    "content:build:v2": "pnpm --filter @devpractice/content-tools build:v2",
+    "content:build:v3": "pnpm --filter @devpractice/content-tools build:v3",
+    "content:assets": "pnpm --filter @devpractice/content-tools assets",
     "owner:bootstrap": "pnpm --filter @devpractice/api owner:bootstrap",
     "owner:reset-password": "pnpm --filter @devpractice/api owner:reset-password"
   },

@@ -5,12 +5,21 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "bin": { "dp-content": "./src/cli.ts" },
+  "bin": {
+    "dp-content": "./src/cli.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "validate": "tsx src/cli.ts validate",
+    "validate:v2": "tsx src/cli.ts validate --manifest release-v2.json --target v2",
+    "validate:v3": "tsx src/cli.ts validate --manifest release-v3.json --target v3",
     "build:package": "tsx src/cli.ts build",
+    "build:v2": "tsx src/cli.ts build --manifest release-v2.json",
+    "build:v3": "tsx src/cli.ts build --manifest release-v3.json",
+    "assets": "tsx src/cli.ts assets",
+    "assets:v2": "tsx src/cli.ts assets --manifest release-v2.json",
+    "assets:v3": "tsx src/cli.ts assets --manifest release-v3.json",
     "build": "echo \"content-tools: source-only package\""
   },
   "dependencies": {

@@ -32,7 +32,9 @@
         "db.cursor-pagination",
         "db.optimistic-concurrency"
       ],
-      "missionIds": [],
+      "missionIds": [
+        "m05-support-desk-nplus1"
+      ],
       "sortOrder": 12
     },
     {

@@ -4,6 +4,7 @@
   "title": "DevPractice V2 — deeper Node.js and production practice",
   "baseReleaseId": null,
   "chapterFiles": [
+    "chapters/v2-track.json",
     "chapters/v1-ch01.json",
     "chapters/v1-ch02.json",
     "chapters/v1-ch03.json",
@@ -42,6 +43,31 @@
       "id": "m03-starter-v1",
       "path": "projects/m03-ownership-defect/starter",
       "checksum": "sha256:7fe4eb16d34a5a08dbcb0abde2654354d3ddf069cbf5bd167fdd90025c2ee377"
+    },
+    {
+      "id": "m04-support-desk-search-starter-v2",
+      "path": "projects/m04-support-desk-search/starter",
+      "checksum": "sha256:686cdb77f3ae454afcffeaea67c559dd251c9b7dd90bd132eae8b2ccf71016da"
+    },
+    {
+      "id": "m05-support-desk-nplus1-starter-v2",
+      "path": "projects/m05-support-desk-nplus1/starter",
+      "checksum": "sha256:5b617e13b868522fa3049aef5e8bd70772b01a064cf2bcddca8a79a5619e1cf7"
+    },
+    {
+      "id": "m06-inventory-core-starter-v2",
+      "path": "projects/m06-inventory-core/starter",
+      "checksum": "sha256:82106da7c0a8b10d9f6bf2912b11e8ab63fdf50e8f3bb06dbf58e14cfcbca382"
+    },
+    {
+      "id": "m07-inventory-idempotency-starter-v2",
+      "path": "projects/m07-inventory-idempotency/starter",
+      "checksum": "sha256:aab8899a70a9a2935b9fb87a24d2cb91c42a61eaa6f1484f99238ca23690b901"
+    },
+    {
+      "id": "m08-inventory-report-job-starter-v2",
+      "path": "projects/m08-inventory-report-job/starter",
+      "checksum": "sha256:a6d85bcdd0fd1126e9b6ab65b7b1868217d5b8520ce35c785e1e4671bb38b040"
     }
   ]
 }

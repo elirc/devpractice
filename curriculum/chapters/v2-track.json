@@ -1,0 +1,73 @@
+{
+  "note": "The v1-track item at version 2: the twelve V1 chapters plus the eight V2 chapters. Used only by release-v2.json.",
+  "items": [
+    {
+      "kind": "track",
+      "id": "v1-track",
+      "version": 2,
+      "masteryRevision": 1,
+      "title": "Web engineering, foundations to production practice",
+      "conceptIds": [
+        "web.request-response",
+        "debug.next-step",
+        "js.functions",
+        "js.array-filter",
+        "js.async-await",
+        "ts.narrowing",
+        "html.semantics",
+        "react.state-updates",
+        "node.route-boundaries",
+        "sql.select",
+        "auth.ownership-check",
+        "test.boundary-cases",
+        "db.cursor-pagination",
+        "db.multi-table-invariants",
+        "db.idempotent-submission",
+        "jobs.interrupted-work",
+        "security.input-output-boundaries",
+        "test.database-backed",
+        "ui.large-list-performance",
+        "ops.code-review"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The V1 track walks from the mechanics of a single web request to a small, testable, secured feature that talks to a database. Twelve chapters, thirty-six lessons, three required exercises per lesson, and one placement check per chapter.\n\nThe track is deliberately linear. Every chapter assumes the vocabulary of the ones before it, and every chapter ends with a placement check whose items were written separately from the practice exercises, so passing it means the ideas transferred rather than that the answers were memorised.\n\nThe V2 chapters continue the same linear path into the problems that only appear once a feature has real data and real traffic: indexes and query plans, transactions that must not half-commit, API changes that do not break existing callers, work that happens outside a request, and the review and operational habits that keep all of it honest. They assume every V1 chapter.",
+      "description": "A linear twelve-chapter path from the request/response cycle through JavaScript, TypeScript, the browser platform, React, Node.js APIs, relational data, authentication and day-to-day operation. Eight further chapters then go deeper: persistence and query plans, transaction correctness, safe API evolution, background work, security depth, database-backed integration testing, frontend depth, and operations and review.",
+      "targetOutcomes": [
+        "Explain what happens between a click in the browser and a rendered response.",
+        "Write and debug small JavaScript and TypeScript functions from evidence rather than guesswork.",
+        "Build an accessible React feature that reads and writes real server data.",
+        "Design a Node.js endpoint that validates input, scopes data to its owner and reports failures honestly.",
+        "Model, query and migrate relational data without losing or duplicating rows.",
+        "Ship a change with tests, logs and a rollback you have actually thought through.",
+        "Read a query plan and choose an index from evidence rather than habit.",
+        "Keep a multi-table invariant true under concurrent writes, and prove it.",
+        "Change a published API without breaking the callers already using it.",
+        "Run work outside the request cycle so that a retry does not duplicate its effects.",
+        "Test against a real database, including the failures you injected on purpose.",
+        "Review a change, and propose one, in terms a colleague can act on."
+      ],
+      "chapterIds": [
+        "v1-ch01",
+        "v1-ch02",
+        "v1-ch03",
+        "v1-ch04",
+        "v1-ch05",
+        "v1-ch06",
+        "v1-ch07",
+        "v1-ch08",
+        "v1-ch09",
+        "v1-ch10",
+        "v1-ch11",
+        "v1-ch12",
+        "v2-ch13",
+        "v2-ch14",
+        "v2-ch15",
+        "v2-ch16",
+        "v2-ch17",
+        "v2-ch18",
+        "v2-ch19",
+        "v2-ch20"
+      ]
+    }
+  ]
+}

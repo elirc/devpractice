@@ -1,0 +1,485 @@
+{
+  "note": "V2 project missions (M04-M08). Each mission owns its own PostgreSQL database\non 127.0.0.1:5440 and can reach neither the platform database nor another\nmission's (spec 5.2). starterCommit is null everywhere: the starters are\nshipped as release assets, not as commits in this repository, and inventing a\nhash would be a lie the platform would then display.",
+  "items": [
+    {
+      "kind": "mission",
+      "id": "m04-support-desk-search",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M04 - Search, and the pagination it breaks",
+      "conceptIds": [
+        "api.filtering",
+        "api.pagination-compatibility",
+        "db.cursor-pagination",
+        "db.index-selection",
+        "sql.ordering",
+        "sql.pagination",
+        "sql.duplicates",
+        "node.runtime-validation",
+        "http.status-codes",
+        "test.database-backed"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The support desk has a backlog now. Dispatchers want to type part of a title\nor a customer name and see the matching tickets, and scrolling is not an\nanswer any more.\n\nAdding a `WHERE` clause takes ten minutes. Keeping pagination correct while\nthat clause is applied is the mission, and it is a harder problem than it\nlooks, because a cursor is a claim about a position in an ordering. Change\nwhat is being ordered and the claim stops being true.\n\nThe fixture in `tests/helpers.ts` was built to punish the obvious\nimplementations. Six tickets match the word \"printer\". They are not next to\neach other in the full ordering, so filtering after paging returns short\npages. They all share one `createdAt` value, so ordering by the timestamp\nalone is not a total order and a cursor carrying only the timestamp cannot\nsay where it got to. The word appears in three columns and three casings.\nAnd two tickets contain \"print\" without containing \"printer\", so a loose\nmatch drags in rows nobody asked for.\n\nEvery customer, ticket and dispatcher in this project is fictional.",
+      "projectId": "m04-support-desk-search",
+      "workType": "extend",
+      "stack": "node",
+      "release": "v2",
+      "chapterPrerequisiteIds": [
+        "v2-ch13",
+        "v2-ch15"
+      ],
+      "starterAssetId": "m04-support-desk-search-starter-v2",
+      "starterCommit": null,
+      "setupMarkdown": "## Get it running\n\nPostgreSQL must be reachable. The starter defaults to `127.0.0.1:5440` with\nthe `postgres` role and owns two databases, `m04_search` and\n`m04_search_test` - separate from the DevPractice platform database and from\nevery other mission's. Nothing here can reach your learning records.\n\n```bash\ncd projects/m04-support-desk-search/starter\ncp .env.example .env             # adjust only if your server is elsewhere\nnpm install\nnpm run db:deploy                # prisma migrate deploy, onto an empty database\nnpm run db:seed                  # tsx prisma/seed.ts, safe to run twice\nnpm run dev                      # http://localhost:3104\n```\n\n`.env.example` sets `DATABASE_URL` and a separate `TEST_DATABASE_URL`. Keep\nthem pointing at different databases: the integration checks truncate and\nre-seed the one they use between cases, so sharing a database would delete\nyour development data part-way through a run.\n\n## The two check commands are different on purpose\n\n```bash\nnpm run check:baseline   # vitest run tests/baseline.test.ts\nnpm run check:mission    # vitest run tests/mission.test.ts\n```\n\n`check:baseline` must **pass** before you write anything. It proves the\ndatabase is reachable, the migration is applied, and every endpoint M02 built\nstill works, including paging the unfiltered list without duplicates. A\nfailure there is your environment, and none of it is the assignment.\n\n`check:mission` must **fail** before you start, because `GET /tickets`\nignores `q` entirely and returns everything. Those failures are the\nassignment.\n\n`npm run check:all` runs both. `npm run build` type-checks with\n`tsc --noEmit`.\n\n## Response shape\n\nUnchanged from M02: `{ \"data\": [...], \"meta\": { \"nextCursor\": ..., \"hasMore\": ... } }`\non success, `{ \"error\": { \"code\": ..., \"message\": ... } }` on a rejection. The\nchecks read those fields, so keep the shape.",
+      "baselineChecks": [
+        "npm run db:deploy - the initial Prisma migration applies to an empty database",
+        "npm run db:seed - loads two fictional dispatchers, five tickets and three comments, and is safe to run twice",
+        "npm run check:baseline - database reachable, tables migrated, health route answering, and every M02 endpoint still correct including unfiltered paging; this must pass before you start"
+      ],
+      "acceptanceCriteria": [
+        "GET /tickets?q=printer returns exactly the matching tickets and nothing else.",
+        "The match covers title, body and customerName, not the title alone.",
+        "The match is case-insensitive.",
+        "A substring the caller did not ask for does not match: searching \"printer\" must not return a ticket that only says \"printing\".",
+        "q composes with the existing status filter.",
+        "An empty q behaves like no search at all rather than matching nothing.",
+        "A search with no matches returns an empty page with hasMore false and a null cursor, not an error.",
+        "Paging through a search returns every match exactly once, with no duplicates, at every page size including 1.",
+        "The search stays applied on the second page and every page after it.",
+        "A cursor reused with different search text does not silently return a wrong page: either it is rejected, or it carries enough to stay correct.",
+        "Migrations apply cleanly to an empty database and the seed is repeatable."
+      ],
+      "verificationCommands": [
+        "npm run check:baseline",
+        "npm run check:mission",
+        "npm run check:all",
+        "npm run build"
+      ],
+      "checklist": [
+        {
+          "id": "baseline-green",
+          "label": "check:baseline passes and check:mission fails before I change anything"
+        },
+        {
+          "id": "three-columns",
+          "label": "The search looks at title, body and customerName"
+        },
+        {
+          "id": "case-insensitive",
+          "label": "Casing does not change the result set"
+        },
+        {
+          "id": "total-order",
+          "label": "The ordering I page by is a total order, so no row can tie with another"
+        },
+        {
+          "id": "filter-on-every-page",
+          "label": "The filter is applied on every page, not only the first"
+        },
+        {
+          "id": "cursor-scope",
+          "label": "I decided what a cursor from a different search should do, and can defend it"
+        },
+        {
+          "id": "empty-and-none",
+          "label": "Empty search text and a search with no matches both behave sensibly"
+        }
+      ],
+      "hints": [
+        "Prisma's `contains` takes a `mode` option, which settles the casing question. Then ask what the page is actually ordered by, because that is where the real problem is.",
+        "A cursor has to identify one row unambiguously. In this fixture `createdAt` does not, because six rows share a value. Which pair of columns does, and does your ORDER BY use the same pair?",
+        "Ask what the cursor is a position WITHIN. If the honest answer is \"this specific query\", then a cursor handed back with different search text is meaningless, and you have two defensible options: refuse it, or put the filter inside the cursor so it cannot be misused."
+      ],
+      "solutionMarkdown": "Two changes, and the second is the one worth remembering.\n\n**The filter.** `q` becomes an `OR` across `title`, `body` and `customerName`\nwith `mode: 'insensitive'`, combined with the existing status filter rather\nthan replacing it. `contains` rather than a word match is what keeps\n\"printing\" out of a search for \"printer\" while still finding \"printer queue\":\nthe substring asked for is present in one and absent from the other.\n\n**The ordering and the cursor.** The filter has to be part of the same query\nthat pages, never applied to a page after it has been fetched - otherwise the\npage boundary is decided before the filter runs and pages come back short.\nAnd because six rows share a `createdAt`, the cursor carries `(createdAt, id)`\nand the `ORDER BY` uses the same pair. A compound cursor and a compound sort\nhave to agree; a cursor on one column with a sort on two is a silent source\nof repeated and skipped rows, and it only shows up when two rows tie, which\nin a small test database may be never.\n\n**The reused cursor.** The reference solution puts a fingerprint of the active\nfilter into the cursor and rejects a cursor whose fingerprint does not match,\nwith a 400. Carrying the filter inside the cursor and ignoring the query\nparameter would also be correct and is what several real APIs do. What is not\nacceptable is accepting a foreign cursor and answering with a page that\nbelongs to neither query.\n\nWhat this solution does NOT claim: `contains` cannot use a plain B-tree index,\nso on a large table this search scans. The honest next step is a trigram index\nor a full-text column, and the honest way to decide is to look at the query\nplan on representative data rather than guessing. Chapter 13 is where that\nplan is read.",
+      "reflectionRubric": [
+        "I can explain why ordering by createdAt alone is not enough, using the fixture as evidence rather than as a rule I was told.",
+        "I can say what my cursor encodes and why each part of it is there.",
+        "I can describe what I decided about a cursor reused with different search text, and name the alternative I rejected.",
+        "I can say what would have to change before this search was acceptable on a large table, and how I would know it was needed."
+      ]
+    },
+    {
+      "kind": "mission",
+      "id": "m05-support-desk-nplus1",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M05 - A dashboard that asks too many questions",
+      "conceptIds": [
+        "db.query-plan",
+        "db.index-selection",
+        "sql.select",
+        "sql.relationships",
+        "js.promises",
+        "js.async-await",
+        "test.database-backed",
+        "ops.structured-diagnostics",
+        "ui.large-list-performance"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "This code works. Every baseline check passes and every response is correct.\nThat is what makes this mission different from the others: you are not fixing\na wrong answer, you are fixing how a right answer is obtained.\n\nThe desk added a dashboard listing tickets with their comment counts and\nlatest comment. It was fine against five seeded tickets. With a realistic\nbacklog the page takes seconds and the database sits at high CPU, and nobody\ncan point at a line and say \"that one is slow\", because no single line is.\n\nThe shape of the problem is the point. One query fetches the page of tickets,\nand then, for each ticket, two more go out: one to count its comments and one\nto find the newest. Twenty tickets is forty-one round trips. The code reads\nperfectly well. The cost is invisible in the source and obvious in a log of\nwhat was actually sent.\n\nSo the mission gives you the log. `src/db.ts` emits query events and\n`countQueries` records them, which means your work can be measured rather\nthan argued about. Your job is to make the round trips stop growing with the\npage size while the response body stays byte-for-byte what it is today.\n\nEvery ticket, comment and customer here is fictional.",
+      "projectId": "m05-support-desk-nplus1",
+      "workType": "investigate",
+      "stack": "node",
+      "release": "v2",
+      "chapterPrerequisiteIds": [
+        "v2-ch13"
+      ],
+      "starterAssetId": "m05-support-desk-nplus1-starter-v2",
+      "starterCommit": null,
+      "setupMarkdown": "## Get it running\n\nPostgreSQL on `127.0.0.1:5440`, and two databases that belong to this mission\nalone: `m05_nplus1` and `m05_nplus1_test`. Neither is the platform database.\n\n```bash\ncd projects/m05-support-desk-nplus1/starter\ncp .env.example .env\nnpm install\nnpm run db:deploy                # migrations onto an empty database\nnpm run db:seed                  # repeatable\nnpm run dev                      # http://localhost:3105\n```\n\n## Measure before you change anything\n\n```bash\nnpm run check:baseline   # must pass now: the dashboard is CORRECT\nnpm run check:mission    # must fail now: the dashboard is EXPENSIVE\n```\n\nRead the failure output before you write code. It prints the SQL that was\nactually issued, and counting those statements yourself is the skill this\nmission is really teaching. A fix you cannot measure is a guess.\n\n## Do not change the measurement\n\n`src/db.ts` holds the query recorder. It is instrumentation, not assignment,\nand the one listener it registers is deliberate: Prisma has no way to remove\nan event listener, so registering one per measurement would leak them and\ncross-contaminate the counts. Leave it alone.\n\n## Do not change the answer either\n\nThe response body is pinned. The mission checks compare your output against\nthe same dashboard computed independently from the database, including the\ncases that catch a plausible wrong answer: a ticket with no comments must\nreport zero rather than disappear, and the latest comment must be the latest\none rather than whichever row came back first.",
+      "baselineChecks": [
+        "npm run db:deploy - migrations apply to an empty database",
+        "npm run db:seed - repeatable seed, safe to run twice",
+        "npm run check:baseline - the dashboard endpoint returns correct counts and latest comments, and the plain listing still pages correctly; this must pass before you start, because the starter is not wrong, only slow"
+      ],
+      "acceptanceCriteria": [
+        "The number of queries issued by GET /tickets?withComments=true does not grow with the page size: a page of 20 costs the same number of round trips as a page of 4.",
+        "A full page of 20 tickets costs at most 3 queries.",
+        "The response body is unchanged: same rows, same order, same commentCount, same latestCommentBody.",
+        "A ticket with no comments reports a count of zero and a null latest comment, and is not dropped from the page.",
+        "The latest comment is the newest one by createdAt, with id as the tiebreaker, not an arbitrary row.",
+        "The plain listing without withComments stays cheap and does not gain comment fields it was not asked for.",
+        "The query recorder in src/db.ts is unchanged."
+      ],
+      "verificationCommands": [
+        "npm run check:baseline",
+        "npm run check:mission",
+        "npm run check:all",
+        "npm run build"
+      ],
+      "checklist": [
+        {
+          "id": "measured-first",
+          "label": "I counted the queries the starter issues before changing anything"
+        },
+        {
+          "id": "constant-queries",
+          "label": "The count no longer depends on the page size"
+        },
+        {
+          "id": "same-answer",
+          "label": "The response body is identical to before, including the empty and tied cases"
+        },
+        {
+          "id": "no-inner-join",
+          "label": "A ticket with no comments is still in the page"
+        },
+        {
+          "id": "latest-is-latest",
+          "label": "The latest comment is chosen by a total ordering, not by luck"
+        },
+        {
+          "id": "recorder-untouched",
+          "label": "I did not change the measurement to make the number look better"
+        }
+      ],
+      "hints": [
+        "Do not optimise yet. Run the mission checks and read the SQL they print. Count the statements for a page of 4 and a page of 20, and write both numbers down - the rest of the mission is making the second number stop depending on the first.",
+        "Two round trips can answer the whole page: fetch the tickets, then fetch the comment data for all of their ids at once. `groupBy` with a `_count` gives you the counts in one query; the latest comment per ticket is the harder half.",
+        "For \"the latest per group\", either sort the relevant comments once in SQL and pick the first per ticket in memory, or express it as a window function with `$queryRaw`. Both are fine. What is not fine is a query inside a loop, however tidy the loop looks."
+      ],
+      "solutionMarkdown": "The reference solution answers the whole page in two queries plus the page\nfetch itself.\n\n**Counts.** One `groupBy` over comments, filtered to the ticket ids on this\npage, returning a count per ticket. A ticket with no comments has no row in\nthat result at all, which is exactly the case a naive join loses - so the\nlookup defaults to zero rather than assuming every ticket is present.\n\n**Latest comments.** One query fetching the comments for those ids ordered by\n`(ticketId, createdAt desc, id desc)`, then a single pass keeping the first\ncomment seen per ticket. The `id` tiebreaker matters: two comments written in\nthe same millisecond would otherwise make the answer depend on which row the\ndatabase happened to return first, and a test that passes for that reason\npasses for no reason.\n\n**Why not one clever query.** A `LEFT JOIN LATERAL` would do it in one round\ntrip, and on this data that is a smaller win than it sounds: three bounded\nqueries do not scale with the page, which was the actual problem. Reaching\nfor raw SQL also costs you Prisma typing at the boundary. The point of the\nmission is the shape of the cost, not the smallest possible number.\n\n**What was never true.** The starter was not wrong and the fix did not make\nit correct - it was correct throughout. What changed is that the cost of an\nanswer no longer depends on how much of it you asked for. That distinction is\nworth keeping, because it is the difference between a bug report and a\ncapacity problem, and they are fixed by different people at different times.",
+      "reflectionRubric": [
+        "I can state the query count before and after, for two different page sizes, from measurement rather than estimate.",
+        "I can explain why the starter was correct and still unacceptable.",
+        "I can explain why a ticket with no comments is the case that catches a wrong fix.",
+        "I can say why the id tiebreaker is in the ordering, and what would be untestable without it.",
+        "I can name the next thing I would measure if the page were still slow after this change."
+      ]
+    },
+    {
+      "kind": "mission",
+      "id": "m06-inventory-core",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M06 - Inventory, and the invariants that hold it together",
+      "conceptIds": [
+        "db.multi-table-invariants",
+        "sql.transactions",
+        "sql.partial-writes",
+        "sql.uniqueness",
+        "sql.relationships",
+        "node.runtime-validation",
+        "node.error-contracts",
+        "http.status-codes",
+        "http.error-mapping",
+        "test.database-backed"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A new service, built from an empty routes file. The database, the schema, the\nmigrations, the seed and the server already work; every endpoint is missing.\n\nFive endpoints: create a product, list products with their on-hand quantity,\nrecord a stock movement, place an order with lines, and fetch an order with\nits total.\n\nThe CRUD is not the interesting part. The invariants are - the statements\nthat must be true no matter what a caller sends or how two callers interleave.\nA SKU is unique. A movement is a non-zero whole number. On-hand stock is never\nnegative. An order has at least one line, every line has a quantity of at\nleast one, and every line points at a product that exists. And placing an\norder writes its lines and its stock movements together, or writes none of\nthem.\n\nRead the schema before you write a route. On-hand stock is the SUM OF\nMOVEMENTS, not a column you decrement. That choice makes \"never negative\"\nharder to state, because there is no single value to hang a CHECK constraint\non - and it is what gives every change a reason and an audit trail, and what\nstops two concurrent writers losing an update by overwriting a total. Part of\nthis mission is deciding which of the six invariants belongs in the schema,\nwhich belongs in a transaction, and which belongs in the route.\n\nEvery product, price and customer in this project is fictional.",
+      "projectId": "m06-inventory-core",
+      "workType": "build",
+      "stack": "node",
+      "release": "v2",
+      "chapterPrerequisiteIds": [
+        "v2-ch14"
+      ],
+      "starterAssetId": "m06-inventory-core-starter-v2",
+      "starterCommit": null,
+      "setupMarkdown": "## Get it running\n\nPostgreSQL on `127.0.0.1:5440`. This mission owns `m06_inventory` and\n`m06_inventory_test`, and can reach neither the platform database nor another\nmission's.\n\n```bash\ncd projects/m06-inventory-core/starter\ncp .env.example .env\nnpm install\nnpm run db:deploy                # migrations onto an empty database\nnpm run db:seed                  # repeatable\nnpm run dev                      # http://localhost:3106\n```\n\n## The two check commands\n\n```bash\nnpm run check:baseline   # must pass now: database, migrations, health route\nnpm run check:mission    # must fail now: every endpoint answers 501\n```\n\nThe starter answers `501 NOT_IMPLEMENTED` on purpose, so a fresh checkout\nfails loudly and unambiguously rather than half-working.\n\n## Status codes the checks expect\n\n| Situation | Response |\n| --- | --- |\n| created | 201 with `{ \"data\": ... }` |\n| invalid body | 400 with `{ \"error\": { \"code\": \"BAD_REQUEST\", \"fieldErrors\": ... } }` |\n| duplicate SKU | 409 |\n| line references a product that does not exist | 404 |\n| not enough stock | 409, naming the product and the quantities |\n| unknown order id | 404 |\n\nMoney is in minor units throughout - whole pence, never a float. An order\ntotal is derived from the prices captured on its lines, so repricing a\nproduct later must not change a placed order.",
+      "baselineChecks": [
+        "npm run db:deploy - the initial migration applies to an empty database, creating products, stock movements, orders and order lines",
+        "npm run db:seed - repeatable seed of fictional users and products",
+        "npm run check:baseline - database reachable, tables migrated, unique SKU index and order-line foreign keys enforced by PostgreSQL, health route answering; this must pass before you start"
+      ],
+      "acceptanceCriteria": [
+        "POST /products creates a product and returns 201; a duplicate SKU is rejected with 409, decided by the database rather than by a check-then-insert.",
+        "A rejected product writes no rows.",
+        "GET /products lists every product with its on-hand quantity summed from the movement ledger, including zero for a product that has never moved.",
+        "POST /products/:id/movements rejects a zero or fractional delta with 400, and an unknown product with 404.",
+        "A movement that would drive on-hand stock negative is rejected with 409 and writes nothing.",
+        "POST /orders rejects an order with no lines, or a line with quantity below one, with 400.",
+        "An order line referencing a product that does not exist returns 404 and writes no order.",
+        "Placing an order writes the order, its lines and one stock movement per line, or writes none of them: a shortfall on the second line must leave no trace of the first.",
+        "Line prices are captured when the order is placed, so repricing a product afterwards does not change the order total.",
+        "GET /orders/:id returns the order with its lines and a total derived from the captured prices, and 404 for an unknown id.",
+        "Migrations apply cleanly to an empty database and the seed is repeatable."
+      ],
+      "verificationCommands": [
+        "npm run check:baseline",
+        "npm run check:mission",
+        "npm run check:all",
+        "npm run build"
+      ],
+      "checklist": [
+        {
+          "id": "baseline-green",
+          "label": "check:baseline passes and check:mission fails before I change anything"
+        },
+        {
+          "id": "where-enforced",
+          "label": "For each of the six invariants I can say which of schema, transaction or route enforces it, and why there"
+        },
+        {
+          "id": "db-decides-uniqueness",
+          "label": "The duplicate SKU is decided by the unique index, not by a read before the insert"
+        },
+        {
+          "id": "ledger-not-counter",
+          "label": "On-hand stock is summed from movements; I did not add a quantity column"
+        },
+        {
+          "id": "all-or-nothing",
+          "label": "A failure on a later line leaves no rows from an earlier one"
+        },
+        {
+          "id": "captured-prices",
+          "label": "An order total survives a reprice of its products"
+        },
+        {
+          "id": "errors-are-useful",
+          "label": "A shortfall says which product and what the numbers were, and is not a 500"
+        }
+      ],
+      "hints": [
+        "Start with the schema, not the routes. Read every constraint in `prisma/schema.prisma` and write down what each one makes impossible. Several of the acceptance criteria are already enforced there, and your route only has to turn the resulting error into a decent response.",
+        "For the duplicate SKU, let the insert fail and catch it. Prisma raises `P2002` for a unique violation. A read that checks first and then inserts has a gap between the two statements, and two concurrent requests both pass the check - the unique index has no gap.",
+        "Placing an order needs one `$transaction`, and the stock check has to happen INSIDE it and be re-read there. Checking on-hand stock before opening the transaction tells you what was true a moment ago, which is not what you need to know. Throwing from inside the callback is what rolls everything back."
+      ],
+      "solutionMarkdown": "The theme of this solution is that an invariant is only as strong as the place\nit is enforced, and the three places are not interchangeable.\n\n**The schema holds what must never be true of stored data.** A unique SKU, a\nline that must point at a real product, one line per product per order. These\nsurvive a bug in the route file, which is the entire reason they belong there\nrather than in an `if`.\n\n**The transaction holds what must be true across several rows.** An order,\nits lines and its movements are one fact. Nothing outside a transaction can\nexpress that, and the all-or-nothing criterion is unreachable without it: the\nreference solution throws from inside the callback, which rolls back the order\nrow and any earlier line along with it.\n\n**The route holds what makes a good error.** A 409 naming the product and the\nquantities, rather than a constraint violation leaking out as a 500. The\ndatabase decided; the route translated.\n\n**Stock deserves its own note.** On-hand is the sum of movements. \"Never\nnegative\" therefore cannot be a CHECK constraint, so it is re-read and\nre-checked inside the transaction, where a concurrent order cannot slip\nbetween the read and the write. What this buys is an audit trail and\nappend-only writes; what it costs is exactly this care.\n\n**Where this is still weak, said plainly.** Two concurrent orders for the same\nscarce product are serialised by PostgreSQL at READ COMMITTED only because\neach re-reads the sum inside its transaction - under a stricter requirement\nyou would want an explicit lock or a constraint on a materialised total. M11\nis where that argument gets settled properly, with concurrency tokens and a\nconflicting pair of writers.",
+      "reflectionRubric": [
+        "For each of the six invariants I can name where I enforced it and defend that choice against one alternative.",
+        "I can explain why a read-then-insert uniqueness check is not equivalent to a unique index.",
+        "I can explain what the stock ledger buys and what it costs, rather than treating it as the obviously right design.",
+        "I can describe what a half-placed order would look like in the database, and what prevents it.",
+        "I can say which of my error responses an operator could act on without reading my code."
+      ]
+    },
+    {
+      "kind": "mission",
+      "id": "m07-inventory-idempotency",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M07 - The order that was placed twice",
+      "conceptIds": [
+        "db.idempotent-submission",
+        "db.locking",
+        "sql.transactions",
+        "sql.uniqueness",
+        "http.retryable-failure",
+        "http.status-codes",
+        "js.race-condition",
+        "jobs.idempotency",
+        "test.database-backed",
+        "security.input-output-boundaries"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The inventory service works. Orders are placed, stock moves, and everything\ncommits atomically. It also has a defect that only appears in production,\nwhich is the worst place to find one.\n\nThe ordering app retries. Phones drop connections, the load balancer gives up\nat thirty seconds while the request is still committing, and people press\n\"Place order\" again when nothing seems to have happened. The API documents an\n`Idempotency-Key` header for exactly this, and the client sends it faithfully.\n\nThe header is accepted and ignored. A retried submission places a second\norder and moves stock again. Warehouse staff are picking duplicates and the\non-hand figures have drifted.\n\nThe repair is four rules, and the interesting one is the second. Same key and\nsame body twice gives one order, with the retry replaying the first response.\nSame key and same body CONCURRENTLY still gives one order - and that rules out\nthe tempting shape, because two requests that are genuinely in flight at the\nsame instant both pass a \"have I seen this key?\" check before either writes.\nSame key with a DIFFERENT body is a conflict, not a replay, because the client\nhas reused a key for a different intent and quietly discarding the second\norder would be worse than refusing it. And keys are scoped per user, because\ntwo people may both choose \"order-1\".\n\nLook at what is already in the schema before you design anything.\n\nEvery order, product and name here is fictional.",
+      "projectId": "m07-inventory-idempotency",
+      "workType": "repair",
+      "stack": "node",
+      "release": "v2",
+      "chapterPrerequisiteIds": [
+        "v2-ch14"
+      ],
+      "starterAssetId": "m07-inventory-idempotency-starter-v2",
+      "starterCommit": null,
+      "setupMarkdown": "## Get it running\n\nPostgreSQL on `127.0.0.1:5440`, with `m07_inventory` and\n`m07_inventory_test` belonging to this mission alone.\n\n```bash\ncd projects/m07-inventory-idempotency/starter\ncp .env.example .env\nnpm install\nnpm run db:deploy                # migrations onto an empty database\nnpm run db:seed                  # repeatable\nnpm run dev                      # http://localhost:3107\n```\n\n## Reproduce the defect before you fix it\n\n```bash\n# Place the same order twice with the same key. Today you get two orders.\ncurl -s -X POST http://localhost:3107/orders \\\n  -H 'content-type: application/json' \\\n  -H 'idempotency-key: demo-1' \\\n  -d '{\"customerName\":\"Brightleaf Bakery\",\"lines\":[{\"productId\":\"prod-ink-black\",\"quantity\":2}]}'\n```\n\nRun it twice and compare the two order ids. Then check on-hand stock.\n\n## The two check commands\n\n```bash\nnpm run check:baseline   # must pass now: orders, stock and atomicity all work\nnpm run check:mission    # must fail now: the retry rules\n```\n\nA failing `check:mission` here is the defect, not a broken environment.\n\n## What the mission checks actually do\n\nOne of them fires two submissions at the same instant with `Promise.all` and\nthen counts the orders in the database. A fix that works when the retry\narrives a second later and fails when it arrives in the same millisecond will\nbe caught, which is the point: the bug you are fixing IS a timing bug, so a\nfix that depends on timing has not fixed it.\n\nA replay returns **200**, not 201, because that request created nothing.",
+      "baselineChecks": [
+        "npm run db:deploy - migrations apply to an empty database, including the IdempotencyRecord table and its unique index on (ownerId, operation, key)",
+        "npm run db:seed - repeatable seed of fictional users and products",
+        "npm run check:baseline - orders place correctly, stock moves, a shortfall rolls the whole order back, and a rejected body writes nothing; this must pass before you start, because the service is not broken, only unsafe to retry"
+      ],
+      "acceptanceCriteria": [
+        "Two sequential submissions with the same key and the same body create one order; the second returns 200 with the first response, including the original order id.",
+        "Two CONCURRENT submissions with the same key and the same body still create one order, and one stock movement per line rather than two.",
+        "The same key with a different body is rejected with 409 rather than replaying the first response.",
+        "Keys are scoped per training user: two users may use the same key without colliding.",
+        "A submission with no Idempotency-Key behaves exactly as it does today.",
+        "A submission rejected for an invalid body does not consume the key: correcting the body and retrying with the same key succeeds.",
+        "A submission that fails for a shortfall does not record a success: the key stays usable once stock allows the order.",
+        "Stock moves exactly once per placed order, verified from the movement ledger rather than from the API response.",
+        "Nothing about the non-idempotent endpoints changes."
+      ],
+      "verificationCommands": [
+        "npm run check:baseline",
+        "npm run check:mission",
+        "npm run check:all",
+        "npm run build"
+      ],
+      "checklist": [
+        {
+          "id": "reproduced",
+          "label": "I reproduced the duplicate order by hand before changing code"
+        },
+        {
+          "id": "db-arbitrates",
+          "label": "Which request wins is decided by a database constraint, not by which one arrived first"
+        },
+        {
+          "id": "receipt-in-transaction",
+          "label": "The record of the work commits in the same transaction as the work"
+        },
+        {
+          "id": "replay-is-200",
+          "label": "A replay returns 200 and the original body, not a second creation"
+        },
+        {
+          "id": "mismatch-is-409",
+          "label": "The same key with a different body conflicts instead of replaying"
+        },
+        {
+          "id": "failure-frees-key",
+          "label": "A failed submission leaves the key usable"
+        },
+        {
+          "id": "scoped-keys",
+          "label": "Keys are scoped so two users cannot collide"
+        }
+      ],
+      "hints": [
+        "Read the `IdempotencyRecord` model and its unique constraint on (ownerId, operation, key) before you write anything. Ask which of the four rules that constraint can decide on its own, and which one you have to decide.",
+        "A check-then-write cannot work here and no amount of reordering the statements fixes it, because the gap is between two round trips. Invert it: attempt the insert and treat a unique violation as the answer rather than as an error. Prisma raises `P2002`.",
+        "Decide where the receipt is written. Inside the same transaction as the order, a failure rolls the receipt back with the work and a crash between the two becomes impossible. Outside it, you have invented a new way to lose or duplicate an order. Then store a fingerprint of the body so you can tell a genuine retry from a reused key."
+      ],
+      "solutionMarkdown": "One rule decides the whole shape: let the database arbitrate, not the clock.\n\n**The receipt is inserted inside the transaction that places the order**, and\n`(ownerId, operation, key)` is unique. Two concurrent submissions race to\ninsert it; exactly one wins, and the loser gets a unique violation it can\nrecognise, after its own transaction has already rolled back - so no\nduplicate order ever existed. It then reads the winner's stored response and\nreplays it. Correctness does not depend on which request was faster, which is\nthe only way to fix a timing bug.\n\nWriting the receipt inside the transaction gives two more rules for free. The\nwork and the record of it commit together, so a crash between them is not a\nstate the system can be in. And a FAILED submission rolls its receipt back\nwith everything else, which is what lets a corrected retry through instead of\nreplaying a failure forever.\n\n**The request fingerprint covers the mismatch case.** A hash over the\ncanonicalised body, so field order does not matter: a client that serialised\nthe same intent differently has not changed its mind. A different hash under\nthe same key is a 409. Replaying the first response there would silently throw\naway a real order, and the client would have no way to know.\n\n**The fast path is an optimisation, not the guarantee.** The solution does\nlook the key up first, because most retries are not concurrent and a cheap\nread saves a rolled-back transaction. Delete that block and everything still\nworks. Delete the unique constraint and nothing does. It is worth being able\nto say which part of your code is load-bearing.\n\n**The boundary of the claim.** This makes the EFFECT of a submission happen\nonce per key: one order, one movement per line. It does not make the HTTP\nrequest happen once - it cannot, and nothing in an API can. Saying\n\"exactly-once\" without naming which of the two you mean is how teams end up\nbelieving a guarantee nobody implemented.",
+      "reflectionRubric": [
+        "I can explain why a read-then-write idempotency check fails under concurrency, without using the word \"fast\".",
+        "I can say which database object makes the guarantee, and what would break if it were removed.",
+        "I can defend returning 409 for a reused key with a different body, against the alternative of replaying.",
+        "I can explain why a failed submission must not leave a usable receipt behind.",
+        "I can state what is exactly-once here and what is merely at-least-once, and say which one the client sees."
+      ]
+    },
+    {
+      "kind": "mission",
+      "id": "m08-inventory-report-job",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M08 - A report job you can rerun",
+      "conceptIds": [
+        "jobs.state-machine",
+        "jobs.retry-backoff",
+        "jobs.idempotency",
+        "jobs.interrupted-work",
+        "db.locking",
+        "sql.uniqueness",
+        "sql.transactions",
+        "test.failure-injection",
+        "test.database-backed",
+        "ops.deployment-recovery"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "A nightly stock-valuation report. For every product it writes one row holding\nthe quantity on hand and its value, then marks the job succeeded. On a first\nrun, on a quiet machine, it works, and the baseline checks prove exactly that\nmuch.\n\nIt cannot be rerun. And a background job that cannot be rerun is a job you\ncannot operate, because every retry, every deployment part-way through a run,\nand every duplicated scheduler tick is a second run.\n\nFour things are wrong. A rerun after a partial failure repeats work that was\nalready committed - the unique index stops the duplicate row being stored, so\ninstead of quietly duplicating, the rerun dies on the first product it already\ndid and the job can never finish. A loud failure is still a failure. A job\nthat already succeeded runs all over again. `maxAttempts` and `runAfter` sit\nin the schema unused, so nothing stops a hopeless job retrying forever and\nnothing delays the next try. And the claim is a read followed by a write, so\ntwo workers can both decide the job is theirs.\n\nThe mission checks inject a failure part-way through the run and then rerun,\nwhich is the only honest way to test this: a job that has never been\ninterrupted has never been tested.\n\nThere is also a vocabulary question the reflection will ask you, and it is\nworth carrying while you work. This runner is invoked at least once and may be\ninvoked again at any moment. You cannot make the invocation happen exactly\nonce. You can make its committed effect exactly once. Say which you mean.\n\nEvery product, valuation and report row here is fictional.",
+      "projectId": "m08-inventory-report-job",
+      "workType": "extend",
+      "stack": "node",
+      "release": "v2",
+      "chapterPrerequisiteIds": [
+        "v2-ch16",
+        "v2-ch18"
+      ],
+      "starterAssetId": "m08-inventory-report-job-starter-v2",
+      "starterCommit": null,
+      "setupMarkdown": "## Get it running\n\nPostgreSQL on `127.0.0.1:5440`, with `m08_inventory` and\n`m08_inventory_test` belonging to this mission alone.\n\n```bash\ncd projects/m08-inventory-report-job/starter\ncp .env.example .env\nnpm install\nnpm run db:deploy                # migrations onto an empty database\nnpm run db:seed                  # repeatable\nnpm run dev                      # http://localhost:3108\nnpm run job:run                  # one pass of the worker, by hand\n```\n\n## Where the work is\n\n`src/jobs/report.ts` is the only file you need to change. The inventory\nendpoints are carried forward from M06 and M07 and are already correct;\n`src/routes/reports.ts` enqueues a job and reads one back, and is also done.\nEnqueueing returns **202** and runs nothing inside the request, because a\nreport over the whole catalogue has no business holding an HTTP connection\nopen and a caller who disconnects must not cancel work that was accepted.\n\n## The two check commands\n\n```bash\nnpm run check:baseline   # must pass now: one clean run writes the right report\nnpm run check:mission    # must fail now: the second run\n```\n\nNote where the line falls. The baseline pins a single clean run, the numbers\nin the report, and the unique index that makes a duplicate detectable at all.\nThe mission checks are about the second invocation.\n\n## The failure seam\n\n`runReportJob` takes an optional `beforeItem` hook, called before each product\nis written. The checks use it to kill a run part-way through; production code\npasses nothing. It is there because injecting a failure is the only way to\ntest a resume, and a seam you can see in the signature is better than a mock\nthat reaches inside.\n\nKeep the return shape: the checks read `status`, `linesWritten`, `attempts`\nand `detail`, and the difference between \"I did the work\" and \"I did nothing\"\nhas to be visible to the caller.",
+      "baselineChecks": [
+        "npm run db:deploy - migrations apply to an empty database, including ReportJob, ReportLine and the unique index on (jobId, productId)",
+        "npm run db:seed - repeatable seed of fictional users and products",
+        "npm run check:baseline - the unique index rejects a duplicate report line, enqueueing accepts a job with 202 without running it, and one clean run writes a correct line per product; this must pass before you start",
+        "npm run check:baseline - the M06 and M07 inventory endpoints still work, so a change to the job cannot quietly break the data it reads"
+      ],
+      "acceptanceCriteria": [
+        "A rerun after a partial failure completes the job instead of dying on work it already committed.",
+        "A rerun writes only the lines that were missing, not the ones already there.",
+        "After a failure and a rerun there is exactly one line per product, with the numbers a clean run would have produced.",
+        "Both attempts are counted: a resumed job reports two attempts, not one.",
+        "A job that already succeeded is skipped, writes nothing, and does not count an attempt.",
+        "A failed attempt moves runAfter forward, and a second failure waits longer than the first.",
+        "Once attempts reach maxAttempts the job is no longer picked up, and a refused invocation is not counted as an attempt.",
+        "A job that ran out of attempts keeps whatever it did commit, for an operator to inspect.",
+        "Two concurrent invocations of the same job result in exactly one doing the work and one reporting that it was skipped, with one line per product and one attempt counted.",
+        "A failure is reported as a failure, with a message an operator can act on, and never as success."
+      ],
+      "verificationCommands": [
+        "npm run check:baseline",
+        "npm run check:mission",
+        "npm run check:all",
+        "npm run build"
+      ],
+      "checklist": [
+        {
+          "id": "baseline-green",
+          "label": "check:baseline passes and check:mission fails before I change anything"
+        },
+        {
+          "id": "atomic-claim",
+          "label": "The claim is a single conditional statement, not a read followed by a write"
+        },
+        {
+          "id": "resume-not-repeat",
+          "label": "A rerun finishes the remaining work instead of repeating committed work"
+        },
+        {
+          "id": "succeeded-is-noop",
+          "label": "Re-running a succeeded job does nothing and says so"
+        },
+        {
+          "id": "cap-and-backoff",
+          "label": "Attempts are capped and a retry is delayed, using the columns already in the schema"
+        },
+        {
+          "id": "failure-is-visible",
+          "label": "A failed job records why, and keeps what it committed"
+        },
+        {
+          "id": "guarantee-named",
+          "label": "I can state what is exactly once here and what is at least once"
+        }
+      ],
+      "hints": [
+        "Make the claim one statement. `updateMany` with the old status in its WHERE clause is a conditional update: PostgreSQL locks the row, re-evaluates the condition and tells you how many rows changed. One concurrent worker sees a count of 1 and the other sees 0, and no separate read could have told them apart.",
+        "A resume needs one extra query before the loop: which products has this job already written? `reportLine.findMany({ where: { jobId }, select: { productId: true } })`. Skip those. Note what this is not - it is not what prevents duplicates, the unique index is; it is what lets the job make progress.",
+        "Decide what state a failed attempt leaves behind, and use the columns that are already there. `runAfter` is when a SCHEDULER should next consider the job; `attempts` against `maxAttempts` is whether it should be considered at all. Leaving a job on `running` after a failure is the one choice that makes it unrecoverable."
+      ],
+      "solutionMarkdown": "Four changes, and each one moves a decision out of the code's timing and into\nthe database.\n\n**The claim is one statement.** `updateMany`, with `status in (pending,\nfailed)` and `attempts < maxAttempts` in the WHERE clause, returns a count.\nExactly one of two concurrent workers sees 1. The read-then-write version\ncould not be fixed by reordering, because the decision was being made in the\ngap between two round trips.\n\n**A rerun resumes.** One query for the `productId`s this job has already\ncommitted, and the loop skips them. That query is the whole difference between\na resume and a repeat - and it is worth being precise about its job: the\nunique index on `(jobId, productId)` is what makes a duplicate impossible;\nthis query is what stops the job dying on its own past work.\n\n**Failure sets a backoff and respects a cap.** `runAfter` moves forward by a\ndoubling delay so a failing job does not spin, and the attempt cap lives in\nthe claim, so an exhausted job simply stops being claimable. Nothing needed a\nnew column.\n\n**A succeeded job is not claimable**, so running it again is a no-op that does\nnot touch the attempt counter. \"I did nothing\" and \"I did the work\" are\ndifferent answers and a caller has to be able to tell them apart.\n\n**What is guaranteed, stated carefully.** The committed effect is exactly\nonce: each `(jobId, productId)` line is written one time, however many\ninvocations it took. The invocation is at-least-once and always will be. The\nsolution says so in its own header comment, because a delivery guarantee\nwritten down somewhere nobody reads is not a guarantee.\n\n**One limitation, stated rather than hidden.** A process that dies while\nholding a claim leaves the job on `running`, and nothing here picks it up\nagain. Recovering that needs a lease with an expiry and a heartbeat, which is\na bigger mechanism than this mission. The stuck job was chosen deliberately\nover reclaiming on a timeout: a job that needs a human is visible, whereas a\ntimeout that is too short puts two workers on one job, which is the bug that\nwas just fixed. M12 builds the same job in C# and asks the same question about\ncancellation.",
+      "reflectionRubric": [
+        "I can explain why a conditional update is a different kind of thing from a read followed by a write, and name what the database does that my code cannot.",
+        "I can distinguish the query that makes a resume possible from the constraint that makes duplication impossible.",
+        "I can defend the state I leave a failed job in, and say what would go wrong in the alternative.",
+        "I can state the delivery guarantee in terms of effects rather than invocations, and say what is still at-least-once.",
+        "I can describe the failure mode my solution does not handle, and what it would take to handle it."
+      ]
+    }
+  ]
+}

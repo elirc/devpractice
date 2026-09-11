@@ -122,3 +122,76 @@ Verify by running the mutated source. Then either remove an **incidental**
 mutation site, or document it — but do NOT rewrite a solution to silence a
 warning when the construct is what the lesson teaches. Precedent and reasoning
 are in `docs/known-limitations.md`.
+
+## A reset that misses one table makes a suite pass only once
+
+M07's `resetDatabase()` cleared five tables and left `IdempotencyRecord` alone.
+The first `check:baseline` run on a fresh database passed; the second failed on
+its own fixture row, with a unique-violation pointing at the test's own setup
+line. It looked exactly like a broken reference solution.
+
+When you add a model to a mission's schema, add it to the reset in the same
+commit, and **run the baseline twice**. Compare the models in
+`prisma/schema.prisma` against the tables the reset deletes; that comparison takes
+a minute and is the whole check.
+
+## `dotnet build` needs a project or solution in the CURRENT directory
+
+All four .NET mission starters held two or three sibling project directories and
+no `.sln`. The .NET CLI does not search subdirectories, so every `dotnet build`
+and `dotnet test` the mission text documented failed with "no project or solution
+file found" — the missions could not be run at all. A solution file per starter
+fixed it. If you add a .NET mission, add its `.sln`.
+
+## The reachability edges that no tool used to check
+
+Two content mistakes validated green and were invisible until someone opened the
+app: a chapter that the release's track item does not list in `chapterIds`, and a
+mission that no chapter lists in `missionIds`. The validator walked references
+forwards only. Both shipped broken once, affecting 18 chapters and 9 missions.
+
+They are now errors — `reachability.chapter-unlisted` and
+`reachability.mission-unclaimed` — with a fixture each. The remaining judgement a
+tool cannot make is whether a mission sits on the RIGHT chapter.
+
+## Over-length strings are the common authoring error
+
+Two of 27 new content items were rejected, both for the same reason: a
+`baselineChecks` entry over the 300-character cap. The schema caps are in
+`packages/contracts/src/content.ts` and worth checking before a long validate run
+rather than after: 300 for baseline checks and verification commands, 500 for
+acceptance criteria and rubric lines, 1000 per hint, 300 per checklist label.
+
+## `--no-build` after restoring a starter runs the SOLUTION
+
+The A13 flow for a .NET mission builds the starter, checks it, copies the
+reference solution over the starter file, rebuilds, checks again, then restores
+the starter **source**. It does not rebuild afterwards. So the source on disk is
+the starter while `tests/*/bin/Debug/net10.0/*.dll` is still the solution.
+
+A later `dotnet test --no-build` then runs the solution's code and reports a
+confident, meaningless pass. This happened here, and the pass looked exactly like
+a starter that had stopped failing.
+
+Rebuild before you believe any re-run, and leave each mission rebuilt against its
+starter when you are done.
+
+## The global body limit made a real release impossible to import
+
+`app.ts` set `bodyLimit: 1_048_576` with the comment "content import raises its
+own limit". It did not. The import route had an application-level
+`MAX_PACKAGE_BYTES` of 10 MiB but no route-level `bodyLimit`, so Fastify rejected
+the body before the handler ever ran — and because it drops the connection rather
+than answering, the publish script saw only:
+
+    Signed in. Active release: ...
+    fetch failed
+
+V1's package is 1.09 MB, so this was invisible until a real V2 package (1.9 MB)
+was published for the first time. Fixed with
+`app.post('/content/imports', { bodyLimit: MAX_PACKAGE_BYTES }, ...)`.
+
+Two lessons, both of which have now bitten this repo twice. A comment asserting
+that something is configured elsewhere is not configuration. And a limit sized
+against V1's data could never have worked on a real release — the same shape as
+the transaction-budget defect above.

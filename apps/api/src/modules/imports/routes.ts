@@ -21,7 +21,7 @@ const activateSchema = z.object({
   expectedActiveReleaseId: z.string().uuid().nullable().default(null),
 });
 
-/** V1 accepts a single JSON snapshot package, capped at 10 MiB. */
+/** A release is a single JSON snapshot package, capped at 10 MiB. */
 const MAX_PACKAGE_BYTES = 10 * 1024 * 1024;
 
 function toDiffItems(items: ContentItem[], versions: Map<string, { version: number; masteryRevision: number }>): DiffItem[] {
@@ -43,7 +43,7 @@ export function registerImportsRoutes(app: FastifyInstance): void {
    * it exists so the owner can preview added, changed and archived items before
    * choosing to publish.
    */
-  app.post('/content/imports', async (request, reply) => {
+  app.post('/content/imports', { bodyLimit: MAX_PACKAGE_BYTES }, async (request, reply) => {
     const owner = requireOwner(request);
 
     const raw = request.body;

@@ -1,0 +1,152 @@
+// Inventory LEARNING database. Entirely separate from the DevPractice
+// platform database and from every other mission's database.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  draft
+  placed
+  cancelled
+}
+
+enum MovementReason {
+  received
+  sold
+  adjustment
+  returned
+}
+
+/// Fictional training users. This is NOT an authentication system.
+model TrainingUser {
+  id          String   @id
+  displayName String
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  orders Order[]
+}
+
+model Product {
+  id        String   @id @default(uuid())
+  /// Business key. Two products can never share a SKU — enforced by the
+  /// database, not only by a check in the route.
+  sku       String   @unique
+  name      String
+  /// Stored in minor units (pence/cents) so money is never a float.
+  unitPrice Int
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  movements  StockMovement[]
+  orderLines OrderLine[]
+
+  @@index([createdAt, id])
+}
+
+/// Stock is a LEDGER, not a mutable counter. On-hand quantity is the sum of
+/// movements, so every change has a reason and an audit trail, and two
+/// concurrent writers cannot lose an update by overwriting a total.
+model StockMovement {
+  id        String         @id @default(uuid())
+  productId String
+  /// Positive for stock in, negative for stock out. Never zero.
+  delta     Int
+  reason    MovementReason
+  /// Set when this movement was caused by placing an order.
+  orderId   String?
+  createdAt DateTime       @default(now()) @db.Timestamptz(6)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([productId, createdAt])
+  @@index([orderId])
+}
+
+model Order {
+  id           String      @id @default(uuid())
+  customerName String
+  status       OrderStatus @default(draft)
+  ownerId      String
+  placedAt     DateTime?   @db.Timestamptz(6)
+  createdAt    DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime    @updatedAt @db.Timestamptz(6)
+
+  owner     TrainingUser    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  lines     OrderLine[]
+  movements StockMovement[]
+
+  @@index([createdAt, id])
+  @@index([ownerId, createdAt, id])
+}
+
+model OrderLine {
+  id        String @id @default(uuid())
+  orderId   String
+  productId String
+  quantity  Int
+  /// Price captured when the line was created. An order must not silently
+  /// change total because a product was repriced afterwards.
+  unitPrice Int
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  /// One line per product per order; adding the same product twice adjusts the
+  /// existing line rather than creating a duplicate.
+  @@unique([orderId, productId])
+  @@index([productId])
+}
+
+enum JobStatus {
+  pending
+  running
+  succeeded
+  failed
+}
+
+/// A database-backed job record. No queue broker, no Redis — the point is to
+/// see the state machine and the retry rules explicitly, not to hide them
+/// inside infrastructure.
+model ReportJob {
+  id          String    @id @default(uuid())
+  kind        String
+  /// Parameters the job runs against, e.g. the period to report on.
+  params      Json
+  status      JobStatus @default(pending)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  /// When this job may next be attempted. Backoff moves it forward.
+  runAfter    DateTime  @default(now()) @db.Timestamptz(6)
+  lastError   String?
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(6)
+
+  lines ReportLine[]
+
+  @@index([status, runAfter])
+}
+
+/// The committed effect of a job. Reruns must not duplicate these rows, which
+/// is what makes the job safe to retry.
+model ReportLine {
+  id        String @id @default(uuid())
+  jobId     String
+  productId String
+  /// Quantity on hand at the moment the report ran.
+  onHand    Int
+  /// Value in minor units.
+  value     Int
+
+  job ReportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  /// One line per product per job: the natural key that makes a rerun
+  /// idempotent rather than additive.
+  @@unique([jobId, productId])
+}

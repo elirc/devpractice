@@ -1,7 +1,7 @@
 # DevPractice — handoff to a fresh session
 
-Read these five files in order. They are written for a model with **no prior
-context** on this build.
+Read these files in order. They are written for a model with **no prior context**
+on this build. If you only want to run the thing, jump to `06-cold-start.md`.
 
 | File | What it tells you |
 |---|---|
@@ -10,6 +10,7 @@ context** on this build.
 | `03-environment.md` | This machine's constraints. Read before running anything. |
 | `04-gotchas.md` | Traps that cost hours. Read before debugging anything. |
 | `05-verification.md` | Exact commands to reproduce every gate. |
+| `06-cold-start.md` | Getting from a fresh clone or reboot to a running app, plus a map of where things live. |
 
 ## The 30-second version
 
@@ -17,15 +18,18 @@ context** on this build.
 learning platform built from `docs/product-spec.md` (the authoritative
 specification — read it before changing behaviour).
 
-- **V1 is COMPLETE and verified.** Platform + 12 chapters + 3 missions. Every
-  acceptance gate except A15 was executed. Commits `dacb8ad`, `b147d96`.
-- **V2 and V3 CHAPTERS are complete and validated.** 18 chapters, committed at
-  `1d81c1e`.
-- **V2 and V3 MISSIONS are incomplete.** Code exists for M04-M11, M12 does not
-  exist, and none of it has mission content items or A13 verification. This is
-  the main outstanding work.
-- **One known defect blocks V2/V3 navigation**: the track item lists only the 12
-  V1 chapters. See `02-outstanding.md` item 1.
+- **V1 is COMPLETE, verified and published.** Platform, 12 chapters, 3 missions.
+  Every acceptance gate except A15 was executed.
+- **V2 and V3 content is COMPLETE and assembles as full releases.** 30 chapters,
+  90 lessons, 270 exercises, 180 review cards, 150 placement items, 12 missions —
+  the spec §2.2 combined baseline, hit exactly. Structural validation is green for
+  all three releases.
+- **The missions are verified.** See `01-state.md` for exactly how many and which;
+  that number is the one thing in this folder most likely to be stale, because it
+  changed during the last session.
+- **What is left is publication**, the platform re-verification that publication
+  invalidates, and the behavioural content gate on an assembled V2/V3. All three
+  are in `02-outstanding.md` with commands.
 
 ## Rules that are not negotiable
 
@@ -35,10 +39,15 @@ These come from the spec and from failures that already happened here:
    implemented / verified / content authored / content validated / deferred /
    blocked. A green reference solution proves one implementation passes, not
    that the grader rejects wrong ones.
-2. **Never weaken a test to make it pass.** Three tests in this repo asserted
+2. **Never weaken a test to make it pass.** Several tests in this repo asserted
    behaviour they never exercised; each was found only because someone made a
    test fail loudly instead of skipping.
 3. **Do not run `pnpm install` casually.** Concurrent installs destroyed this
    workspace four times. See `03-environment.md`.
 4. **Learner code never reaches host eval.** The QuickJS interpreter boundary is
    the security model. Do not "simplify" it.
+5. **One heavy process at a time.** The OS memory killer has stopped background
+   test runs here. This is not caution, it is the observed failure mode.
+6. **The validator checks references forwards only.** A chapter the track does not
+   list, and a mission no chapter lists, both validate green and are invisible in
+   the app. Both shipped broken once. `curriculum/README.md` has the rule.

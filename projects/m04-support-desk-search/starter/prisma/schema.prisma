@@ -1,0 +1,57 @@
+// Support desk LEARNING database. Entirely separate from the platform database.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TicketStatus {
+  open
+  pending
+  closed
+}
+
+/// Fictional training users. This is NOT an authentication system.
+model TrainingUser {
+  id          String   @id
+  displayName String
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  tickets  Ticket[]
+  comments Comment[]
+}
+
+model Ticket {
+  id           String       @id @default(uuid())
+  title        String
+  body         String
+  status       TicketStatus @default(open)
+  customerName String
+  ownerId      String
+  createdAt    DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime     @updatedAt @db.Timestamptz(6)
+
+  owner    TrainingUser @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  comments Comment[]
+
+  // Supports the total ordering the list endpoint must use.
+  @@index([createdAt, id])
+  @@index([ownerId, createdAt, id])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  ticketId  String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  ticket Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author TrainingUser @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt, id])
+}

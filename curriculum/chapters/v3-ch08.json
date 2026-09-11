@@ -11,7 +11,11 @@
         "aspnet.authorization-policies",
         "dotnet.resource-ownership"
       ],
-      "prerequisiteIds": ["auth.identity-vs-access", "auth.ownership-check", "aspnet.middleware"],
+      "prerequisiteIds": [
+        "auth.identity-vs-access",
+        "auth.ownership-check",
+        "aspnet.middleware"
+      ],
       "objectiveIds": [
         "aspnet.authentication-schemes",
         "aspnet.authorization-policies",
@@ -19,20 +23,30 @@
       ],
       "trackId": "v1-track",
       "sortOrder": 27,
-      "lessonIds": ["v3-l22", "v3-l23", "v3-l24"],
+      "lessonIds": [
+        "v3-l22",
+        "v3-l23",
+        "v3-l24"
+      ],
       "assessmentId": "v3-a08",
-      "missionIds": [],
+      "missionIds": [
+        "m10-dotnet-efcore-repair"
+      ],
       "bodyMarkdown": "You have already met this chapter's central bug. In V1 chapter 11 you learned that authentication and authorization are different questions, and in mission M03 you repaired a route that fetched a ticket by id without asking whose ticket it was. Nothing about that defect is specific to Node — it is a shape of mistake, and ASP.NET Core gives you new and slightly more comfortable ways to make it.\n\nWhat the framework genuinely adds is structure. Authentication becomes a **scheme**: a named, pluggable way of turning a request into an identity, so 'cookie for the web app, bearer token for the integration API' is configuration rather than branching. Authorization becomes a **policy**: a named rule you declare once and apply by name, so the rule lives in one place instead of being re-derived in every handler.\n\nWhat the framework does **not** do is know which rows belong to whom. `[Authorize]` answers 'is this a signed-in agent?'. It cannot answer 'is this *their* ticket?', because it has never seen the ticket. That gap — between a request being authenticated and a specific row being yours — is where the M03 defect lived, and it is where the equivalent .NET defect lives too.\n\nSo this chapter runs authentication, then policies, then the thing neither of them does for you: scoping data access to the owner, in the query, where it cannot be forgotten."
     },
-
     {
       "kind": "lesson",
       "id": "v3-l22",
       "version": 1,
       "masteryRevision": 1,
       "title": "Authentication schemes",
-      "conceptIds": ["aspnet.authentication-schemes"],
-      "prerequisiteIds": ["auth.identity-vs-access", "auth.session-handling"],
+      "conceptIds": [
+        "aspnet.authentication-schemes"
+      ],
+      "prerequisiteIds": [
+        "auth.identity-vs-access",
+        "auth.session-handling"
+      ],
       "chapterId": "v3-ch08",
       "sortOrder": 0,
       "objectives": [
@@ -41,8 +55,7 @@
         "Choose a scheme for a given client and say why the alternative is wrong."
       ],
       "estimatedMinutes": 17,
-      "bodyMarkdown": "Authentication answers exactly one question: **who is making this request?** Not what they may do — only who they are, or that nobody is.\n\nIn ASP.NET Core the answer is produced by a **scheme**: a named handler that inspects the request and, if it can, builds a `ClaimsPrincipal`. Registering one looks like this:\n\n```csharp\nbuilder.Services\n    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)\n    .AddCookie(options =>\n    {\n        options.Cookie.HttpOnly = true;\n        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;\n        options.Cookie.SameSite = SameSiteMode.Lax;\n    });\n```\n\nThe result lands on `HttpContext.User`. If no scheme succeeded, that property is not null — it is an *unauthenticated* principal, with `Identity.IsAuthenticated == false`. This trips people up: `User` is always there, so a null check proves nothing.\n\nA claim is a statement about the identity — `sub`, `email`, `role` — asserted by whatever issued it. Claims are input to authorization, never a decision in themselves.\n\nYou can register more than one scheme, which is the point of naming them. Larkspur's browser app uses a cookie; its partner integration uses a bearer token:\n\n```csharp\nbuilder.Services\n    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)\n    .AddCookie()\n    .AddJwtBearer(\"PartnerApi\", options => { /* ... */ });\n```\n\nand an endpoint can demand a specific one with `[Authorize(AuthenticationSchemes = \"PartnerApi\")]`.\n\nThe choice between them is not stylistic. A cookie is sent by the browser automatically on every request to the origin, which is exactly why it is convenient for a web app and exactly why it needs CSRF defences — the browser will attach it to a request your site did not initiate. A bearer token is attached deliberately by client code, so it is immune to that particular problem and correspondingly useless for a plain HTML form post. The V1 platform uses a cookie plus a session-bound CSRF token for precisely this reason.\n\nFinally, ordering. Two pieces of middleware, and they must appear in this order:\n\n```csharp\napp.UseAuthentication();   // work out who this is\napp.UseAuthorization();    // decide whether they may proceed\n```\n\nReversed, authorization runs before an identity exists, so every authenticated request looks anonymous and `[Authorize]` rejects everyone. The symptom — 401s for users who are definitely signed in — reads like a broken login, and the cause is two lines in the wrong order."
-      ,
+      "bodyMarkdown": "Authentication answers exactly one question: **who is making this request?** Not what they may do — only who they are, or that nobody is.\n\nIn ASP.NET Core the answer is produced by a **scheme**: a named handler that inspects the request and, if it can, builds a `ClaimsPrincipal`. Registering one looks like this:\n\n```csharp\nbuilder.Services\n    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)\n    .AddCookie(options =>\n    {\n        options.Cookie.HttpOnly = true;\n        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;\n        options.Cookie.SameSite = SameSiteMode.Lax;\n    });\n```\n\nThe result lands on `HttpContext.User`. If no scheme succeeded, that property is not null — it is an *unauthenticated* principal, with `Identity.IsAuthenticated == false`. This trips people up: `User` is always there, so a null check proves nothing.\n\nA claim is a statement about the identity — `sub`, `email`, `role` — asserted by whatever issued it. Claims are input to authorization, never a decision in themselves.\n\nYou can register more than one scheme, which is the point of naming them. Larkspur's browser app uses a cookie; its partner integration uses a bearer token:\n\n```csharp\nbuilder.Services\n    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)\n    .AddCookie()\n    .AddJwtBearer(\"PartnerApi\", options => { /* ... */ });\n```\n\nand an endpoint can demand a specific one with `[Authorize(AuthenticationSchemes = \"PartnerApi\")]`.\n\nThe choice between them is not stylistic. A cookie is sent by the browser automatically on every request to the origin, which is exactly why it is convenient for a web app and exactly why it needs CSRF defences — the browser will attach it to a request your site did not initiate. A bearer token is attached deliberately by client code, so it is immune to that particular problem and correspondingly useless for a plain HTML form post. The V1 platform uses a cookie plus a session-bound CSRF token for precisely this reason.\n\nFinally, ordering. Two pieces of middleware, and they must appear in this order:\n\n```csharp\napp.UseAuthentication();   // work out who this is\napp.UseAuthorization();    // decide whether they may proceed\n```\n\nReversed, authorization runs before an identity exists, so every authenticated request looks anonymous and `[Authorize]` rejects everyone. The symptom — 401s for users who are definitely signed in — reads like a broken login, and the cause is two lines in the wrong order.",
       "workedExampleMarkdown": "Larkspur needs both clients working at once. The full wiring:\n\n```csharp\nbuilder.Services\n    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)\n    .AddCookie(options =>\n    {\n        options.Cookie.Name = \"__Host-larkspur\";\n        options.Cookie.HttpOnly = true;\n        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;\n        options.Cookie.SameSite = SameSiteMode.Lax;\n        options.ExpireTimeSpan = TimeSpan.FromDays(7);\n        options.SlidingExpiration = true;\n    })\n    .AddJwtBearer(\"PartnerApi\", options =>\n    {\n        options.Authority = builder.Configuration[\"PartnerApi:Authority\"];\n        options.Audience = \"larkspur-tickets\";\n    });\n\nvar app = builder.Build();\n\napp.UseAuthentication();\napp.UseAuthorization();\n\napp.MapGet(\"/tickets\", GetTickets)\n   .RequireAuthorization();                       // default scheme: cookie\n\napp.MapPost(\"/partner/tickets\", CreateFromPartner)\n   .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = \"PartnerApi\" });\n```\n\nReading an identity in a handler:\n\n```csharp\nstatic async Task<IResult> GetTickets(ClaimsPrincipal user, SupportContext db)\n{\n    if (user.Identity?.IsAuthenticated != true)\n        return Results.Unauthorized();            // belt and braces; RequireAuthorization already did this\n\n    var agentId = long.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);\n    // ... and note that having agentId is not yet permission to read anything\n}\n```\n\nThat last comment is the bridge to the rest of the chapter. `agentId` tells you who is asking. It does not tell you which tickets are theirs, and nothing in the authentication layer ever will.",
       "commonMistakes": [
         "Checking `HttpContext.User != null`. It is never null; an anonymous request has an unauthenticated principal. Test `User.Identity?.IsAuthenticated`.",
@@ -53,22 +66,39 @@
         "Parsing the user id from a claim in every handler and trusting whatever arrives, rather than treating it as one input to an ownership check."
       ],
       "summaryMarkdown": "A scheme turns a request into a `ClaimsPrincipal`; several can coexist and be demanded by name. `User` is always present, so check `IsAuthenticated` rather than null. Authentication middleware must run before authorization middleware. And knowing who the caller is answers nothing about which rows they may touch — that is the next two lessons.",
-      "exerciseIds": ["v3-e801", "v3-e802", "v3-e803"],
-      "reviewCardIds": ["v3-c801", "v3-c802"],
+      "exerciseIds": [
+        "v3-e801",
+        "v3-e802",
+        "v3-e803"
+      ],
+      "reviewCardIds": [
+        "v3-c801",
+        "v3-c802"
+      ],
       "references": [
-        { "label": "ASP.NET Core — Authentication overview", "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authentication/" },
-        { "label": "ASP.NET Core — Cookie authentication", "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authentication/cookie" },
-        { "label": "ASP.NET Core — Middleware order", "url": "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/middleware/#middleware-order" }
+        {
+          "label": "ASP.NET Core — Authentication overview",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authentication/"
+        },
+        {
+          "label": "ASP.NET Core — Cookie authentication",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authentication/cookie"
+        },
+        {
+          "label": "ASP.NET Core — Middleware order",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/fundamentals/middleware/#middleware-order"
+        }
       ]
     },
-
     {
       "kind": "exercise",
       "id": "v3-e801",
       "version": 1,
       "masteryRevision": 1,
       "title": "What does authentication produce?",
-      "conceptIds": ["aspnet.authentication-schemes"],
+      "conceptIds": [
+        "aspnet.authentication-schemes"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Fixing the boundary between the two questions before anything else.",
       "lessonId": "v3-l22",
@@ -119,14 +149,15 @@
         ]
       }
     },
-
     {
       "kind": "exercise",
       "id": "v3-e802",
       "version": 1,
       "masteryRevision": 1,
       "title": "Pick the scheme for a request",
-      "conceptIds": ["aspnet.authentication-schemes"],
+      "conceptIds": [
+        "aspnet.authentication-schemes"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Scheme selection as pure logic: what the request carries decides who handles it.",
       "lessonId": "v3-l22",
@@ -155,51 +186,83 @@
         "cases": [
           {
             "id": "bearer-token",
-            "args": [{ "authorizationHeader": "Bearer eyJhbGciOiJIUzI1NiJ9", "hasSessionCookie": false }],
+            "args": [
+              {
+                "authorizationHeader": "Bearer eyJhbGciOiJIUzI1NiJ9",
+                "hasSessionCookie": false
+              }
+            ],
             "expected": "bearer",
             "hidden": false
           },
           {
             "id": "bearer-wins-over-cookie",
-            "args": [{ "authorizationHeader": "Bearer eyJhbGciOiJIUzI1NiJ9", "hasSessionCookie": true }],
+            "args": [
+              {
+                "authorizationHeader": "Bearer eyJhbGciOiJIUzI1NiJ9",
+                "hasSessionCookie": true
+              }
+            ],
             "expected": "bearer",
             "hidden": false
           },
           {
             "id": "basic-is-unsupported",
-            "args": [{ "authorizationHeader": "Basic YWdlbnQ6c2VjcmV0", "hasSessionCookie": true }],
+            "args": [
+              {
+                "authorizationHeader": "Basic YWdlbnQ6c2VjcmV0",
+                "hasSessionCookie": true
+              }
+            ],
             "expected": "unsupported",
             "hidden": false
           },
           {
             "id": "cookie-only",
-            "args": [{ "authorizationHeader": null, "hasSessionCookie": true }],
+            "args": [
+              {
+                "authorizationHeader": null,
+                "hasSessionCookie": true
+              }
+            ],
             "expected": "cookie",
             "hidden": false
           },
           {
             "id": "empty-header-falls-through",
-            "args": [{ "authorizationHeader": "", "hasSessionCookie": true }],
+            "args": [
+              {
+                "authorizationHeader": "",
+                "hasSessionCookie": true
+              }
+            ],
             "expected": "cookie",
             "hidden": false
           },
           {
             "id": "nothing-at-all",
-            "args": [{ "authorizationHeader": null, "hasSessionCookie": false }],
+            "args": [
+              {
+                "authorizationHeader": null,
+                "hasSessionCookie": false
+              }
+            ],
             "expected": "anonymous",
             "hidden": false
           }
         ]
       }
     },
-
     {
       "kind": "exercise",
       "id": "v3-e803",
       "version": 1,
       "masteryRevision": 1,
       "title": "Everyone is suddenly unauthorized",
-      "conceptIds": ["aspnet.authentication-schemes", "aspnet.middleware"],
+      "conceptIds": [
+        "aspnet.authentication-schemes",
+        "aspnet.middleware"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "A two-line defect that presents as a broken login.",
       "lessonId": "v3-l22",
@@ -250,14 +313,15 @@
         ]
       }
     },
-
     {
       "kind": "review_card",
       "id": "v3-c801",
       "version": 1,
       "masteryRevision": 1,
       "title": "Is `User` ever null?",
-      "conceptIds": ["aspnet.authentication-schemes"],
+      "conceptIds": [
+        "aspnet.authentication-schemes"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Recall the shape of an unauthenticated request.",
       "lessonId": "v3-l22",
@@ -268,14 +332,15 @@
       "answerMarkdown": "Test `User.Identity?.IsAuthenticated == true`. `HttpContext.User` is **never null** — an anonymous request carries a `ClaimsPrincipal` whose identity simply reports `IsAuthenticated == false`. A null check therefore passes for everyone, including anonymous callers, which makes it look like a guard while guarding nothing.",
       "explanationMarkdown": "This is a quietly dangerous mistake because the code reads like a check and behaves like a no-op. The same shape appears elsewhere: an object that is always present but sometimes empty needs a state test, not a presence test."
     },
-
     {
       "kind": "review_card",
       "id": "v3-c802",
       "version": 1,
       "masteryRevision": 1,
       "title": "Cookie or bearer?",
-      "conceptIds": ["aspnet.authentication-schemes"],
+      "conceptIds": [
+        "aspnet.authentication-schemes"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Transfer: choosing a scheme from how the client behaves.",
       "lessonId": "v3-l22",
@@ -286,15 +351,19 @@
       "answerMarkdown": "Cookie for the browser app, bearer token for the integration. The browser attaches a cookie **automatically** to every request to the origin — convenient, and exactly why cookie auth needs a **CSRF defence**, because a request your site did not initiate still carries it. A bearer token is attached deliberately by client code, so it is not sent by a cross-site form post, but for the same reason it is unsuitable for plain HTML form submissions.",
       "explanationMarkdown": "The trade-off is automatic-versus-deliberate transmission, and every consequence follows from it. It also explains why moving browser auth to `localStorage` bearer tokens is not a straightforward win: it swaps CSRF exposure for XSS exposure."
     },
-
     {
       "kind": "lesson",
       "id": "v3-l23",
       "version": 1,
       "masteryRevision": 1,
       "title": "Authorization policies",
-      "conceptIds": ["aspnet.authorization-policies"],
-      "prerequisiteIds": ["auth.identity-vs-access", "authz.resource-scoped-permissions"],
+      "conceptIds": [
+        "aspnet.authorization-policies"
+      ],
+      "prerequisiteIds": [
+        "auth.identity-vs-access",
+        "authz.resource-scoped-permissions"
+      ],
       "chapterId": "v3-ch08",
       "sortOrder": 1,
       "objectives": [
@@ -303,8 +372,7 @@
         "Say what a policy can decide without seeing the resource, and what it cannot."
       ],
       "estimatedMinutes": 18,
-      "bodyMarkdown": "A **policy** is a named authorization rule, declared once and applied by name. That is nearly the whole idea, and the value is entirely in the indirection.\n\nWithout it, rules spread:\n\n```csharp\nif (user.IsInRole(\"Supervisor\") || user.IsInRole(\"Admin\")) { /* ... */ }\n```\n\nrepeated in eleven handlers, and when a `TeamLead` role is added, ten of them get updated. The eleventh is the incident.\n\nWith a policy the rule has one home:\n\n```csharp\nbuilder.Services.AddAuthorization(options =>\n{\n    options.AddPolicy(\"CanReassignTickets\", policy =>\n        policy.RequireRole(\"Supervisor\", \"Admin\", \"TeamLead\"));\n\n    options.AddPolicy(\"OnSupportTeam\", policy =>\n        policy.RequireClaim(\"team\", \"support\"));\n});\n```\n\n```csharp\napp.MapPost(\"/tickets/{id}/reassign\", Reassign)\n   .RequireAuthorization(\"CanReassignTickets\");\n```\n\nNotice what the endpoint now says. Not 'supervisors and admins and team leads' but **'whoever may reassign tickets'** — the capability, not its current membership. The list changes in one place, and the endpoint keeps telling the truth.\n\nFor rules that roles cannot express, write a requirement and a handler:\n\n```csharp\npublic record MinimumTenure(int Days) : IAuthorizationRequirement;\n\npublic class MinimumTenureHandler : AuthorizationHandler<MinimumTenure>\n{\n    protected override Task HandleRequirementAsync(\n        AuthorizationHandlerContext context, MinimumTenure requirement)\n    {\n        var hired = context.User.FindFirstValue(\"hired_on\");\n        if (hired is not null &&\n            DateTime.Parse(hired) <= DateTime.UtcNow.AddDays(-requirement.Days))\n        {\n            context.Succeed(requirement);\n        }\n        return Task.CompletedTask;\n    }\n}\n```\n\nTwo details in there are worth pausing on. You call `context.Succeed(requirement)` to allow; you do **not** call `Fail()` to deny. Simply not succeeding is a denial. `Fail()` is stronger — it vetoes the requirement even if another handler would have succeeded it — and reaching for it by mistake produces rules that cannot be satisfied by any combination of handlers.\n\nAnd now the boundary that the next lesson exists for. Everything above decides using **the identity alone**: roles, claims, tenure. None of it has looked at a ticket. A policy can say 'supervisors may reassign tickets'; it cannot say 'this agent may reassign *this* ticket', because nothing has fetched it.\n\nASP.NET Core does offer resource-based authorization for exactly that — `IAuthorizationService.AuthorizeAsync(user, resource, requirement)`, called from inside the handler once the resource is loaded. It is the right tool for a genuine multi-actor rule. But for the common case of 'this row belongs to this user', the next lesson argues for something simpler and harder to forget."
-      ,
+      "bodyMarkdown": "A **policy** is a named authorization rule, declared once and applied by name. That is nearly the whole idea, and the value is entirely in the indirection.\n\nWithout it, rules spread:\n\n```csharp\nif (user.IsInRole(\"Supervisor\") || user.IsInRole(\"Admin\")) { /* ... */ }\n```\n\nrepeated in eleven handlers, and when a `TeamLead` role is added, ten of them get updated. The eleventh is the incident.\n\nWith a policy the rule has one home:\n\n```csharp\nbuilder.Services.AddAuthorization(options =>\n{\n    options.AddPolicy(\"CanReassignTickets\", policy =>\n        policy.RequireRole(\"Supervisor\", \"Admin\", \"TeamLead\"));\n\n    options.AddPolicy(\"OnSupportTeam\", policy =>\n        policy.RequireClaim(\"team\", \"support\"));\n});\n```\n\n```csharp\napp.MapPost(\"/tickets/{id}/reassign\", Reassign)\n   .RequireAuthorization(\"CanReassignTickets\");\n```\n\nNotice what the endpoint now says. Not 'supervisors and admins and team leads' but **'whoever may reassign tickets'** — the capability, not its current membership. The list changes in one place, and the endpoint keeps telling the truth.\n\nFor rules that roles cannot express, write a requirement and a handler:\n\n```csharp\npublic record MinimumTenure(int Days) : IAuthorizationRequirement;\n\npublic class MinimumTenureHandler : AuthorizationHandler<MinimumTenure>\n{\n    protected override Task HandleRequirementAsync(\n        AuthorizationHandlerContext context, MinimumTenure requirement)\n    {\n        var hired = context.User.FindFirstValue(\"hired_on\");\n        if (hired is not null &&\n            DateTime.Parse(hired) <= DateTime.UtcNow.AddDays(-requirement.Days))\n        {\n            context.Succeed(requirement);\n        }\n        return Task.CompletedTask;\n    }\n}\n```\n\nTwo details in there are worth pausing on. You call `context.Succeed(requirement)` to allow; you do **not** call `Fail()` to deny. Simply not succeeding is a denial. `Fail()` is stronger — it vetoes the requirement even if another handler would have succeeded it — and reaching for it by mistake produces rules that cannot be satisfied by any combination of handlers.\n\nAnd now the boundary that the next lesson exists for. Everything above decides using **the identity alone**: roles, claims, tenure. None of it has looked at a ticket. A policy can say 'supervisors may reassign tickets'; it cannot say 'this agent may reassign *this* ticket', because nothing has fetched it.\n\nASP.NET Core does offer resource-based authorization for exactly that — `IAuthorizationService.AuthorizeAsync(user, resource, requirement)`, called from inside the handler once the resource is loaded. It is the right tool for a genuine multi-actor rule. But for the common case of 'this row belongs to this user', the next lesson argues for something simpler and harder to forget.",
       "workedExampleMarkdown": "The same rule, three ways, in increasing order of maintainability.\n\n**Scattered checks** — the rule is wherever someone remembered it:\n\n```csharp\napp.MapPost(\"/tickets/{id}/reassign\", async (long id, ClaimsPrincipal user, ...) =>\n{\n    if (!user.IsInRole(\"Supervisor\") && !user.IsInRole(\"Admin\"))\n        return Results.Forbid();\n    // ...\n});\n\napp.MapPost(\"/tickets/{id}/escalate\", async (long id, ClaimsPrincipal user, ...) =>\n{\n    if (!user.IsInRole(\"Supervisor\"))          // drifted: Admin silently excluded\n        return Results.Forbid();\n    // ...\n});\n```\n\nThe second endpoint has already diverged, and nothing will tell you.\n\n**A named policy** — one definition, applied by name:\n\n```csharp\noptions.AddPolicy(\"CanReassignTickets\", p => p.RequireRole(\"Supervisor\", \"Admin\"));\n\napp.MapPost(\"/tickets/{id}/reassign\", Reassign).RequireAuthorization(\"CanReassignTickets\");\napp.MapPost(\"/tickets/{id}/escalate\", Escalate).RequireAuthorization(\"CanReassignTickets\");\n```\n\nAdding `TeamLead` is a one-line change that both endpoints inherit.\n\n**Resource-based, when the rule genuinely needs the row:**\n\n```csharp\nstatic async Task<IResult> Reassign(\n    long id, ClaimsPrincipal user,\n    IAuthorizationService authorization, SupportContext db)\n{\n    var ticket = await db.Tickets.FindAsync(id);\n    if (ticket is null) return Results.NotFound();\n\n    var result = await authorization.AuthorizeAsync(user, ticket, \"CanReassignThisTicket\");\n    if (!result.Succeeded) return Results.NotFound();\n\n    // ...\n}\n```\n\nHere the ticket has been loaded, so a handler can compare `ticket.TeamId` against the user's claims — something no endpoint-level policy could do. Note the `NotFound` rather than `Forbid` on failure: for a resource the caller should not be able to see, confirming it exists is itself a disclosure.",
       "commonMistakes": [
         "Repeating `IsInRole` checks across handlers, so the rule drifts silently as roles are added.",
@@ -315,22 +383,39 @@
         "Putting business rules that depend on row state into claims, so the token has to be reissued whenever the data changes."
       ],
       "summaryMarkdown": "A policy gives a rule one name and one home, so endpoints declare the capability they need rather than its current membership. Requirements plus handlers cover rules roles cannot express; `Succeed` allows and silence denies, while `Fail` vetoes. And every endpoint-level policy decides from the identity alone — deciding about a specific row needs the row, which is the next lesson.",
-      "exerciseIds": ["v3-e804", "v3-e805", "v3-e806"],
-      "reviewCardIds": ["v3-c803", "v3-c804"],
+      "exerciseIds": [
+        "v3-e804",
+        "v3-e805",
+        "v3-e806"
+      ],
+      "reviewCardIds": [
+        "v3-c803",
+        "v3-c804"
+      ],
       "references": [
-        { "label": "ASP.NET Core — Policy-based authorization", "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authorization/policies" },
-        { "label": "ASP.NET Core — Resource-based authorization", "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authorization/resourcebased" },
-        { "label": "ASP.NET Core — Authorization introduction", "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authorization/introduction" }
+        {
+          "label": "ASP.NET Core — Policy-based authorization",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authorization/policies"
+        },
+        {
+          "label": "ASP.NET Core — Resource-based authorization",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authorization/resourcebased"
+        },
+        {
+          "label": "ASP.NET Core — Authorization introduction",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authorization/introduction"
+        }
       ]
     },
-
     {
       "kind": "exercise",
       "id": "v3-e804",
       "version": 1,
       "masteryRevision": 1,
       "title": "The policy that can never succeed",
-      "conceptIds": ["aspnet.authorization-policies"],
+      "conceptIds": [
+        "aspnet.authorization-policies"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Reading a requirement handler for a control-flow mistake with an outsized effect.",
       "lessonId": "v3-l23",
@@ -381,14 +466,15 @@
         ]
       }
     },
-
     {
       "kind": "exercise",
       "id": "v3-e805",
       "version": 1,
       "masteryRevision": 1,
       "title": "What can this policy decide?",
-      "conceptIds": ["aspnet.authorization-policies"],
+      "conceptIds": [
+        "aspnet.authorization-policies"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Predicting the limit of an endpoint-level rule.",
       "lessonId": "v3-l23",
@@ -410,7 +496,11 @@
       },
       "grading": {
         "kind": "predict-output",
-        "normalization": { "trim": true, "collapseWhitespace": true, "caseSensitive": false },
+        "normalization": {
+          "trim": true,
+          "collapseWhitespace": true,
+          "caseSensitive": false
+        },
         "expected": "yes — ticket",
         "acceptedAlternatives": [
           "yes - ticket",
@@ -421,14 +511,15 @@
         ]
       }
     },
-
     {
       "kind": "exercise",
       "id": "v3-e806",
       "version": 1,
       "masteryRevision": 1,
       "title": "Name the policy properly",
-      "conceptIds": ["aspnet.authorization-policies"],
+      "conceptIds": [
+        "aspnet.authorization-policies"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "A short written design review. The names you choose decide how much changes when the org chart does.",
       "lessonId": "v3-l23",
@@ -460,14 +551,15 @@
         "modelAnswerMarkdown": "**What is wrong.** `SupervisorsAndAdmins` names its current membership, not the capability it protects. An endpoint decorated with it says *who may call it today* rather than *why it is restricted*, so the name goes stale the moment the org chart changes — and it gives no hint whether a given endpoint is about ticket handling or billing.\n\n**What that costs now.** Because one policy spans several unrelated capabilities, `TeamLead` cannot simply be added to it: that would grant billing access too. Someone has to open all thirty endpoints, work out which ones are reassignment-and-closure and which are billing, and split them into two policies by hand. That audit is exactly the work the policy indirection was supposed to eliminate, and any endpoint missed in the sweep becomes a silent over-grant.\n\n**How I would restructure it.**\n\n```csharp\noptions.AddPolicy(\"CanReassignTickets\", p => p.RequireRole(\"Supervisor\", \"Admin\", \"TeamLead\"));\noptions.AddPolicy(\"CanCloseTickets\",    p => p.RequireRole(\"Supervisor\", \"Admin\", \"TeamLead\"));\noptions.AddPolicy(\"CanChangeBillingSettings\", p => p.RequireRole(\"Admin\"));\n```\n\nEach endpoint declares the capability it needs. Introducing `TeamLead` becomes a change to two policy definitions and zero endpoints, and reading an endpoint tells you what it is protecting rather than who happened to be trusted when it was written."
       }
     },
-
     {
       "kind": "review_card",
       "id": "v3-c803",
       "version": 1,
       "masteryRevision": 1,
       "title": "Succeed, or Fail?",
-      "conceptIds": ["aspnet.authorization-policies"],
+      "conceptIds": [
+        "aspnet.authorization-policies"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Recall how a requirement handler denies.",
       "lessonId": "v3-l23",
@@ -478,14 +570,15 @@
       "answerMarkdown": "Not calling `Succeed` is an ordinary denial: the requirement remains unsatisfied, but **another handler may still satisfy it**. `Fail()` is a veto — it marks the entire authorization as failed, and no other handler's `Succeed` can undo it. Use plain return for 'I cannot grant this'; reserve `Fail()` for 'nobody may grant this'.",
       "explanationMarkdown": "The distinction matters as soon as a requirement has more than one handler, which is the normal way to express alternative routes to the same permission. Using `Fail()` as an else-branch quietly makes those alternatives impossible."
     },
-
     {
       "kind": "review_card",
       "id": "v3-c804",
       "version": 1,
       "masteryRevision": 1,
       "title": "What a policy cannot see",
-      "conceptIds": ["aspnet.authorization-policies"],
+      "conceptIds": [
+        "aspnet.authorization-policies"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Transfer: the boundary between endpoint and resource decisions.",
       "lessonId": "v3-l23",
@@ -496,15 +589,20 @@
       "answerMarkdown": "Because it runs **before the handler**, and therefore before anything has queried the ticket. It decides from the identity alone — roles and claims — and has no row to compare against. Ownership is a fact about a specific record, so it can only be enforced once that record has been fetched: either with resource-based authorization (`IAuthorizationService.AuthorizeAsync(user, resource, requirement)`) or, more robustly, by scoping the query itself to the owner.",
       "explanationMarkdown": "Holding this boundary clearly is what prevents the M03-class defect. `[Authorize]` looking reassuring at the top of a handler is precisely why the missing ownership check is so easy to overlook — it answers a real question, just not that one."
     },
-
     {
       "kind": "lesson",
       "id": "v3-l24",
       "version": 1,
       "masteryRevision": 1,
       "title": "Resource ownership in the query",
-      "conceptIds": ["dotnet.resource-ownership"],
-      "prerequisiteIds": ["auth.ownership-check", "auth.cross-user-access", "efcore.entities"],
+      "conceptIds": [
+        "dotnet.resource-ownership"
+      ],
+      "prerequisiteIds": [
+        "auth.ownership-check",
+        "auth.cross-user-access",
+        "efcore.entities"
+      ],
       "chapterId": "v3-ch08",
       "sortOrder": 2,
       "objectives": [
@@ -513,8 +611,7 @@
         "Choose between 404 and 403 for a resource the caller may not see, and apply it consistently."
       ],
       "estimatedMinutes": 20,
-      "bodyMarkdown": "This is the lesson the chapter exists for, and you have met the defect before — in V1 chapter 11, and hands-on in mission M03. Here it is in C#:\n\n```csharp\n[Authorize]\napp.MapGet(\"/tickets/{id}\", async (long id, SupportContext db) =>\n{\n    var ticket = await db.Tickets.FindAsync(id);\n    return ticket is null ? Results.NotFound() : Results.Ok(ticket);\n});\n```\n\nEvery signed-in agent can read every ticket by guessing an id. The `[Authorize]` is doing real work — it rejects anonymous callers — which is exactly what makes this so easy to ship. The handler looks protected.\n\nThe naive fix works and is still wrong:\n\n```csharp\nvar ticket = await db.Tickets.FindAsync(id);\nif (ticket is null) return Results.NotFound();\nif (ticket.OwnerId != agentId) return Results.NotFound();   // correct, but fragile\n```\n\nCorrect for this handler. The trouble is that it is a rule enforced by *remembering* — and there are eleven other handlers. The next one written under time pressure will not have it, and nothing will notice.\n\nThe robust version moves ownership into the **query**, so there is no path that returns a row you do not own:\n\n```csharp\nvar ticket = await db.Tickets\n    .FirstOrDefaultAsync(t => t.Id == id && t.OwnerId == agentId);\n\nreturn ticket is null ? Results.NotFound() : Results.Ok(ticket);\n```\n\nOne statement, and the failure mode has changed shape. Forgetting the ownership predicate now means writing a query that does not compile into what you meant, rather than writing a query that silently returns someone else's data. The database never hands you the row in the first place.\n\nThe same reasoning extends to updates and deletes — `Where(t => t.Id == id && t.OwnerId == agentId)` before `ExecuteUpdate`, so an unowned row matches nothing — and to lists, where the scope belongs in the base query rather than in a filter applied afterwards.\n\nFor a codebase-wide guarantee, EF Core offers **global query filters**:\n\n```csharp\nmodelBuilder.Entity<Ticket>().HasQueryFilter(t => t.OwnerId == _currentAgentId);\n```\n\nEvery query against `Tickets` gets the predicate automatically, and forgetting it is no longer possible. That is a strong default with a sharp edge: it applies to *everything*, including admin screens and background jobs, and the escape hatch (`IgnoreQueryFilters()`) is easy to sprinkle around until the guarantee is gone. Worth using deliberately, with the exceptions few and reviewed.\n\nOne more decision, and it is a policy rather than a technique: **404 or 403** for a ticket that exists but is not yours? `403` says 'this exists and you may not have it', which confirms the id is real — sometimes an unacceptable disclosure, sometimes fine. `404` says only 'nothing here for you'. Neither is universally right. What is universally wrong is being inconsistent: if `GET` returns 404 and `PATCH` returns 403 for the same unowned ticket, the pair of responses discloses exactly what the 404 was hiding. Pick one, write it down, and make every endpoint follow it — which is precisely what mission M03 asks you to repair."
-      ,
+      "bodyMarkdown": "This is the lesson the chapter exists for, and you have met the defect before — in V1 chapter 11, and hands-on in mission M03. Here it is in C#:\n\n```csharp\n[Authorize]\napp.MapGet(\"/tickets/{id}\", async (long id, SupportContext db) =>\n{\n    var ticket = await db.Tickets.FindAsync(id);\n    return ticket is null ? Results.NotFound() : Results.Ok(ticket);\n});\n```\n\nEvery signed-in agent can read every ticket by guessing an id. The `[Authorize]` is doing real work — it rejects anonymous callers — which is exactly what makes this so easy to ship. The handler looks protected.\n\nThe naive fix works and is still wrong:\n\n```csharp\nvar ticket = await db.Tickets.FindAsync(id);\nif (ticket is null) return Results.NotFound();\nif (ticket.OwnerId != agentId) return Results.NotFound();   // correct, but fragile\n```\n\nCorrect for this handler. The trouble is that it is a rule enforced by *remembering* — and there are eleven other handlers. The next one written under time pressure will not have it, and nothing will notice.\n\nThe robust version moves ownership into the **query**, so there is no path that returns a row you do not own:\n\n```csharp\nvar ticket = await db.Tickets\n    .FirstOrDefaultAsync(t => t.Id == id && t.OwnerId == agentId);\n\nreturn ticket is null ? Results.NotFound() : Results.Ok(ticket);\n```\n\nOne statement, and the failure mode has changed shape. Forgetting the ownership predicate now means writing a query that does not compile into what you meant, rather than writing a query that silently returns someone else's data. The database never hands you the row in the first place.\n\nThe same reasoning extends to updates and deletes — `Where(t => t.Id == id && t.OwnerId == agentId)` before `ExecuteUpdate`, so an unowned row matches nothing — and to lists, where the scope belongs in the base query rather than in a filter applied afterwards.\n\nFor a codebase-wide guarantee, EF Core offers **global query filters**:\n\n```csharp\nmodelBuilder.Entity<Ticket>().HasQueryFilter(t => t.OwnerId == _currentAgentId);\n```\n\nEvery query against `Tickets` gets the predicate automatically, and forgetting it is no longer possible. That is a strong default with a sharp edge: it applies to *everything*, including admin screens and background jobs, and the escape hatch (`IgnoreQueryFilters()`) is easy to sprinkle around until the guarantee is gone. Worth using deliberately, with the exceptions few and reviewed.\n\nOne more decision, and it is a policy rather than a technique: **404 or 403** for a ticket that exists but is not yours? `403` says 'this exists and you may not have it', which confirms the id is real — sometimes an unacceptable disclosure, sometimes fine. `404` says only 'nothing here for you'. Neither is universally right. What is universally wrong is being inconsistent: if `GET` returns 404 and `PATCH` returns 403 for the same unowned ticket, the pair of responses discloses exactly what the 404 was hiding. Pick one, write it down, and make every endpoint follow it — which is precisely what mission M03 asks you to repair.",
       "workedExampleMarkdown": "Larkspur's ticket endpoints, before and after.\n\n**Before** — four handlers, four opportunities to forget:\n\n```csharp\napp.MapGet(\"/tickets/{id}\", async (long id, SupportContext db) =>\n{\n    var ticket = await db.Tickets.FindAsync(id);          // no scope\n    return ticket is null ? Results.NotFound() : Results.Ok(ticket);\n});\n\napp.MapGet(\"/tickets\", async (SupportContext db, long agentId) =>\n    await db.Tickets.Where(t => t.OwnerId == agentId).ToListAsync());   // scoped\n\napp.MapPatch(\"/tickets/{id}\", async (long id, TicketPatch body, SupportContext db, long agentId) =>\n{\n    var ticket = await db.Tickets.FindAsync(id);\n    if (ticket is null) return Results.NotFound();\n    if (ticket.OwnerId != agentId)\n        return Results.Forbid();                          // scoped, but 403 here and 404 there\n    ticket.Subject = body.Subject;\n    await db.SaveChangesAsync();\n    return Results.NoContent();\n});\n\napp.MapPost(\"/tickets/{id}/comments\", async (long id, CommentBody body, SupportContext db) =>\n{\n    db.Comments.Add(new Comment { TicketId = id, Body = body.Text });   // no scope at all\n    await db.SaveChangesAsync();\n    return Results.Created($\"/tickets/{id}/comments\", null);\n});\n```\n\nThe list is scoped. The by-id read is not. The patch is scoped but answers `403` where the read answers `404`, so an attacker can distinguish a real id from a fake one by comparing the two responses. The comment endpoint never checks anything and will happily attach a comment to a stranger's ticket. This inconsistency is what real code looks like — one person fixed the list, someone else added the comment route later.\n\n**After** — ownership in the query, one documented policy:\n\n```csharp\n// Documented policy: an unowned resource is indistinguishable from a missing one. 404 everywhere.\n\napp.MapGet(\"/tickets/{id}\", async (long id, SupportContext db, long agentId) =>\n{\n    var ticket = await db.Tickets\n        .FirstOrDefaultAsync(t => t.Id == id && t.OwnerId == agentId);\n    return ticket is null ? Results.NotFound() : Results.Ok(ticket);\n});\n\napp.MapPatch(\"/tickets/{id}\", async (long id, TicketPatch body, SupportContext db, long agentId) =>\n{\n    var ticket = await db.Tickets\n        .FirstOrDefaultAsync(t => t.Id == id && t.OwnerId == agentId);\n    if (ticket is null) return Results.NotFound();\n\n    ticket.Subject = body.Subject;\n    await db.SaveChangesAsync();\n    return Results.NoContent();\n});\n\napp.MapPost(\"/tickets/{id}/comments\", async (long id, CommentBody body, SupportContext db, long agentId) =>\n{\n    var owns = await db.Tickets.AnyAsync(t => t.Id == id && t.OwnerId == agentId);\n    if (!owns) return Results.NotFound();\n\n    db.Comments.Add(new Comment { TicketId = id, Body = body.Text });\n    await db.SaveChangesAsync();\n    return Results.Created($\"/tickets/{id}/comments\", null);\n});\n```\n\nEvery path that can reach a ticket now names the owner in its predicate, and every unowned resource produces the same response.",
       "commonMistakes": [
         "Reading `[Authorize]` on a handler and concluding the resource is protected. It proves the caller is signed in and nothing more.",
@@ -526,22 +623,40 @@
         "Trusting an owner id taken from the request body or a query string instead of from the authenticated principal."
       ],
       "summaryMarkdown": "`[Authorize]` cannot enforce ownership because it never sees the row. Checking after the fetch works but relies on memory; putting the owner in the query means the database cannot return a record you do not own, and a forgotten predicate fails loudly instead of leaking. Choose 404 or 403 deliberately and apply it to every endpoint, because an inconsistent pair discloses exactly what the stricter one was protecting.",
-      "exerciseIds": ["v3-e807", "v3-e808", "v3-e809"],
-      "reviewCardIds": ["v3-c805", "v3-c806"],
+      "exerciseIds": [
+        "v3-e807",
+        "v3-e808",
+        "v3-e809"
+      ],
+      "reviewCardIds": [
+        "v3-c805",
+        "v3-c806"
+      ],
       "references": [
-        { "label": "ASP.NET Core — Resource-based authorization", "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authorization/resourcebased" },
-        { "label": "EF Core — Global query filters", "url": "https://learn.microsoft.com/en-us/ef/core/querying/filters" },
-        { "label": "OWASP — Broken access control", "url": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/" }
+        {
+          "label": "ASP.NET Core — Resource-based authorization",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/security/authorization/resourcebased"
+        },
+        {
+          "label": "EF Core — Global query filters",
+          "url": "https://learn.microsoft.com/en-us/ef/core/querying/filters"
+        },
+        {
+          "label": "OWASP — Broken access control",
+          "url": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+        }
       ]
     },
-
     {
       "kind": "exercise",
       "id": "v3-e807",
       "version": 1,
       "masteryRevision": 1,
       "title": "Two endpoints, one disclosure",
-      "conceptIds": ["dotnet.resource-ownership", "auth.cross-user-access"],
+      "conceptIds": [
+        "dotnet.resource-ownership",
+        "auth.cross-user-access"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Both handlers scope by owner. The pair still leaks.",
       "lessonId": "v3-l24",
@@ -592,14 +707,15 @@
         ]
       }
     },
-
     {
       "kind": "exercise",
       "id": "v3-e808",
       "version": 1,
       "masteryRevision": 1,
       "title": "The ownership decision, as a function",
-      "conceptIds": ["dotnet.resource-ownership"],
+      "conceptIds": [
+        "dotnet.resource-ownership"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "The .NET counterpart of V1's `canEditTicket`, and the rule mission M03 asks you to restore. Pure policy logic over plain data.",
       "lessonId": "v3-l24",
@@ -628,51 +744,108 @@
         "cases": [
           {
             "id": "owner-open-ticket",
-            "args": [{ "id": 7, "role": "agent" }, { "id": 42, "ownerId": 7, "status": "open" }],
+            "args": [
+              {
+                "id": 7,
+                "role": "agent"
+              },
+              {
+                "id": 42,
+                "ownerId": 7,
+                "status": "open"
+              }
+            ],
             "expected": "allow",
             "hidden": false
           },
           {
             "id": "owner-closed-ticket",
-            "args": [{ "id": 7, "role": "agent" }, { "id": 42, "ownerId": 7, "status": "closed" }],
+            "args": [
+              {
+                "id": 7,
+                "role": "agent"
+              },
+              {
+                "id": 42,
+                "ownerId": 7,
+                "status": "closed"
+              }
+            ],
             "expected": "forbidden",
             "hidden": false
           },
           {
             "id": "other-agents-ticket-is-invisible",
-            "args": [{ "id": 7, "role": "agent" }, { "id": 42, "ownerId": 9, "status": "open" }],
+            "args": [
+              {
+                "id": 7,
+                "role": "agent"
+              },
+              {
+                "id": 42,
+                "ownerId": 9,
+                "status": "open"
+              }
+            ],
             "expected": "not-found",
             "hidden": false
           },
           {
             "id": "missing-ticket-looks-identical",
-            "args": [{ "id": 7, "role": "agent" }, null],
+            "args": [
+              {
+                "id": 7,
+                "role": "agent"
+              },
+              null
+            ],
             "expected": "not-found",
             "hidden": false
           },
           {
             "id": "admin-sees-another-agents-ticket",
-            "args": [{ "id": 1, "role": "admin" }, { "id": 42, "ownerId": 9, "status": "open" }],
+            "args": [
+              {
+                "id": 1,
+                "role": "admin"
+              },
+              {
+                "id": 42,
+                "ownerId": 9,
+                "status": "open"
+              }
+            ],
             "expected": "allow",
             "hidden": false
           },
           {
             "id": "admin-still-refused-on-closed",
-            "args": [{ "id": 1, "role": "admin" }, { "id": 42, "ownerId": 9, "status": "closed" }],
+            "args": [
+              {
+                "id": 1,
+                "role": "admin"
+              },
+              {
+                "id": 42,
+                "ownerId": 9,
+                "status": "closed"
+              }
+            ],
             "expected": "forbidden",
             "hidden": false
           }
         ]
       }
     },
-
     {
       "kind": "exercise",
       "id": "v3-e809",
       "version": 1,
       "masteryRevision": 1,
       "title": "Argue for the query-scoped fix",
-      "conceptIds": ["dotnet.resource-ownership"],
+      "conceptIds": [
+        "dotnet.resource-ownership"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "A short written review comment. Both versions are secure today; you are arguing about which stays secure.",
       "lessonId": "v3-l24",
@@ -705,14 +878,15 @@
         "modelAnswerMarkdown": "Both versions are correct as written, and yours has a real virtue: the explicit `if` states the ownership rule where a reader will see it, which is worth something in a handler people will edit.\n\nMy preference is about what happens when this codebase grows. Your version enforces ownership by *remembering to write a check*. There are a dozen ticket endpoints and there will be more, and the one added at the end of a sprint will look like `FindAsync(id)` followed by a null check — because that is what the surrounding code looks like — and it will silently return another agent's ticket. Nothing fails; a test that only exercises the owner's own data passes.\n\nPutting the owner in the predicate changes what a mistake produces. If someone forgets `&& t.OwnerId == agentId`, the query returns rows that are not scoped — but the far more common slip, copying a scoped query and adapting it, keeps the predicate. And in the fetch-then-check version the unowned row is loaded into memory before being discarded, which is both a wasted round trip and a row sitting in a variable one `return` away from being serialised.\n\nOne thing to check across the whole PR rather than in this handler: **response-code consistency**. This returns 404 for an unowned ticket, which is right — but if `PATCH /tickets/{id}` returns 403 for the same ticket, an attacker can send both and learn whether the id is real. Whichever convention we pick needs to be written down and applied everywhere."
       }
     },
-
     {
       "kind": "review_card",
       "id": "v3-c805",
       "version": 1,
       "masteryRevision": 1,
       "title": "What `[Authorize]` does not do",
-      "conceptIds": ["dotnet.resource-ownership"],
+      "conceptIds": [
+        "dotnet.resource-ownership"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Recall the boundary that the classic defect crosses.",
       "lessonId": "v3-l24",
@@ -723,14 +897,15 @@
       "answerMarkdown": "Guaranteed: the caller is authenticated — an anonymous request never reaches the handler. **Not** guaranteed: that the ticket belongs to them. `[Authorize]` runs before the handler and has never seen the ticket, so any signed-in agent can read any ticket by guessing an id. Ownership has to be enforced where the row is fetched, ideally inside the query predicate.",
       "explanationMarkdown": "The reason this defect ships so often is that the handler genuinely *is* protected — just against the wrong thing. Keeping 'authenticated' and 'entitled to this row' as separate sentences in your head is the whole defence."
     },
-
     {
       "kind": "review_card",
       "id": "v3-c806",
       "version": 1,
       "masteryRevision": 1,
       "title": "404 or 403?",
-      "conceptIds": ["dotnet.resource-ownership"],
+      "conceptIds": [
+        "dotnet.resource-ownership"
+      ],
       "prerequisiteIds": [],
       "bodyMarkdown": "Debugging recall: the mistake that is not in any single endpoint.",
       "lessonId": "v3-l24",
@@ -741,7 +916,6 @@
       "answerMarkdown": "The pair is an **existence oracle**. The 404 was concealing whether ticket 9001 exists; the 403 confirms that it does, since a genuinely missing ticket would produce 404 there too. An attacker with any valid session can enumerate real ids by sending PATCHes. Neither code is wrong in isolation — the inconsistency is the vulnerability, so the codebase must pick one convention for unowned resources and apply it to every endpoint.",
       "explanationMarkdown": "This is worth remembering because no single endpoint review would catch it: both handlers look careful. It is a property of the API as a whole, which is why the decision belongs in a written policy rather than in each author's judgement — and it is exactly what mission M03 asks you to make consistent."
     },
-
     {
       "kind": "assessment",
       "id": "v3-a08",
@@ -756,11 +930,16 @@
       "prerequisiteIds": [],
       "bodyMarkdown": "Five separately authored items covering chapter D08. Reason about what each layer has actually seen when it makes its decision; no hints are shown until you submit.",
       "chapterId": "v3-ch08",
-      "qualification": { "minimumCorrect": 4, "requireAllCritical": true },
+      "qualification": {
+        "minimumCorrect": 4,
+        "requireAllCritical": true
+      },
       "items": [
         {
           "id": "v3-a08-i1",
-          "objectiveIds": ["aspnet.authentication-schemes"],
+          "objectiveIds": [
+            "aspnet.authentication-schemes"
+          ],
           "critical": false,
           "promptMarkdown": "A request arrives with no credentials at all. What is the value of `HttpContext.User` inside a handler that allows anonymous access?",
           "grading": {
@@ -797,7 +976,9 @@
         },
         {
           "id": "v3-a08-i2",
-          "objectiveIds": ["aspnet.authorization-policies"],
+          "objectiveIds": [
+            "aspnet.authorization-policies"
+          ],
           "critical": false,
           "promptMarkdown": "In an `AuthorizationHandler`, a developer writes `else context.Fail();` after the success branch. A second handler exists that can satisfy the same requirement another way. What is the consequence?",
           "grading": {
@@ -834,7 +1015,9 @@
         },
         {
           "id": "v3-a08-i3",
-          "objectiveIds": ["dotnet.resource-ownership"],
+          "objectiveIds": [
+            "dotnet.resource-ownership"
+          ],
           "critical": true,
           "promptMarkdown": "```csharp\n[Authorize]\napp.MapDelete(\"/attachments/{id}\", async (long id, SupportContext db) =>\n{\n    var file = await db.Attachments.FindAsync(id);\n    if (file is null) return Results.NotFound();\n    db.Attachments.Remove(file);\n    await db.SaveChangesAsync();\n    return Results.NoContent();\n});\n```\n\nWhat can any signed-in user do?",
           "grading": {
@@ -871,7 +1054,9 @@
         },
         {
           "id": "v3-a08-i4",
-          "objectiveIds": ["dotnet.resource-ownership"],
+          "objectiveIds": [
+            "dotnet.resource-ownership"
+          ],
           "critical": true,
           "promptMarkdown": "Which change makes the ownership rule hardest to forget in a future endpoint?",
           "grading": {
@@ -908,7 +1093,10 @@
         },
         {
           "id": "v3-a08-i5",
-          "objectiveIds": ["dotnet.resource-ownership", "aspnet.authorization-policies"],
+          "objectiveIds": [
+            "dotnet.resource-ownership",
+            "aspnet.authorization-policies"
+          ],
           "critical": false,
           "promptMarkdown": "An API returns 404 for an unowned ticket on `GET` and 403 on `DELETE`. Both refuse the operation. Why is this still a finding in a security review?",
           "grading": {

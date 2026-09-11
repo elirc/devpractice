@@ -31,7 +31,9 @@
         "api.pagination-compatibility",
         "api.schema-change-safety"
       ],
-      "missionIds": [],
+      "missionIds": [
+        "m04-support-desk-search"
+      ],
       "sortOrder": 14
     },
     {

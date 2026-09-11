@@ -40,7 +40,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       level: config.logLevel,
       redact: { paths: LOG_REDACT_PATHS, remove: true },
     },
-    // Bound the request body globally; content import raises its own limit.
+    // Bound the request body globally. Content import raises its own limit to
+    // MAX_PACKAGE_BYTES on its route, which it has to: a real release package is
+    // megabytes, and until that route-level limit existed, Fastify rejected the
+    // body before the handler ran. The client saw only a dropped connection.
     bodyLimit: 1_048_576,
     trustProxy: config.isProduction,
     disableRequestLogging: true,

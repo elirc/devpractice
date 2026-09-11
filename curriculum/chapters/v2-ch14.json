@@ -31,7 +31,10 @@
         "db.locking",
         "db.idempotent-submission"
       ],
-      "missionIds": [],
+      "missionIds": [
+        "m06-inventory-core",
+        "m07-inventory-idempotency"
+      ],
       "sortOrder": 13
     },
     {

@@ -1,0 +1,51 @@
+{
+  "note": "The v1-track item at version 1: the twelve V1 chapters. Releases are snapshots, so each release carries the ONE track version that lists exactly its own chapters (v2-track.json, v3-track.json). Adding chapters to a track is an editorial change: version bumps, masteryRevision does not (spec 8.2).",
+  "items": [
+    {
+      "kind": "track",
+      "id": "v1-track",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "Web engineering foundations",
+      "conceptIds": [
+        "web.request-response",
+        "debug.next-step",
+        "js.functions",
+        "js.array-filter",
+        "js.async-await",
+        "ts.narrowing",
+        "html.semantics",
+        "react.state-updates",
+        "node.route-boundaries",
+        "sql.select",
+        "auth.ownership-check",
+        "test.boundary-cases"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "The V1 track walks from the mechanics of a single web request to a small, testable, secured feature that talks to a database. Twelve chapters, thirty-six lessons, three required exercises per lesson, and one placement check per chapter.\n\nThe track is deliberately linear. Every chapter assumes the vocabulary of the ones before it, and every chapter ends with a placement check whose items were written separately from the practice exercises, so passing it means the ideas transferred rather than that the answers were memorised.",
+      "description": "A linear twelve-chapter path from the request/response cycle through JavaScript, TypeScript, the browser platform, React, Node.js APIs, relational data, authentication and day-to-day operation.",
+      "targetOutcomes": [
+        "Explain what happens between a click in the browser and a rendered response.",
+        "Write and debug small JavaScript and TypeScript functions from evidence rather than guesswork.",
+        "Build an accessible React feature that reads and writes real server data.",
+        "Design a Node.js endpoint that validates input, scopes data to its owner and reports failures honestly.",
+        "Model, query and migrate relational data without losing or duplicating rows.",
+        "Ship a change with tests, logs and a rollback you have actually thought through."
+      ],
+      "chapterIds": [
+        "v1-ch01",
+        "v1-ch02",
+        "v1-ch03",
+        "v1-ch04",
+        "v1-ch05",
+        "v1-ch06",
+        "v1-ch07",
+        "v1-ch08",
+        "v1-ch09",
+        "v1-ch10",
+        "v1-ch11",
+        "v1-ch12"
+      ]
+    }
+  ]
+}

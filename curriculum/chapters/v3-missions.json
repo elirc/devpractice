@@ -1,0 +1,354 @@
+{
+  "items": [
+    {
+      "kind": "mission",
+      "id": "m09-dotnet-support-desk",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M09 — The support desk API, in ASP.NET Core",
+      "conceptIds": [
+        "aspnet.routing",
+        "aspnet.model-binding",
+        "aspnet.dependency-injection",
+        "aspnet.validation",
+        "aspnet.error-contracts",
+        "efcore.entities",
+        "efcore.relationships",
+        "dotnet.resource-ownership",
+        "compare.node-vs-dotnet"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "You have already built this API once. In M02 you built it in Node, and in M01 you\nbuilt the React interface that talks to it. Neither of those is changing.\n\nThat is the entire point of this mission. `src/SupportDesk.Api/TicketEndpoints.cs`\nanswers `501 Not Implemented` on every route, and the mission tests describe the\nsame HTTP contract M02 served: the same paths, the same envelope, the same status\ncodes, the same cursor pagination over the same total order. When you are done,\nthe M01 frontend should be able to point at this server and not notice.\n\nWhat is different is everything underneath. Model binding turns a request into a\ntyped argument and has its own opinion about what a malformed body is. `string?`\nis a compile-time hint, not a promise about what arrived over HTTP, so runtime\nvalidation at the boundary is still yours to write. EF Core will happily give you\nwhole tracked entities when a projection was what you wanted.\n\nThe identity fixture is training scaffolding, not authentication: the dispatcher\narrives in a header and falls back to a fixed fictional one. Do not carry that\npattern anywhere real. Ownership, though, is not scaffolding — it belongs in the\nquery, and one of the mission tests will tell you if it is not.\n\nEvery dispatcher, customer and ticket in this repository is fictional.",
+      "projectId": "m09-dotnet-support-desk",
+      "workType": "build",
+      "stack": "dotnet",
+      "release": "v3",
+      "chapterPrerequisiteIds": [
+        "v3-ch01",
+        "v3-ch05"
+      ],
+      "starterAssetId": "m09-dotnet-support-desk-starter-v3",
+      "starterCommit": null,
+      "setupMarkdown": "PostgreSQL must be reachable. The starter defaults to\n`Host=127.0.0.1;Port=5440;Username=postgres` and creates its own database, which\nis separate from the DevPractice platform database and from every other\nmission's — a training exercise must never be able to touch your learning\nrecords.\n\n```\ncp .env.example .env      # adjust only if your server is elsewhere\ndotnet restore\ndotnet build\n```\n\nThe SDK is pinned in `global.json` to .NET 10. The first `dotnet restore` on a\ncold NuGet cache takes a while; that is the package download, not a hang.\n\nBaseline and mission checks are SEPARATE commands on purpose, so you can always\ntell an intentionally incomplete assignment from a broken setup.",
+      "baselineChecks": [
+        "dotnet build — the solution compiles against the pinned .NET 10 SDK",
+        "dotnet test --filter Category=Baseline — the app starts, the learning database is reachable and created, the comment foreign key is enforced, and the seed is repeatable"
+      ],
+      "acceptanceCriteria": [
+        "POST /tickets returns 201 with the stored record and a trimmed title.",
+        "POST /tickets rejects an empty or whitespace-only title with 400 and a field-keyed error naming the title, and writes no row.",
+        "GET /tickets returns an empty page with a null cursor when there is nothing, rather than an error.",
+        "GET /tickets orders by CreatedAt then Id, so two rows sharing a timestamp still have a deterministic order.",
+        "Cursor pagination covers every row exactly once across pages, with no duplicates and no gaps.",
+        "A caller asking for 500 rows receives at most the bounded page size.",
+        "An unknown ticket id returns 404, not 500.",
+        "A comment requires an existing ticket the caller owns; otherwise 404 and no row is written.",
+        "A comment with an empty body is rejected with 400 and writes nothing.",
+        "A dispatcher only sees their own tickets: ownership is enforced in the query."
+      ],
+      "verificationCommands": [
+        "dotnet test --filter Category=Baseline",
+        "dotnet test --filter Category=Mission",
+        "dotnet test",
+        "dotnet build"
+      ],
+      "checklist": [
+        {
+          "id": "baseline-green",
+          "label": "Baseline passes and Mission fails before I change anything"
+        },
+        {
+          "id": "create-validates",
+          "label": "POST /tickets validates at runtime, returns 201, and writes nothing on a 400"
+        },
+        {
+          "id": "total-ordering",
+          "label": "Listing orders by CreatedAt then Id, so the order is total"
+        },
+        {
+          "id": "cursor-pagination",
+          "label": "Cursor paging covers every row exactly once"
+        },
+        {
+          "id": "bounded-page",
+          "label": "Page size is clamped regardless of what the caller asks for"
+        },
+        {
+          "id": "ownership-in-query",
+          "label": "Ownership is part of the query, not a filter applied afterwards"
+        },
+        {
+          "id": "frontend-unchanged",
+          "label": "I can explain why the M01 frontend needs no change"
+        }
+      ],
+      "hints": [
+        "Start by reading the mission tests as a specification. They were written against the contract M02 already serves, so they tell you the exact shape of every response before you write a line.",
+        "Minimal APIs bind the body to your record parameter and inject `SupportDeskContext` from DI. `Results.Created`, `Results.Ok`, `Results.NotFound` and `Results.Json(..., statusCode: ...)` cover every status these tests ask for.",
+        "For the page, order by `CreatedAt` then `Id`, take `size + 1` rows, and let the extra row tell you whether another page exists. Decode the cursor into that same pair and compare with `>` on the timestamp OR equal-timestamp-and-greater-id."
+      ],
+      "solutionMarkdown": "The reference solution is one file: `TicketEndpoints.cs`.\n\nThree things are worth naming.\n\n**Validation lives at the boundary.** `request.Title` is typed `string?`, and\nthat is a compile-time hint. The value arrived over HTTP, so it is checked at\nruntime — trimmed, tested for emptiness, bounded in length — before anything is\nadded to the context. A rejected request returns before `SaveChangesAsync`, which\nis why no row appears.\n\n**Ownership is part of the query.** `FirstOrDefaultAsync(t => t.Id == id && t.OwnerId == owner)`\nnever materialises a row the caller may not see. There is no later filter to\nforget and nothing to leak in an error message. This is the same lesson M03\ntaught in Node, and D08 will make it a policy.\n\n**The cursor and the sort share one total order.** Ordering by a timestamp alone\nis ambiguous when two rows share it; adding `Id` makes the order total, and the\nkeyset comparison uses exactly the same pair. Take one row more than you need and\nthe extra row answers \"is there another page?\" without a second count query.",
+      "reflectionRubric": [
+        "I can explain why the M01 React frontend did not have to change when the server language did.",
+        "I can say what model binding does for me and what it explicitly does not, and where runtime validation therefore belongs.",
+        "I can explain why ordering by CreatedAt alone breaks cursor pagination, and what adding Id fixes.",
+        "I can describe where ownership is enforced in my code, and why enforcing it in the UI would not be equivalent."
+      ]
+    },
+    {
+      "kind": "mission",
+      "id": "m10-dotnet-efcore-repair",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M10 — Three defects EF Core will not warn you about",
+      "conceptIds": [
+        "efcore.tracking",
+        "efcore.projection",
+        "efcore.generated-sql",
+        "efcore.query-performance",
+        "dotnet.resource-ownership",
+        "aspnet.authorization-policies"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "This code runs. It returns plausible JSON. Every baseline check passes. It is\nalso wrong in three ways, and none of them will ever show up as a stack trace.\n\nThat is what makes it worth your afternoon. A crash tells you where to look. This\ndoes not: the list endpoint returns correct comment counts, the detail endpoint\nreturns the right ticket, and a dispatcher who only ever opens their own tickets\nwould never notice anything at all.\n\nThe mission tests describe the three defects by behaviour rather than by line\nnumber. Two of them are about the SQL EF Core actually sends, which is why the\nstarter ships a command interceptor: an N+1 and a single joined query return\nidentical JSON, so the response alone cannot tell you which one you wrote. Read\nthe captured SQL before you start changing code.\n\nThe third defect is the one that matters most, and it is the same class of bug\nyou repaired in Node in M03. A superficial fix — filtering after loading, or\nhiding a control in the interface — will pass neither the test nor review.\n\nEvery dispatcher, customer and ticket here is fictional.",
+      "projectId": "m10-dotnet-efcore-repair",
+      "workType": "repair",
+      "stack": "dotnet",
+      "release": "v3",
+      "chapterPrerequisiteIds": [
+        "v3-ch06",
+        "v3-ch08"
+      ],
+      "starterAssetId": "m10-dotnet-efcore-repair-starter-v3",
+      "starterCommit": null,
+      "setupMarkdown": "PostgreSQL must be reachable. The starter defaults to\n`Host=127.0.0.1;Port=5440;Username=postgres` and creates its own database, which\nis separate from the DevPractice platform database and from every other\nmission's — a training exercise must never be able to touch your learning\nrecords.\n\n```\ncp .env.example .env      # adjust only if your server is elsewhere\ndotnet restore\ndotnet build\n```\n\nThe SDK is pinned in `global.json` to .NET 10. The first `dotnet restore` on a\ncold NuGet cache takes a while; that is the package download, not a hang.\n\nBaseline and mission checks are SEPARATE commands on purpose, so you can always\ntell an intentionally incomplete assignment from a broken setup.",
+      "baselineChecks": [
+        "dotnet build — the solution compiles",
+        "dotnet test --filter Category=Baseline — the app starts, the database is reachable, the owning dispatcher can read their own ticket, and the list returns their tickets with comment counts. All of these pass on the unrepaired starter, which is the point."
+      ],
+      "acceptanceCriteria": [
+        "A dispatcher cannot read, list comments on, or rename another dispatcher's ticket: each returns 404.",
+        "A response about a foreign ticket leaks nothing about it — no customer name, no owner name.",
+        "Listing tickets issues at most one SELECT regardless of how many tickets are returned.",
+        "The detail query does not join the comment graph it never returns.",
+        "The comments endpoint queries the Comments table directly rather than pulling comments through the ticket graph.",
+        "Read-only paths do not track entities.",
+        "Comments still come back in order for the legitimate owner: the repair preserves behaviour."
+      ],
+      "verificationCommands": [
+        "dotnet test --filter Category=Baseline",
+        "dotnet test --filter Category=Mission",
+        "dotnet test",
+        "dotnet build"
+      ],
+      "checklist": [
+        {
+          "id": "baseline-green",
+          "label": "Baseline passes on the unrepaired starter and Mission fails"
+        },
+        {
+          "id": "read-the-sql",
+          "label": "I read the captured SQL before changing any code"
+        },
+        {
+          "id": "ownership-in-query",
+          "label": "Ownership moved into the query, not into a later filter"
+        },
+        {
+          "id": "no-leak",
+          "label": "A 404 about a foreign ticket leaks nothing about it"
+        },
+        {
+          "id": "single-select",
+          "label": "The list endpoint issues one SELECT, not one per row"
+        },
+        {
+          "id": "projection",
+          "label": "Detail and comments project only what they return"
+        },
+        {
+          "id": "behaviour-preserved",
+          "label": "The legitimate owner's behaviour is unchanged"
+        }
+      ],
+      "hints": [
+        "Run the mission tests and read the SQL they print on failure. Two of these defects are visible only in the generated SQL, and one look will tell you more than reading the C# will.",
+        "A per-row `await db.Comments.CountAsync(...)` inside a `foreach` is an N+1. EF Core can count in the projection instead: `.Select(t => new TicketSummaryDto(..., t.Comments.Count()))` becomes part of the single query.",
+        "For ownership, put `&& t.OwnerId == owner` inside the `FirstOrDefaultAsync` predicate so a foreign row is never materialised. For projection, drop the `Include` on the detail path — `TicketDto` has no comments field — and query `db.Comments` directly with `AsNoTracking()`."
+      ],
+      "solutionMarkdown": "Three repairs, none cosmetic.\n\n**Ownership moved into the query.** `FirstOrDefaultAsync(t => t.Id == id)` became\n`... && t.OwnerId == owner`. The foreign row is never loaded, so there is nothing\nto leak and no later filter to forget. The rename path gets the same treatment,\nwhich is why the seized-title assertion passes.\n\n**The N+1 became one projected query.** The per-row `CountAsync` is gone; the\ncount is computed inside the projection, so the database counts and the server\nmakes one round trip. The JSON is identical — which is precisely why the test\nhad to assert about SQL rather than about the response.\n\n**Projection replaced graph loading.** The detail endpoint no longer `Include`s\ncomments it never returns. The comments endpoint queries `Comments` directly and\nfilters in SQL rather than sorting an in-memory collection. Read paths use\n`AsNoTracking()`, because tracking a graph you are about to serialise and discard\nbuys nothing and costs memory.\n\nThe write path deliberately keeps tracking. Tracking is not a mistake; using it\nwhere you only read is.",
+      "reflectionRubric": [
+        "I can explain why every baseline check passed while three real defects were present.",
+        "I can describe how I proved the N+1 was gone, and why the JSON response could not have told me.",
+        "I can explain why ownership belongs in the query rather than in a filter after loading, or in the interface.",
+        "I can say when tracking is the right default and when AsNoTracking is, and what tracking actually costs."
+      ]
+    },
+    {
+      "kind": "mission",
+      "id": "m11-dotnet-inventory-concurrency",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M11 — Two orders, one last box of lids",
+      "conceptIds": [
+        "efcore.transactions",
+        "efcore.concurrency-tokens",
+        "db.optimistic-concurrency",
+        "db.multi-table-invariants",
+        "db.locking",
+        "efcore.indexes"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "`OrderService.PlaceOrderAsync` works. It reads a product, checks the quantity on\nhand, decrements it, writes a line and a stock movement, and saves. On a quiet\nmachine, with one request at a time, it is correct.\n\nThe mission puts it under two situations that are not quiet.\n\nThe first is a mid-order failure. An order has two lines; the second cannot be\nsatisfied. The starter has already committed the first line by then, so what is\nleft behind is an order that half happened — stock decremented for one product,\na movement recorded, and an order row that no customer ever successfully placed.\n\nThe second is two orders arriving at once for the last twelve lids. Both read\ntwelve, both decide eight is fine, and both write. Each write is individually\nsensible; together they sell sixteen lids that do not exist. Notice that the\ncheck is not wrong — it is *stale*, and a decision made on stale data must not be\nallowed to win silently.\n\nThe schema already gives you the tools. `Product.Version` is mapped to\nPostgreSQL's `xmin`, so EF Core can tell when a row changed underneath you, and a\ncheck constraint guarantees stock can never go negative no matter what code you\nwrite. Neither of those does anything until `OrderService` uses them.\n\nEvery product, order and customer here is fictional.",
+      "projectId": "m11-dotnet-inventory-concurrency",
+      "workType": "extend",
+      "stack": "dotnet",
+      "release": "v3",
+      "chapterPrerequisiteIds": [
+        "v3-ch06",
+        "v3-ch07"
+      ],
+      "starterAssetId": "m11-dotnet-inventory-concurrency-starter-v3",
+      "starterCommit": null,
+      "setupMarkdown": "PostgreSQL must be reachable. The starter defaults to\n`Host=127.0.0.1;Port=5440;Username=postgres` and creates its own database, which\nis separate from the DevPractice platform database and from every other\nmission's — a training exercise must never be able to touch your learning\nrecords.\n\n```\ncp .env.example .env      # adjust only if your server is elsewhere\ndotnet restore\ndotnet build\n```\n\nThe SDK is pinned in `global.json` to .NET 10. The first `dotnet restore` on a\ncold NuGet cache takes a while; that is the package download, not a hang.\n\nBaseline and mission checks are SEPARATE commands on purpose, so you can always\ntell an intentionally incomplete assignment from a broken setup.",
+      "baselineChecks": [
+        "dotnet build — the solution compiles",
+        "dotnet test --filter Category=Baseline - the database is reachable and seeded, the seed is repeatable, a single order reduces stock, and the database itself rejects negative stock",
+        "dotnet test --filter Category=Baseline - a conflicting edit on a PRODUCT already raises DbUpdateConcurrencyException, which shows the xmin token in the schema works; making the ORDER path handle it is the mission"
+      ],
+      "acceptanceCriteria": [
+        "A failed line leaves no partial order: no order row, no order lines, no stock movements, and no decremented stock.",
+        "Two concurrent orders for the last twelve lids result in exactly one success and one failure.",
+        "After those two concurrent orders, stock on hand is four and exactly one order exists.",
+        "A successful order still records one line and one stock movement per product and decrements each correctly."
+      ],
+      "verificationCommands": [
+        "dotnet test --filter Category=Baseline",
+        "dotnet test --filter Category=Mission",
+        "dotnet test",
+        "dotnet build"
+      ],
+      "checklist": [
+        {
+          "id": "baseline-green",
+          "label": "Baseline passes and Mission fails before I change anything"
+        },
+        {
+          "id": "one-transaction",
+          "label": "The whole order commits or none of it does"
+        },
+        {
+          "id": "no-partial",
+          "label": "A failed line leaves no order row, no lines, no movements and no decremented stock"
+        },
+        {
+          "id": "stale-detected",
+          "label": "A stale decrement is detected rather than overwriting a fresher value"
+        },
+        {
+          "id": "no-oversell",
+          "label": "Two concurrent orders for the last twelve lids produce exactly one success"
+        },
+        {
+          "id": "constraint-backstop",
+          "label": "I can explain what the check constraint guarantees that my code does not"
+        }
+      ],
+      "hints": [
+        "Look at where `SaveChangesAsync` is called. Saving inside the loop is what allows a later failure to leave earlier lines committed.",
+        "`db.Database.BeginTransactionAsync` gives you an explicit transaction; add every entity first, save once, then commit. If an exception escapes before the commit, the transaction is rolled back and nothing survives.",
+        "For the oversell, the concurrency token does the detecting: because `Version` is mapped to `xmin`, a stale UPDATE raises `DbUpdateConcurrencyException` instead of writing. Catch it, discard the stale decision, re-read the product, and decide again — a retry loop of a few attempts is enough."
+      ],
+      "solutionMarkdown": "Two changes, one idea: **a decision made on stale data must not be allowed to\nwin.**\n\n**One transaction for the whole order.** Every write happens inside\n`BeginTransactionAsync`, there is a single `SaveChangesAsync`, and the commit is\nthe last statement. If a line cannot be satisfied, the exception escapes before\nthe commit and the transaction rolls back — so there is no half-applied order to\ndetect or clean up afterwards. The absence of a cleanup path is the feature.\n\n**The stale write is detected, not overwritten.** `QuantityOnHand` is decremented\non a tracked entity whose `xmin` token was read at the start of the attempt. If\nanother transaction changed that row in between, EF Core raises\n`DbUpdateConcurrencyException` rather than writing a number computed from a value\nthat is no longer true. The retry loop then re-reads and re-decides on fresh data\n— which is why one of the two concurrent orders succeeds and the other fails\nhonestly, instead of both succeeding and overselling.\n\nThe check constraint is the backstop, not the mechanism. It guarantees negative\nstock can never be persisted even by a code path nobody has written yet. That\npairing — application logic for the expected case, a database constraint for the\ncase you did not anticipate — is the same one V1 chapter 10 argued for, now with\na concrete failure it prevents.",
+      "reflectionRubric": [
+        "I can explain what the transaction guarantees that careful ordering of statements does not.",
+        "I can describe how the xmin concurrency token detects a stale write, and what would happen without it.",
+        "I can explain why retrying is safe here, and what would make a retry unsafe.",
+        "I can say what the check constraint protects against that my application code does not."
+      ]
+    },
+    {
+      "kind": "mission",
+      "id": "m12-dotnet-background-compare",
+      "version": 1,
+      "masteryRevision": 1,
+      "title": "M12 — The same job, cancelled and rerun, in two languages",
+      "conceptIds": [
+        "dotnet.background-services",
+        "dotnet.cancellation-tokens",
+        "dotnet.async-await",
+        "dotnet.async-exceptions",
+        "jobs.idempotency",
+        "jobs.interrupted-work",
+        "compare.node-vs-dotnet"
+      ],
+      "prerequisiteIds": [],
+      "bodyMarkdown": "You built this job once already, in Node, in M08. This is the same job in C#, and\nthe mission is only half about the code — the other half is being able to say\nwhat genuinely differs and what merely looks different.\n\n`ReportRunner.RunAsync` processes five source items and writes a row for each.\nIt works on a first run on a quiet machine. Two things are missing.\n\nIt takes a `CancellationToken` and never looks at it. A token nobody checks\ncannot stop anything, so a deployment or a timeout has no polite way to interrupt\nthe run — it either finishes or is killed mid-write. Cancellation in .NET is\ncooperative, exactly as an `AbortSignal` is in Node: the type is different, the\ndiscipline is identical.\n\nAnd a rerun repeats itself. When the first attempt fails on the fourth item,\nthree rows are already committed. Running it again writes those three a second\ntime — or would, if the unique index did not stop it, which is worth thinking\nabout: the constraint turns silent duplication into a loud failure, but a loud\nfailure is still a failure. Resuming means finishing the remaining work, not\nrepeating the finished work.\n\nEvery business, amount and report row here is fictional.",
+      "projectId": "m12-dotnet-background-compare",
+      "workType": "extend",
+      "stack": "dotnet",
+      "release": "v3",
+      "chapterPrerequisiteIds": [
+        "v3-ch09",
+        "v3-ch10"
+      ],
+      "starterAssetId": "m12-dotnet-background-compare-starter-v3",
+      "starterCommit": null,
+      "setupMarkdown": "PostgreSQL must be reachable. The starter defaults to\n`Host=127.0.0.1;Port=5440;Username=postgres` and creates its own database, which\nis separate from the DevPractice platform database and from every other\nmission's — a training exercise must never be able to touch your learning\nrecords.\n\n```\ncp .env.example .env      # adjust only if your server is elsewhere\ndotnet restore\ndotnet build\n```\n\nThe SDK is pinned in `global.json` to .NET 10. The first `dotnet restore` on a\ncold NuGet cache takes a while; that is the package download, not a hang.\n\nBaseline and mission checks are SEPARATE commands on purpose, so you can always\ntell an intentionally incomplete assignment from a broken setup.",
+      "baselineChecks": [
+        "dotnet build — the solution compiles",
+        "dotnet test --filter Category=Baseline — the database is reachable, a clean run writes one row per source item, and the unique index on (JobId, ItemKey) rejects a duplicate row"
+      ],
+      "acceptanceCriteria": [
+        "A cancelled run stops partway: fewer rows are written than there are source items, and OperationCanceledException escapes.",
+        "A rerun after a partial failure completes the job without duplicating the rows already committed, and the attempt count reflects both attempts.",
+        "Re-running a job that already succeeded processes nothing and adds no rows.",
+        "A clean run still writes exactly one row per source item."
+      ],
+      "verificationCommands": [
+        "dotnet test --filter Category=Baseline",
+        "dotnet test --filter Category=Mission",
+        "dotnet test",
+        "dotnet build"
+      ],
+      "checklist": [
+        {
+          "id": "baseline-green",
+          "label": "Baseline passes and Mission fails before I change anything"
+        },
+        {
+          "id": "token-observed",
+          "label": "The cancellation token is checked at an item boundary"
+        },
+        {
+          "id": "resume-not-repeat",
+          "label": "A rerun finishes the remaining work instead of repeating committed work"
+        },
+        {
+          "id": "finished-is-noop",
+          "label": "Re-running a succeeded job processes nothing"
+        },
+        {
+          "id": "cancel-not-failure",
+          "label": "I decided what state a cancelled job should be left in, and can defend it"
+        },
+        {
+          "id": "compare-m08",
+          "label": "I can name what genuinely differs from the Node version in M08 and what only looks different"
+        }
+      ],
+      "hints": [
+        "Cancellation is cooperative. `ct.ThrowIfCancellationRequested()` inside the loop is the whole mechanism — the question is where in the loop to put it so you stop between units of work rather than half-way through one.",
+        "Before processing, ask the database which items this job has already committed: `db.Rows.Where(r => r.JobId == job.Id).Select(r => r.ItemKey)`. Skip those. That single query is what turns a rerun into a resume.",
+        "Consider what a cancelled job should look like afterwards. `Failed` is misleading — nothing failed. Leaving it `Queued` with its committed effects intact means the next pass finishes it, which is what makes cancellation safe to use."
+      ],
+      "solutionMarkdown": "Three changes, and the comparison with M08 is the point.\n\n**The token is observed.** `ct.ThrowIfCancellationRequested()` at the top of each\nitem means a shutdown stops the run at an item boundary, never part-way through\none. Node's M08 does the same job with an `AbortSignal` checked in the loop.\nDifferent type, identical discipline — and in both languages, code that never\nchecks cannot be cancelled politely, no matter how many tokens you thread\nthrough it.\n\n**Committed effects are skipped, not repeated.** The runner reads the `ItemKey`s\nalready written for this job and processes only the remainder. A rerun after a\npartial failure finishes the work; it does not redo it. This is the same\nquestion M07 answered for duplicate order submission in Node, arrived at from a\ndifferent direction: there the key was supplied by the caller, here it is derived\nfrom the work itself.\n\n**A cancelled job is not a failed job.** It returns to `Queued` with its\ncommitted effects intact, so the next pass resumes it. Marking it `Failed` would\nbe a lie about what happened and would need a human to distinguish \"we stopped\nit\" from \"it broke\".\n\nThe unique index on `(JobId, ItemKey)` is the backstop, not the mechanism: it\nguarantees a duplicate cannot be persisted even if the skip logic is wrong. That\nis the same application-logic-plus-constraint pairing M11 used for stock, and the\nreason to have both is that they fail at different moments — one before the\nwrite, one at it.",
+      "reflectionRubric": [
+        "I can explain why cancellation is cooperative and what happens to a token that is never checked.",
+        "I can describe how my runner distinguishes work already committed from work still to do, and why that makes a rerun safe.",
+        "I can defend the state I leave a cancelled job in, against at least one alternative.",
+        "I can name one thing that genuinely differs between the .NET and Node versions of this job, and one thing that only looks different."
+      ]
+    }
+  ]
+}

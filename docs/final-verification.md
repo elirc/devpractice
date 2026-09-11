@@ -88,3 +88,35 @@ phantom failures. A per-suite database would remove the trap.
   driven end to end in Chromium, not all 33.
 - The QuickJS `JS_FreeRuntime` stack-overflow abort and its drop-the-worker
   mitigation were reproduced under Node only, never in a browser.
+
+---
+
+## What has happened since, and what this file does NOT cover
+
+This record is about **V1 only**, and V1 is still the only published release.
+
+V2 and V3 content was authored later, and their missions were verified later
+still. Those results live in their own records and are not duplicated here:
+
+| Record | Covers |
+| --- | --- |
+| `missions-verification.md` | A13 for M01-M03 |
+| `missions-verification-v2.md` | A13 for M04-M08 |
+| `missions-verification-v3.md` | A13 for M09-M12 |
+
+Structural validation is green for all three releases, and V3's assembled
+inventory hits the spec §2.2 combined baseline exactly (30 chapters, 90 lessons,
+270 exercises, 180 review cards, 150 placement items, 12 missions).
+
+Three things in this file are therefore **out of date as statements about the
+product**, though every number in them remains true of V1:
+
+- the gate table describes a 12-chapter catalogue, not a 30-chapter one;
+- the content inventory is V1's;
+- nothing here has been re-run since the V2/V3 work, which included moving the
+  track item between files and adding a `--manifest` flag to the content CLI.
+
+Before anyone treats this file as current, the gate set in
+`handoff/05-verification.md` has to be re-run against the larger catalogue, and
+V2 and V3 have to be published. `handoff/02-outstanding.md` has both, in order,
+with commands.

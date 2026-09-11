@@ -58,8 +58,20 @@ export function stableStringify(value: unknown): string {
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
 }
 
-export async function loadManifest(curriculumDir: string): Promise<ReleaseManifest> {
-  const path = join(curriculumDir, 'release.json');
+/**
+ * Load a release manifest. `manifestFile` selects one other than `release.json`
+ * — a name inside the curriculum directory, or a path. Each release is a
+ * separate manifest because releases are snapshots: V2 and V3 re-list every
+ * chapter they carry, including V1's, and each pins the ONE track version that
+ * lists exactly its own chapters.
+ */
+export async function loadManifest(
+  curriculumDir: string,
+  manifestFile?: string,
+): Promise<ReleaseManifest> {
+  const path = manifestFile
+    ? (existsSync(manifestFile) ? manifestFile : join(curriculumDir, manifestFile))
+    : join(curriculumDir, 'release.json');
   if (!existsSync(path)) {
     throw new Error(
       `No release manifest at ${path}. Create one listing packageId, packageVersion, title and chapterFiles.`,
@@ -85,7 +97,7 @@ export async function assembleSnapshot(
   for (const relative of manifest.chapterFiles) {
     const path = join(curriculumDir, relative);
     if (!existsSync(path)) {
-      throw new Error(`Chapter file listed in release.json is missing: ${path}`);
+      throw new Error(`Chapter file listed in the release manifest is missing: ${path}`);
     }
     const raw: unknown = JSON.parse(await readFile(path, 'utf8'));
     const parsed = chapterFileSchema.safeParse(raw);
@@ -121,7 +133,7 @@ export async function assembleSnapshot(
   return { raw, checksum: checksumOf(raw), sourceByItemId };
 }
 
-/** Chapter files present on disk but absent from release.json. */
+/** Chapter files present on disk but absent from the loaded manifest. */
 export async function findOrphanChapterFiles(
   curriculumDir: string,
   manifest: ReleaseManifest,

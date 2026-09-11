@@ -71,16 +71,63 @@ traces — they simply do not execute them.
 
 This is not a web IDE and does not aim to become one.
 
-## V1 is a foundation course; V2 and V3 are not built
+## V2 and V3 content is authored and validated, but not yet published
 
 V1 covers 12 chapters, 36 lessons, 108 lesson exercises, 72 review cards, 60
-placement items and 3 missions. That is a broad foundation across JavaScript,
-TypeScript, React, Node.js, SQL, authentication and operations.
+placement items and 3 missions, and is published.
 
-It is **not** comprehensive Node.js expertise, and it contains no C# or .NET at
-all. Production depth (V2) and the .NET curriculum (V3) are specified in the
-backlog and are explicitly not delivered. Any report that describes the whole
-Node and .NET curriculum as complete is wrong.
+V2 adds 8 chapters and 5 missions; V3 adds 10 chapters and 4 missions. Both
+assemble and validate as full releases, and all 12 missions have been A13
+verified against real runs. What has **not** happened is publication: neither
+release has been imported and published through the API, and the platform gate
+set has not been re-run against a catalogue of that size. Until that is done,
+"V2 and V3 are complete" is a claim about content, not about the product. See
+`docs/missions-verification-v2.md`, `-v3.md` and `final-verification.md` for what
+was and was not executed.
+
+## Two content reachability edges used to be unvalidated
+
+The validator walked references forwards only, so two mistakes validated green
+and were invisible until someone opened the app:
+
+- a chapter that no release track listed in `chapterIds` was unreachable in
+  curriculum navigation;
+- a mission that no chapter listed in `missionIds` was unreachable from every
+  chapter page, even though its own `chapterPrerequisiteIds` named chapters.
+
+Both shipped broken once: all 18 V2 and V3 chapters validated while no track
+listed them, and all 9 new missions validated while no chapter claimed them. In
+both cases the content was complete, correct and invisible.
+
+They are now checked. `validateReachability` in
+`packages/content-tools/src/validate.ts` raises `reachability.chapter-unlisted`
+and `reachability.mission-unclaimed` as errors, and
+`curriculum/fixtures/invalid-chapter-unlisted.json` and
+`invalid-mission-unclaimed.json` prove each one fires.
+
+What is still **not** checked is whether a chapter's missions are the ones a
+reader would expect there. A mission claimed by an arbitrary chapter passes. That
+judgement stays with a reviewer.
+
+## Asset checksums before this release were not reproducible
+
+`dp-content assets` now computes a bundled asset's checksum by a documented
+method (`packages/content-tools/src/asset-checksum.ts`) and compares it with the
+manifest. The three V1 mission-starter checksums predate that tool and **cannot
+be reproduced by it**; the method that produced them was not recorded. They have
+been left exactly as they are, because they belong to a published release and
+rewriting them would change that release's package checksum. So V1's three assets
+are declared-but-unverifiable, and everything from V2 onward is verifiable. Do
+not "fix" the V1 three without deciding, deliberately, to republish V1.
+
+## The .NET mission test projects carry a known package advisory
+
+Restoring or building any of the four .NET mission starters prints NU1903 for
+`System.Security.Cryptography.Xml` 9.0.0, a high-severity advisory. It arrives
+transitively through `Microsoft.NET.Test.Sdk` 17.11.1, which is a test-only
+dependency and is not part of the API a learner runs. It is reported rather than
+suppressed: the honest fix is to move the test SDK forward and re-run A13 for all
+four missions, and that has not been done.
 
 ## Content authoring is a human-reviewed pipeline
 
@@ -124,5 +171,37 @@ comparisons with a clamp helper would delete the very construct the lesson
 exists to teach in order to satisfy a heuristic. The warnings are accepted and
 documented instead.
 
+### V2 and V3 add three more, all verified the same way
+
+The first full-release behavioural run on the assembled V2 and V3 packages
+produced three further survivors. Each was judged by **running the mutated
+source**, not by reading it:
+
+    verify.mutant-survived [v2-e002]  off-by-one-lt: boundary widened
+    verify.mutant-survived [v3-e023]  off-by-one-lt: boundary widened
+    verify.mutant-survived [v3-e023]  off-by-one-gt: boundary widened
+
+**`v2-e002`** (`usablePrefix`, V2 chapter 13) walks the index columns with
+`i < indexColumns.length`. Widening to `<=` adds one iteration in which `column`
+is `undefined`; no predicate matches an undefined column, so `op` stays `null`,
+the `else` branch breaks, and the count is unchanged. The mutant returns the same
+answer as the solution on all seven authored cases and on every input where a
+predicate names a real column. The only distinguishing input is a predicate whose
+`column` is itself `undefined` — which is not a query predicate, and authoring a
+case for it would test malformed input the lesson does not teach.
+
+**`v3-e023`** (`groupCounts`, V3 chapter 3) sorts with a comparator whose two
+guards are `a.key < b.key` and `a.key > b.key`. Widening either to `<=` or `>=`
+changes the result only when `a.key === b.key` — and the array being sorted is
+built from `Object.keys(counts)`, so **its keys are unique by construction and
+the equal case can never occur**. This one is not merely undistinguished by the
+current cases; it is undistinguishable in principle, for any input at all.
+
+Neither solution was rewritten. `v2-e002` teaches how an index prefix is consumed
+column by column, and `v3-e023` teaches writing an explicit comparator; replacing
+either construct with a helper that happens to have no mutation site would delete
+the thing the lesson exists to teach.
+
 The general point: a surviving mutant is a prompt to inspect the case set, not
-proof of a defect. Equivalent mutants are a known limit of mutation testing.
+proof of a defect. Equivalent mutants are a known limit of mutation testing, and
+the check that separates the two is running the mutant, not arguing about it.

@@ -79,6 +79,10 @@ describe('each structural check fires on its own fixture', () => {
     ['invalid-uncovered-objective.json', 'concept.uncovered-objective'],
     ['invalid-unknown-concept.json', 'concept.unknown'],
     ['invalid-weak-cases.json', 'grading.uniform-expectations'],
+    // Reachability: the two checks that look BACKWARDS. Every other check here
+    // walks references forwards, which is why both of these shipped broken.
+    ['invalid-chapter-unlisted.json', 'reachability.chapter-unlisted'],
+    ['invalid-mission-unclaimed.json', 'reachability.mission-unclaimed'],
   ];
 
   it.each(cases)('%s raises %s', async (fixture, code) => {

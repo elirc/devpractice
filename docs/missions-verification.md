@@ -140,3 +140,14 @@ rm -rf projects/m03-ownership-defect/starter/node_modules
 The generated `.env` files in both starters point at 127.0.0.1:5440 and contain
 no credentials (trust auth, local only). `starterCommit` remains `null` in both
 missions — no commit hash was invented.
+
+---
+
+## Later releases
+
+V2's missions (M04-M08) and V3's (M09-M12) are recorded separately, in
+`missions-verification-v2.md` and `missions-verification-v3.md`. Read those for
+the A13 results of the nine later missions, including three defects found during
+verification: the .NET missions had no solution file and so could not be built at
+all, M07's baseline was not repeatable, and M04 shipped a stale docker-compose
+file naming another mission's database.

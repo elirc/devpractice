@@ -35,7 +35,9 @@
         "aspnet.validation",
         "aspnet.error-contracts"
       ],
-      "missionIds": [],
+      "missionIds": [
+        "m09-dotnet-support-desk"
+      ],
       "sortOrder": 24
     },
     {

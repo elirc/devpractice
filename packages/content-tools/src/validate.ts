@@ -187,6 +187,56 @@ function expectKind(
   return null;
 }
 
+/**
+ * Reachability, which is the reverse of every other reference check here.
+ *
+ * The UI renders the curriculum from `track.chapterIds` and a chapter's missions
+ * from `chapter.missionIds`. Everything else in this file walks references
+ * FORWARDS - does the id this item names exist - and forwards checks cannot see
+ * an item that nothing points at. Both of these have shipped broken: eighteen
+ * chapters validated green while no track listed them, and nine missions
+ * validated green while no chapter claimed them. In both cases the content was
+ * complete, correct, and invisible in the application.
+ *
+ * A mission's `chapterPrerequisiteIds` is NOT the reverse edge. It says which
+ * chapters you should have done first; it does not put the mission on a page.
+ */
+function validateReachability(pkg: ContentPackage): Issue[] {
+  const issues: Issue[] = [];
+
+  const listedByTrack = new Set<string>();
+  const claimedByChapter = new Set<string>();
+  for (const item of pkg.items) {
+    if (item.kind === 'track') for (const id of item.chapterIds) listedByTrack.add(id);
+    if (item.kind === 'chapter') for (const id of item.missionIds) claimedByChapter.add(id);
+  }
+
+  pkg.items.forEach((item, index) => {
+    if (item.kind === 'chapter' && !listedByTrack.has(item.id)) {
+      issues.push(
+        err(
+          'reachability.chapter-unlisted',
+          `items[${index}].id`,
+          `chapter '${item.id}' is in this release but no track lists it in chapterIds, so it is unreachable in curriculum navigation`,
+          item.id,
+        ),
+      );
+    }
+    if (item.kind === 'mission' && !claimedByChapter.has(item.id)) {
+      issues.push(
+        err(
+          'reachability.mission-unclaimed',
+          `items[${index}].id`,
+          `mission '${item.id}' is in this release but no chapter lists it in missionIds, so no chapter page can link to it (chapterPrerequisiteIds is not the reverse edge)`,
+          item.id,
+        ),
+      );
+    }
+  });
+
+  return issues;
+}
+
 export function validateReferences(pkg: ContentPackage, byId: ItemsById): Issue[] {
   const issues: Issue[] = [];
   const push = (issue: Issue | null): void => {
@@ -809,6 +859,7 @@ export function validateStructure(
     ...surfaceIssues,
     ...identityIssues,
     ...validateReferences(pkg, byId),
+    ...validateReachability(pkg),
     ...validatePrerequisiteCycles(pkg),
     ...validateOrdering(pkg, byId),
     ...validateConcepts(pkg, catalog),
