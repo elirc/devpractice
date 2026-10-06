@@ -5,14 +5,14 @@ something reported success.
 
 ## Git operates on the user's HOME directory
 
-`C:\Users\Owner\Desktop\opusboot1` sits inside a stray repo rooted at
-`C:\Users\Owner`. Before this repo had its own `.git`, a plain `git add -A` began
+On the build machine, the project folder sat inside a stray repo rooted at the
+user's home directory. Before this repo had its own `.git`, a plain `git add -A` began
 staging `Cookies/`, `My Documents/` and `AppData/`.
 
 The project now has its own `.git`, so this is handled — but **always confirm
 before staging**:
 
-    git rev-parse --show-toplevel     # must print .../Desktop/opusboot1
+    git rev-parse --show-toplevel     # must print this project's folder
 
 There is no global git identity on this box; it is set repo-locally. Do not set
 it globally.

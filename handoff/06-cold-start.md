@@ -1,7 +1,7 @@
 # Cold start — from a fresh clone (or a fresh reboot) to a running app
 
 Commands verified against the real scripts in this repo, not guessed. Bash tool
-syntax, run from `C:\Users\Owner\Desktop\opusboot1`.
+syntax, run from the repository root.
 
 Read `03-environment.md` first if anything fails — most failures here are
 environmental, not code.

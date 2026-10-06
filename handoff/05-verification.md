@@ -1,6 +1,6 @@
 # Verification commands
 
-Run from `C:\Users\Owner\Desktop\opusboot1` unless stated. Bash tool syntax.
+Run from the repository root unless stated. Bash tool syntax.
 Confirm the database is up first (`03-environment.md`).
 
 These are the exact commands whose results are recorded in

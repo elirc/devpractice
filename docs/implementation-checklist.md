@@ -5,6 +5,11 @@ unless the check was actually run and its output observed.**
 
 Last updated: 2026-09-09, by the content-tooling / missions / docs workstream.
 
+> **Status note (2026-10-06).** Frozen V1 build record. Rows marked "not started"
+> below (P4 chapters, P5, P6/P7 V2 and V3) were all completed later: V1, V2 and V3
+> are published and M01–M12 are A13 verified. Only A15 (export and restore) is
+> still not performed. Current state: [`handoff/01-state.md`](../handoff/01-state.md).
+
 ## Ownership note
 
 V1 was built by five parallel workstreams with disjoint file ownership. This

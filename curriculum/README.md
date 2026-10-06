@@ -39,8 +39,12 @@ ONE version, so the same `v1-track` item exists three times:
 | `chapters/v2-track.json` | 2 | those 12 plus the 8 V2 chapters |
 | `chapters/v3-track.json` | 3 | all 30 |
 
-Each manifest lists exactly **one** of these. Adding chapters to a track is an
-editorial change: `version` bumps, `masteryRevision` does not (spec §8.2).
+Each manifest lists exactly **one** of these. When adding chapters, the author
+bumps `version` and leaves `masteryRevision` alone (spec §8.2). The **publisher**
+then owns `masteryRevision`: `track.chapterIds` is listed in `BEHAVIOURAL_FIELDS`
+(`packages/learning-core/src/content-diff.ts:27-28`), so each publish that adds
+chapters classifies the track as a behavioural change and increments it. The live
+V3 track is version 3, masteryRevision 3. That is expected, not drift.
 
 Two reachability rules, now enforced by the validator because both shipped broken
 once:

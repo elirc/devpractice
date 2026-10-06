@@ -49,6 +49,20 @@ trust, debug and change than one you cannot.
 These thresholds are configurable product decisions. They are not a claim about
 memory, and no research is cited in support of them.
 
+## Placement passes do not feed concept status
+
+Placement assessments record `ChapterPlacement` and `PlacementAttempt` rows, and
+they can mark a chapter `placed_out`. They do **not** count toward a concept's
+`demonstrated` status: the progress endpoint builds concept evidence only from
+`Attempt` rows for exercises in the active release
+(`apps/api/src/modules/progress/routes.ts:96-112`), and the placement route never
+writes an `Attempt` (`apps/api/src/modules/placements/routes.ts:142-158`). A learner
+who places out of a chapter will therefore see its concepts as `unseen` or
+`practicing` until they pass exercises. This is narrower than specification §3.4,
+which says "a different authored variant or a placement item can provide new
+evidence"; it was found during a documentation review on 2026-10-06 and has not
+been fixed. `docs/learning-algorithms.md` describes the rule as implemented.
+
 ## Full offline learning is deferred
 
 Losing the connection preserves what is in the current tab and may keep a
@@ -71,19 +85,21 @@ traces — they simply do not execute them.
 
 This is not a web IDE and does not aim to become one.
 
-## V2 and V3 content is authored and validated, but not yet published
+## V2 and V3 are published, but the platform is only partly re-verified
 
 V1 covers 12 chapters, 36 lessons, 108 lesson exercises, 72 review cards, 60
-placement items and 3 missions, and is published.
+placement items and 3 missions. V2 adds 8 chapters and 5 missions; V3 adds 10
+chapters and 4 missions. All three releases validate with the behavioural gate on
+the QuickJS backend, all 12 missions are A13 verified, and V2 (409 items) and V3
+(613 items) were imported and published through the API on 2026-09-11.
 
-V2 adds 8 chapters and 5 missions; V3 adds 10 chapters and 4 missions. Both
-assemble and validate as full releases, and all 12 missions have been A13
-verified against real runs. What has **not** happened is publication: neither
-release has been imported and published through the API, and the platform gate
-set has not been re-run against a catalogue of that size. Until that is done,
-"V2 and V3 are complete" is a claim about content, not about the product. See
-`docs/missions-verification-v2.md`, `-v3.md` and `final-verification.md` for what
-was and was not executed.
+What has **not** happened is a full re-run of the platform gate set against the
+30-chapter catalogue. After publication only the two API integration suites
+(23/23, 45/45) and the content-tools suite (21/21) were re-run; the learning-core,
+runner and web unit suites and the Playwright journeys still carry their V1
+results. Until they are re-run, "V2 and V3 work in the product" rests on the
+published data and the API suites, not on the browser journeys. See
+`handoff/01-state.md` and `handoff/02-outstanding.md`.
 
 ## Two content reachability edges used to be unvalidated
 

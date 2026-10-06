@@ -48,8 +48,9 @@ pnpm dev                         # web + api
 | `packages/runner` | bounded QuickJS-WASM execution, browser and Node |
 | `packages/content-tools` | content validation and snapshot build CLI |
 | `curriculum` | authored content and the concept catalog |
-| `projects` | runnable learning repositories (missions M01–M03) |
-| `docs` | architecture, operations, authoring and handoff |
+| `projects` | runnable learning repositories (missions M01–M08 in TypeScript, M09–M12 in .NET) |
+| `docs` | architecture, operations, authoring and verification records |
+| `handoff` | session handoff: current state, outstanding work, environment notes |
 
 ## Documentation
 
@@ -65,5 +66,7 @@ pnpm dev                         # web + api
 
 Browser results are client-reported and inspectable. Mission outcomes are
 self-reported. The retention model is a transparent heuristic, not a measurement.
-V1 is a foundation course; the V2 production-depth and V3 .NET curricula are
-specified but not built. See [known limitations](docs/known-limitations.md).
+V1 is a foundation course (12 chapters); V2 adds production depth (20 chapters
+total) and V3 adds .NET (30 chapters total). All three are published; the full
+platform test suite has not been re-run since V2/V3 were published. See
+[known limitations](docs/known-limitations.md).

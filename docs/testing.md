@@ -23,10 +23,12 @@ or transactions — the things that actually break.
 ```bash
 pnpm test                    # every workspace
 pnpm --filter @devpractice/learning-core test
-pnpm --filter @devpractice/api test:integration
+pnpm --filter @devpractice/api test:integration   # foundation suite, then learning suite
 pnpm --filter @devpractice/web test:e2e
 
 pnpm content:validate -- --target v1
+pnpm content:validate:v2              # V2 manifest, --target v2
+pnpm content:validate:v3              # V3 manifest, --target v3
 node --import tsx packages/content-tools/tests/gate-harness.mjs
 ```
 
@@ -48,7 +50,7 @@ node --import tsx packages/content-tools/tests/gate-harness.mjs
 | A02 | Progress survives a service restart and a second browser context |
 | A03 | Duplicate submission → one event, one XP award |
 | A04 | Conflicting draft edit → 409, both texts recoverable |
-| A05 | Concurrent review responses → one schedules; retry returns the original |
+| A05 | Concurrent review responses → one schedules; retry returns the original (the test sends the two responses sequentially; see below) |
 | A06 | Reveal solution → reset → pass still shows solution assistance |
 | A07 | Runner isolation: infinite loop, host access, oversized output, cancellation |
 | A08 | A runtime-correct but type-invalid solution fails the compiler gate |
@@ -63,10 +65,24 @@ node --import tsx packages/content-tools/tests/gate-harness.mjs
 | A17 | Release inventory meets minimums; mutants rejected; no empty bodies |
 | A18 | Earlier release can be reactivated without deleting newer attempts |
 
+## What a passing test does and does not prove
+
+Read the test before trusting its name. The A05 test "lets only one of two devices
+holding the same revision schedule the card"
+(`apps/api/tests/learning/reviews.test.ts:158-183`) `await`s the first request
+before sending the second, so it proves a **stale** revision is rejected. It does
+not run the two requests at the same time, and the route's read-then-update check
+(see `codebase-tour.md`, "Reviewer notes") is not race-free under truly
+simultaneous requests. The test is correct for the scenario it names (a second
+device that was offline); it is the acceptance row's word "concurrent" that it does
+not cover.
+
 ## Content gates
 
 The `dp-content` gate is itself tested. `curriculum/fixtures/` holds one valid
-package and twelve that each break exactly one rule; `gate-harness.mjs` asserts
+package and fourteen that each break exactly one rule (the last two,
+`invalid-chapter-unlisted.json` and `invalid-mission-unclaimed.json`, were added
+with the reachability checks); `gate-harness.mjs` asserts
 that the matching check fires for each and stays silent for the valid one.
 
 If you add a validator check, add its fixture. A validator that never fails is

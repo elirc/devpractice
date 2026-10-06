@@ -4,20 +4,21 @@ Every "verified" below means a command was run and its output observed. Anything
 not verified is listed as not verified. Do not upgrade these claims without
 re-running the check.
 
-Updated 2026-09-10, after the V2/V3 mission work.
+Updated 2026-09-11, after the V2/V3 mission work and publication.
 
 ## Git
 
-The repo has its **own** `.git` at `C:\Users\Owner\Desktop\opusboot1`. It sits
-INSIDE a stray repo rooted at `C:\Users\Owner` — see `04-gotchas.md` before
+The repo has its **own** `.git`. On the build machine it sat
+INSIDE a stray repo rooted at the user's home directory — see `04-gotchas.md` before
 running any git command, and always confirm `git rev-parse --show-toplevel`.
 
     1d81c1e  Author V2 and V3 curriculum chapters
     b147d96  Fix two e2e harness races found after the V1 commit
     dacb8ad  Build DevPractice V1: personal web development learning platform
 
-Everything described below as new is in the working tree on top of `bf35cc6`
-(the handoff commit) and **is not yet committed**.
+Everything described below as new was committed on top of `bf35cc6` (the handoff
+commit) as `1c391f5`, "Finish V2 and V3: reachable content, nine verified
+missions, both released".
 
 ## V1 — COMPLETE and verified
 

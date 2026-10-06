@@ -1,5 +1,10 @@
 # DevPractice — handoff to a fresh session
 
+> **Status note (2026-10-06).** Frozen session handoff, last updated 2026-09-11 and
+> committed as `1c391f5`. Commands and paths describe the original build machine
+> (Windows, Git Bash tool syntax). Re-check anything machine-specific before relying
+> on it.
+
 Read these files in order. They are written for a model with **no prior context**
 on this build. If you only want to run the thing, jump to `06-cold-start.md`.
 
@@ -14,22 +19,23 @@ on this build. If you only want to run the thing, jump to `06-cold-start.md`.
 
 ## The 30-second version
 
-`C:\Users\Owner\Desktop\opusboot1` is **DevPractice**, a private single-owner
+This repository (checked out on the build machine as `opusboot1`) is **DevPractice**, a private single-owner
 learning platform built from `docs/product-spec.md` (the authoritative
 specification — read it before changing behaviour).
 
 - **V1 is COMPLETE, verified and published.** Platform, 12 chapters, 3 missions.
   Every acceptance gate except A15 was executed.
-- **V2 and V3 content is COMPLETE and assembles as full releases.** 30 chapters,
+- **V2 and V3 content is COMPLETE, assembles as full releases, and is PUBLISHED** (2026-09-11). 30 chapters,
   90 lessons, 270 exercises, 180 review cards, 150 placement items, 12 missions —
   the spec §2.2 combined baseline, hit exactly. Structural validation is green for
   all three releases.
 - **The missions are verified.** See `01-state.md` for exactly how many and which;
   that number is the one thing in this folder most likely to be stale, because it
   changed during the last session.
-- **What is left is publication**, the platform re-verification that publication
-  invalidates, and the behavioural content gate on an assembled V2/V3. All three
-  are in `02-outstanding.md` with commands.
+- **What is left** is the platform re-verification that publication invalidates
+  (only the API integration and content-tools suites have been re-run) and the A15
+  restore drill. Both are in `02-outstanding.md` with commands. The behavioural
+  content gate has already run green on assembled V2 and V3.
 
 ## Rules that are not negotiable
 

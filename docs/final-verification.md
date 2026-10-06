@@ -93,7 +93,8 @@ phantom failures. A per-suite database would remove the trap.
 
 ## What has happened since, and what this file does NOT cover
 
-This record is about **V1 only**, and V1 is still the only published release.
+This record is about **V1 only**. When it was written V1 was the only published
+release; V2 and V3 were published on 2026-09-11 (see `handoff/01-state.md`).
 
 V2 and V3 content was authored later, and their missions were verified later
 still. Those results live in their own records and are not duplicated here:
@@ -117,6 +118,7 @@ product**, though every number in them remains true of V1:
   track item between files and adding a `--manifest` flag to the content CLI.
 
 Before anyone treats this file as current, the gate set in
-`handoff/05-verification.md` has to be re-run against the larger catalogue, and
-V2 and V3 have to be published. `handoff/02-outstanding.md` has both, in order,
-with commands.
+`handoff/05-verification.md` has to be re-run against the larger catalogue.
+Publication is done; after it, only the two API integration suites (23/23, 45/45)
+and the content-tools suite (21/21) were re-run. `handoff/02-outstanding.md` lists
+the rest, in order, with commands.
